@@ -36,7 +36,7 @@ The first local read-only vertical slice is operational:
 - the AppSheet importer validates and loads all 454 songs plus related lyrics and media metadata into local D1;
 - the responsive catalog reads real local data and searches Latin/native titles;
 - song detail displays metadata, typed lyrics, scan records, and recording records;
-- catalog and opened song details are cached in IndexedDB, and the production app shell is cached by a service worker;
+- the complete catalog, metadata, and typed lyrics are atomically cached in IndexedDB, while the production app shell and hashed assets are precached by a service worker;
 - type checks, importer/schema/API tests, production builds, and local end-to-end API smoke tests pass.
 
 The private staging catalog is loaded into an APAC-primary D1 database for the application's users in India. All 1,325 workbook-linked media files are stored in private APAC R2 and delivered only through the authenticated API. Two unassigned legacy recordings and two unlinked scans remain local for later identification.

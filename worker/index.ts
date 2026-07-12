@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { verifyWithJwks } from "hono/jwt";
+import { loadOfflineLibrary } from "./offline-library";
 
 type Bindings = {
   DB: D1Database;
@@ -157,6 +158,10 @@ app.get("/api/catalog", async (context) => {
       languageIds: JSON.parse(row.languageIds) as string[],
     })),
   });
+});
+
+app.get("/api/offline-library", async (context) => {
+  return context.json({ songs: await loadOfflineLibrary(context.env.DB) });
 });
 
 app.get("/api/songs/:songId", async (context) => {

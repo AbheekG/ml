@@ -1,8 +1,23 @@
 const CACHE_PREFIX = "music-library-shell";
-const CACHE_VERSION = `${CACHE_PREFIX}-v1`;
+const BUILD_ID = "development"; // INJECT_BUILD_ID
+const PRECACHE_URLS = ["/"]; // INJECT_PRECACHE_URLS
+const CACHE_VERSION = `${CACHE_PREFIX}-${BUILD_ID}`;
 
-self.addEventListener("install", () => {
-  self.skipWaiting();
+async function precacheShell() {
+  const cache = await caches.open(CACHE_VERSION);
+  for (const url of PRECACHE_URLS) {
+    const request = new Request(url, { credentials: "include", cache: "reload" });
+    const response = await fetch(request);
+    if (!response.ok || new URL(response.url).origin !== self.location.origin) {
+      throw new Error(`Could not precache ${url}`);
+    }
+    await cache.put(url, response.clone());
+    if (url === "/") await cache.put("/app-shell", response.clone());
+  }
+}
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(precacheShell().then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
@@ -32,7 +47,7 @@ self.addEventListener("fetch", (event) => {
         if (response.ok) await cache.put("/app-shell", response.clone());
         return response;
       } catch {
-        return (await cache.match("/app-shell")) ?? Response.error();
+        return (await cache.match("/app-shell")) ?? (await cache.match("/")) ?? Response.error();
       }
     })());
     return;

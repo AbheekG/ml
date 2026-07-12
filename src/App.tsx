@@ -3,7 +3,7 @@ import { Link, Navigate, Route, Routes, useParams } from "react-router-dom";
 import {
   readCachedCatalog,
   readCachedSong,
-  refreshCatalog,
+  refreshOfflineLibrary,
   refreshSong,
   type CatalogSong,
   type SongDetail,
@@ -46,7 +46,7 @@ function SongsPage({ isOnline }: { isOnline: boolean }) {
         setSyncedAt(cached.syncedAt);
 
         if (navigator.onLine) {
-          const fresh = await refreshCatalog();
+          const fresh = await refreshOfflineLibrary();
           if (cancelled) return;
           setSongs(fresh.songs);
           setSyncedAt(fresh.syncedAt);

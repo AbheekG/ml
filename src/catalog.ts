@@ -116,6 +116,42 @@ export async function refreshCatalog(): Promise<{
   return { songs: payload.songs, syncedAt };
 }
 
+function summarizeSong(song: SongDetail): CatalogSong {
+  return {
+    id: song.id,
+    titleLatin: song.titleLatin,
+    titleNative: song.titleNative,
+    updatedAt: song.updatedAt,
+    languageIds: song.languages.map((language) => language.id),
+    lyricCount: song.lyricTexts.length,
+    scanCount: song.scans.length,
+    recordingCount: song.recordings.length,
+  };
+}
+
+export async function refreshOfflineLibrary(): Promise<{
+  songs: CatalogSong[];
+  syncedAt: string;
+}> {
+  const response = await fetch("/api/offline-library", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new Error(`Offline library request failed (${response.status})`);
+
+  const payload = await response.json() as { songs: SongDetail[] };
+  const songs = payload.songs.map(summarizeSong);
+  const syncedAt = new Date().toISOString();
+  await database.transaction("rw", database.songs, database.songDetails, database.metadata, async () => {
+    await Promise.all([database.songs.clear(), database.songDetails.clear()]);
+    await Promise.all([
+      database.songs.bulkPut(songs),
+      database.songDetails.bulkPut(payload.songs),
+      database.metadata.put({ key: "catalog", syncedAt }),
+    ]);
+  });
+  return { songs, syncedAt };
+}
+
 export async function readCachedSong(songId: string): Promise<SongDetail | undefined> {
   return database.songDetails.get(songId);
 }
