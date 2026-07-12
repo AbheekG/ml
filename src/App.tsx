@@ -13,15 +13,54 @@ function useOnlineStatus(): boolean {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
 
   useEffect(() => {
-    const goOnline = () => setIsOnline(true);
+    let disposed = false;
+    let activeRequest: AbortController | null = null;
+
+    async function checkConnection(): Promise<void> {
+      activeRequest?.abort();
+      const controller = new AbortController();
+      activeRequest = controller;
+      const timeout = window.setTimeout(() => controller.abort(), 5000);
+
+      try {
+        const response = await fetch(`/api/health?connectivity=${Date.now()}`, {
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        const isHealthy = response.ok
+          && response.headers.get("content-type")?.includes("application/json") === true;
+        if (!disposed) setIsOnline(isHealthy);
+      } catch {
+        if (!disposed) setIsOnline(false);
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }
+
+    const goOnline = () => { void checkConnection(); };
     const goOffline = () => setIsOnline(false);
+    const checkWhenVisible = () => {
+      if (document.visibilityState === "visible") void checkConnection();
+    };
 
     window.addEventListener("online", goOnline);
     window.addEventListener("offline", goOffline);
+    window.addEventListener("focus", goOnline);
+    window.addEventListener("pageshow", goOnline);
+    document.addEventListener("visibilitychange", checkWhenVisible);
+    const interval = window.setInterval(() => { void checkConnection(); }, 30000);
+    void checkConnection();
 
     return () => {
+      disposed = true;
+      activeRequest?.abort();
+      window.clearInterval(interval);
       window.removeEventListener("online", goOnline);
       window.removeEventListener("offline", goOffline);
+      window.removeEventListener("focus", goOnline);
+      window.removeEventListener("pageshow", goOnline);
+      document.removeEventListener("visibilitychange", checkWhenVisible);
     };
   }, []);
 
