@@ -1,0 +1,10 @@
+{
+  "name": "Music Library",
+  "short_name": "Music",
+  "description": "A private, offline-friendly song library.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5efe4",
+  "theme_color": "#f5efe4",
+  "lang": "en"
+}

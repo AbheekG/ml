@@ -30,4 +30,25 @@ Do not commit song titles, lyrics, names, email addresses, media, credentials, g
 
 ## Current status
 
-Planning is complete enough to begin the local TypeScript PWA/Worker scaffold and migration tooling. Cloud resources will be created from documented configuration only after local validation.
+The local React/TypeScript PWA and Cloudflare Worker scaffold is operational. It includes responsive Songs/Account shells, online/offline status, a JSON health endpoint, type checking, API tests, and production builds. Migration schema and importer work is next.
+
+Cloud resources will be created from documented configuration only after local validation.
+
+## Local development
+
+Requirements: Node.js 24 LTS and npm.
+
+```bash
+npm install
+npm run dev
+```
+
+The local Vite/Worker server prints its URL, normally `http://127.0.0.1:5173`. Useful checks:
+
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
+The Worker health endpoint is `/api/health`. Generated dependencies, build output, Wrangler state, secrets, and local databases are ignored by Git.
