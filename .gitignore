@@ -1,0 +1,35 @@
+# Private notes and captures
+notes/private/
+
+# Private legacy projects and media
+appsheet/
+woodchime/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# JavaScript dependencies and build output
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.log
+npm-debug.log*
+
+# Cloudflare local state
+.wrangler/
+
+# Local databases and importer output
+*.sqlite
+*.sqlite3
+data/local/
+data/import-output/
+
+# macOS
+.DS_Store
