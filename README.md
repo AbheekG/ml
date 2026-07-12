@@ -30,7 +30,20 @@ Do not commit song titles, lyrics, names, email addresses, media, credentials, g
 
 ## Current status
 
-The local React/TypeScript PWA and Cloudflare Worker scaffold is operational. It includes responsive Songs/Account shells, online/offline status, a JSON health endpoint, type checking, API tests, and production builds. Migration schema and importer work is next.
+The first local read-only vertical slice is operational:
+
+- the normalized D1 schema and guarded relationships are implemented;
+- the AppSheet importer validates and loads all 454 songs plus related lyrics and media metadata into local D1;
+- the responsive catalog reads real local data and searches Latin/native titles;
+- song detail displays metadata, typed lyrics, scan records, and recording records;
+- catalog and opened song details are cached in IndexedDB, and the production app shell is cached by a service worker;
+- type checks, importer/schema/API tests, production builds, and local end-to-end API smoke tests pass.
+
+The private staging catalog is loaded into an APAC-primary D1 database for the application's users in India. All 1,325 workbook-linked media files are stored in private APAC R2 and delivered only through the authenticated API. Two unassigned legacy recordings and two unlinked scans remain local for later identification.
+
+Schema-only staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
+
+Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker also validates Access JWT signatures, issuer, and audience on every API request. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.
 
 Cloud resources will be created from documented configuration only after local validation.
 
@@ -40,6 +53,7 @@ Requirements: Node.js 24 LTS and npm.
 
 ```bash
 npm install
+cp .dev.vars.example .dev.vars
 npm run dev
 ```
 
@@ -51,4 +65,39 @@ npm test
 npm run build
 ```
 
-The Worker health endpoint is `/api/health`. Generated dependencies, build output, Wrangler state, secrets, and local databases are ignored by Git.
+The Worker endpoints currently include `/api/health`, `/api/catalog`, and `/api/songs/:songId`. Generated dependencies, build output, Wrangler state, secrets, and local databases are ignored by Git.
+
+## Legacy import validation
+
+Run the importer without writing output:
+
+```bash
+npm run import:appsheet
+```
+
+To generate a normalized private catalog and validate it against the local relational schema:
+
+```bash
+npm run import:appsheet -- --write
+npm run db:load-local
+```
+
+Generated files stay under ignored `data/import-output/` and `data/local/` directories. The source workbook and media are read-only inputs and are never modified.
+
+Database migrations live in `migrations/`. See [the data model](docs/data-model.md) for the main relationships and safety rules.
+
+## Private media upload
+
+Preview the resumable upload without changing R2:
+
+```bash
+npm run media:upload
+```
+
+Upload only workbook-linked media to the private staging bucket:
+
+```bash
+npm run media:upload -- --write
+```
+
+Progress is stored under ignored `data/import-output/`; private filenames are not printed. Unlinked files are preserved locally and excluded from upload.

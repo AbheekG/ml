@@ -1,13 +1,34 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "music-library",
+  "name": "app",
   "main": "./worker/index.ts",
   "compatibility_date": "2026-07-12",
+  "workers_dev": true,
+  "preview_urls": false,
   "assets": {
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
   "observability": {
     "enabled": true
-  }
+  },
+  "vars": {
+    "AUTH_MODE": "access",
+    "ACCESS_AUD": "81adde1c5316062ed42f2810157e9ef1df8dcf94e77fa403a12a5291def5b662",
+    "ACCESS_ISSUER": "https://musiclibrary.cloudflareaccess.com",
+    "ACCESS_JWKS_URL": "https://musiclibrary.cloudflareaccess.com/cdn-cgi/access/certs"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "music-library-staging-apac",
+      "database_id": "b0c14884-6b3b-4168-86a5-bc40f8b9599e"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "music-library-media-staging"
+    }
+  ]
 }

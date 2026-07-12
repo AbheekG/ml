@@ -30,6 +30,8 @@ Keep dependencies modest and pin an LTS Node.js version. Develop locally before 
 
 Never point development code at production data by default.
 
+Cloud data placement uses the APAC location hint because normal users are primarily in India. This applies to both D1 primary databases and R2 media buckets; creation from the developer's current location in Europe must not determine automatic placement.
+
 ## Phase 1 — foundation and importer
 
 1. Scaffold the TypeScript application, formatting, linting, tests, and local Worker configuration.
@@ -48,6 +50,13 @@ Deliverable: repeatable local database creation from `appsheet/data.xlsx` with n
 3. Add IndexedDB catalog storage and atomic background refresh.
 4. Add installable/offline app shell and explicit offline UI.
 5. Add private scan viewing and audio streaming/playback.
+   - retain every source recording unchanged;
+   - use valid MP3 originals directly and generate MP3 playback derivatives for other or mislabeled formats;
+   - support HTTP range requests for seeking and efficient mobile streaming;
+   - verify uploads with byte size and SHA-256 before marking media available.
+   - show scans in an in-app near-fullscreen lightbox with a small close control, zoom, and optional fullscreen mode instead of opening a bare browser tab;
+   - generate readability-preserving scan derivatives sized for pages no larger than A4, using a broadly supported efficient image format;
+   - retain scan originals until derivative quality is visually accepted and the owner explicitly approves any later archival or deletion policy.
 6. Validate layout and behavior on iPhone/iPad and Android.
 
 Deliverable: a useful staging application that can read the real catalog offline and consume media online.
@@ -57,6 +66,10 @@ Deliverable: a useful staging application that can read the real catalog offline
 1. Add viewer/editor/admin authorization.
 2. Add Song and Lyric text create/edit/trash/restore workflows.
 3. Add Scan and Recording metadata/upload/replace/trash/restore workflows.
+   - inspect actual file signatures/codecs rather than trusting extensions;
+   - calculate SHA-256 before creation and reject duplicate content with a link to the existing record;
+   - preserve recording originals and generate canonical playback derivatives;
+   - make upload finalization atomic so failed validation or conversion cannot create orphan records;
 4. Add actor/timestamp audit metadata.
 5. Enforce no-orphan foreign keys and no-cascade Song deletion.
 6. Refuse Song deletion while any Lyric text, Scan, or Recording exists and link the editor to those dependencies.

@@ -13,7 +13,10 @@
     "deploy": "npm run build && wrangler deploy",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "import:appsheet": "tsx scripts/appsheet-import.ts",
+    "db:load-local": "tsx scripts/load-local-db.ts",
+    "media:upload": "tsx scripts/upload-r2.ts"
   },
   "dependencies": {
     "dexie": "4.4.4",
@@ -30,6 +33,8 @@
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.3",
+    "read-excel-file": "9.3.1",
+    "tsx": "4.23.0",
     "typescript": "7.0.2",
     "vite": "8.1.4",
     "vitest": "4.1.10",
