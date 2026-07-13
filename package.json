@@ -14,6 +14,7 @@
     "deploy": "npm run build && wrangler deploy",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "vitest run",
+    "test:audio": "cd services/audio-converter && python3 -m unittest discover -s tests -v",
     "test:watch": "vitest",
     "import:appsheet": "tsx scripts/appsheet-import.ts",
     "db:load-local": "tsx scripts/load-local-db.ts",

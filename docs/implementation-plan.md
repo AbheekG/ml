@@ -21,6 +21,8 @@ Use one TypeScript Cloudflare Worker project that serves both the PWA static ass
 - private R2 for scans, original audio, and playback derivatives;
 - Cloudflare Access for allowlisted identity at the deployed boundary.
 
+Audio decode validation and conversion are deliberately outside the 128 MB Worker runtime. Use the provider-neutral Python/FFmpeg core described in [audio-processing.md](audio-processing.md): run existing-media preparation locally, and later wrap the same core in a scale-to-zero Google Cloud Run service for rare new uploads. Keep the Cloudflare Worker on the Free plan unless later evidence justifies changing it. Cloud project/billing setup remains an explicit owner action.
+
 Proposed application tooling:
 
 - React + TypeScript + Vite for the interface;
@@ -62,7 +64,7 @@ Deliverable: repeatable local database creation from `appsheet/data.xlsx` with n
 4. Add installable/offline app shell and explicit offline UI.
 5. Add private scan viewing and audio streaming/playback.
    - retain every source recording unchanged;
-   - use valid MP3 originals directly and generate MP3 playback derivatives for other or mislabeled formats;
+   - use reasonable valid MP3 originals directly, generate MP3 playback derivatives for other or mislabeled formats, and convert an oversized/high-bit-rate MP3 only when the result meets the material-saving rule in `audio-processing.md`;
    - generate and verify each required playback derivative once during import or asynchronously after upload, store it privately, and never transcode on a Play request;
    - keep new Recordings in a processing state until their original/derivative is verified, with retryable failure handling;
    - use browser media-capability checks only to select or verify already prepared sources, not to trigger device-specific conversion;

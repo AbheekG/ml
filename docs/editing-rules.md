@@ -71,9 +71,9 @@ Rules should be enforced at every relevant layer:
 - Inspect actual file signatures/codecs rather than trusting extensions and calculate a SHA-256 content fingerprint before finalizing an upload.
 - Reject an accidental exact-content duplicate and link to the existing record. When the same media legitimately belongs in another context, reuse the private stored object rather than uploading duplicate bytes.
 - Upload/validation/database finalization is atomic: a failed or incomplete upload cannot create an active orphan record or replace a working file.
-- Always retain original audio privately. If it already matches the canonical browser-safe playback format, play that original directly; otherwise generate one derivative after upload or during a batch migration and store it privately.
+- Always retain original audio privately. Normally play a valid MP3 original directly; generate one MP3 derivative for other formats and only for a materially reducible oversized MP3 under the thresholds in [audio-processing.md](audio-processing.md).
 - Never transcode audio in response to a playback request. Asynchronous conversion uses a `processing` state and exposes the player only after the derivative is verified and the Recording becomes `ready`; a failed job preserves the original and reports a retryable error.
-- The client may query browser decoding support for the stored MIME/codec and select among already prepared sources. Capability detection never changes the stored original or starts conversion.
+- The stored playback-media reference is the default browser source. Capability detection may verify or fall back among already prepared sources, but never changes the stored original or starts conversion.
 - Generate correctly oriented, readability-preserving Scan derivatives suitable for A4 pages. Retain Scan originals until derivative quality and backups are accepted; only then consider a deliberate archival/deletion policy.
 - Until that derivative pipeline is implemented, new Scan upload accepts only browser-compatible JPEG, PNG, or WebP originals up to 25 MB. It still verifies byte signatures and SHA-256, rejects exact duplicates, and never exposes the R2 object publicly.
 - Future one-tap sharing sends authenticated file bytes through the device share interface where supported, with safe fallbacks; it does not create a permanent public media URL.
@@ -102,6 +102,6 @@ The legacy design or final AppSheet export may still contain behavior that has n
 4. Scan metadata and Notebook/Page behavior. (Confirmed.)
 5. Recording metadata. (Confirmed.)
 6. Lookup administration, duplication rules, Trash/restore, and other cross-record behavior. (Confirmed.)
-7. Media validation, duplicate handling, precomputed derivatives, retention, and private sharing semantics. (Policy confirmed; exact codecs, quality settings, and processing service are implementation decisions.)
+7. Media validation, duplicate handling, precomputed derivatives, retention, and private sharing semantics. (Policy and the MP3 quality/selection rules in `audio-processing.md` are confirmed.)
 
 For each group, record required/optional behavior, allowed values, defaults, conditional rules, uniqueness, and whether the rule belongs in the form, API, and database.

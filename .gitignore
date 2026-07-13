@@ -22,6 +22,11 @@ test-results/
 *.log
 npm-debug.log*
 
+# Python local state
+__pycache__/
+*.py[cod]
+.venv/
+
 # Cloudflare local state
 .wrangler/
 

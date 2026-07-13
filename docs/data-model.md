@@ -56,8 +56,8 @@ Scan ── optional Notebook
 ## Media preservation and playback
 
 - Every uploaded recording keeps its original bytes as an immutable `original_audio` media object.
-- Browser playback uses the original only when its detected container/codec is in the canonical supported set.
-- Other inputs receive a generated MP3 `playback_audio` derivative; conversion never replaces or deletes the original.
+- Browser playback normally uses a valid detected MP3 original directly. Other inputs receive a generated MP3 `playback_audio` derivative; a narrowly defined oversized/high-bit-rate MP3 may also receive one only when the verified result is materially smaller. Conversion never replaces or deletes the original.
+- The exact preferred-source, quality, validation, and oversized-MP3 rules are defined in [audio-processing.md](audio-processing.md).
 - File signatures and decodability are checked from content rather than trusting filename extensions.
 - SHA-256 is recorded for upload verification and duplicate detection. Equal content does not automatically merge distinct historical records.
 - New Scan creation currently accepts verified JPEG, PNG, or WebP files up to 25 MB, stores the original privately, and rejects an existing Scan fingerprint before uploading. If D1 finalization fails after R2 storage, the uncommitted object is removed. Readability-sized image derivatives and replacement are separate later work.

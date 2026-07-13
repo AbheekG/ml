@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "music-library-audio-converter"
+version = "0.1.0"
+description = "Provider-neutral audio inspection and playback-derivative preparation"
+requires-python = ">=3.11"
+
+[project.scripts]
+music-audio-converter = "audio_converter.cli:main"
+
+[tool.setuptools]
+packages = ["audio_converter"]
