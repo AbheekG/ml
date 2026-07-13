@@ -43,6 +43,8 @@ The intended product behavior is:
 ## Working practices
 
 - Keep architecture and migration decisions in concise Markdown records outside private notes when they no longer contain private data.
+- Keep `notes/private/current-handoff.md` current at accepted milestones. It is the concise private resume point for a new Codex session and should record the last accepted commit/deployment, verified device behavior, outstanding issues, and exact next task without copying private catalog content into tracked files.
+- At the start of a continuation session, read this file, `README.md`, the relevant `docs/` records, recent Git history, and any uncommitted diff before changing code or cloud state. If the handoff disagrees with Git or tracked documentation, treat Git/current code as implementation evidence and ask before changing product decisions.
 - Keep secrets out of the repository. Supply `.env.example` files with placeholder names only.
 - Before changing schema or migration behavior, re-run inventory checks and state the expected row/file count changes.
 - Preserve unrelated user changes in this workspace and ask before any destructive or externally visible operation.

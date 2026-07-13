@@ -2,6 +2,19 @@
 
 Status: approved direction; execute iteratively and validate each phase on real data and devices.
 
+## Current execution order
+
+The core read/edit/recovery flows and safe new-Scan upload now work in staging. Based on owner feedback, finish the catalog discovery experience before returning to broader media processing:
+
+1. catalog filters and sorting that compose with the local query;
+2. multi-field offline search across Latin/native titles, aliases, typed lyrics, and relevant metadata;
+3. typo-tolerant phonetic/transliteration ranking, starting from the legacy woodchime/AppSheet experiments and owner-provided acceptance examples;
+4. new Recording upload plus the audio validation/conversion pipeline;
+5. safe Scan/Recording replacement and imported-media fingerprint/derivative work;
+6. compact contributor inputs, sharing, and remaining feedback-driven polish.
+
+This is a delivery order rather than a schema dependency: search and filters can be implemented before the remaining media work.
+
 ## Technical shape
 
 Use one TypeScript Cloudflare Worker project that serves both the PWA static assets and the authenticated API from one origin. Bind the Worker to:
