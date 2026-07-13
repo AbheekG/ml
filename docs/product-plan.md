@@ -98,7 +98,7 @@ The detail screen is one scrollable page with a compact sticky section navigator
 
 - Latin and native titles;
 - aliases, languages, tags, and status;
-- writer/composer credits;
+- lyricist/composer credits;
 - song notes;
 - edit action for authorized online editors;
 - audit summary such as last updated time, with detailed user metadata kept unobtrusive.
@@ -107,40 +107,33 @@ Languages, tags, and people are clickable filters back into the catalog.
 
 ### Typed lyrics
 
-Typed lyrics are structured child records rather than one overloaded Song column. A song can have any number of lyric texts, each with:
+Typed lyrics are structured Song children rather than one overloaded Song column. A Song can have any number of lyric texts. Each record has required preformatted Unicode content, stable automatic order, revision/audit metadata, and recoverable Trash state.
 
-- language, such as Bengali, Hindi, Sanskrit, or English;
-- script, such as Bengali, Devanagari, or Latin;
-- representation: original, transliteration, translation, or legacy combined;
-- an optional human label and display order;
-- preformatted Unicode content;
-- created/updated actor and timestamps.
+Language, script, representation, and labels are not required editor-facing classifications. In this collection they are usually apparent from the Song and the text itself, while mandatory classification would add work and viewer clutter without a demonstrated workflow benefit. Blocks appear sequentially in a stable automatic order so viewers can scroll through them. Editing uses a large plain-text field and preserves capitalization, spaces, and line breaks exactly.
 
-The UI presents these as clearly labelled tabs or sections and allows one lyric text to be copied or shared independently. Editing uses a large plain-text field with preview.
-
-The first migration stores each existing workbook `LyricsTyped` block intact as one **Legacy combined** lyric record. It must preserve all line breaks and scripts and must not guess where one language/version ends. Editors can split important songs gradually inside the new application.
-
-Automatic Unicode script detection may later suggest `Beng`, `Deva`, or `Latn`. It must not silently decide language or representation: Devanagari serves several languages, and Latin text can be transliteration, translation, or original English.
+The first migration stores each existing workbook `LyricsTyped` block intact and marks its legacy origin internally. It must not guess where one language or script ends. Editors can later split each imported block into suitable new lyric records and remove the imported block, with a way to find the remaining legacy records until that cleanup is complete.
 
 ### Scans
 
 - thumbnail grid or compact list;
-- show version, source, notebook/page, date, and notes where present;
-- group notebook scans naturally by notebook and page when useful;
+- show optional notebook/page where present and otherwise treat the Scan as external;
+- group notebook scans naturally by notebook and page when useful, with stable creation order as fallback;
 - full-screen viewer with zoom and next/previous navigation;
 - clear online-only message when offline;
 - editor actions to add, edit metadata, replace a file, move to Trash, or restore.
 
 ### Recordings
 
-- one card per recording with version, date, notes, and recording credits where available;
+- one card per recording with its required description, optional date, and contributors where available;
 - reliable inline play/pause/seek;
 - only one recording plays at a time;
+- prepare any required playback derivative once before the Recording becomes ready; pressing Play never starts transcoding;
+- use runtime browser media-capability checks only to choose or verify already stored sources;
 - persistent mini-player while navigating within the song is optional for the first release;
 - clear online-only message when offline;
 - editor actions to add, edit metadata, replace audio, move to Trash, or restore.
 
-Mixed legacy formats remain preserved. The migration or delivery layer may create a browser-compatible playback derivative without discarding the original.
+Mixed legacy formats remain preserved. Import or post-upload processing creates and verifies a browser-compatible playback derivative once when needed, stores it privately, and never discards the original. Playback only streams an already prepared source.
 
 ## Editing workflow
 
@@ -150,7 +143,7 @@ Mixed legacy formats remain preserved. The migration or delivery layer may creat
 - Song metadata is edited in one form.
 - Lyric texts, scans, and recordings are added from inside a song detail, so the parent is implicit and cannot be omitted or changed accidentally.
 - Lookup administration for tags, people, languages, and notebooks can be added after the primary song workflow works.
-- Use Trash/restore in normal UI with a retention window. Permanent deletion is an exceptional administrator cleanup operation after backups and relationship checks.
+- Use indefinite Trash/restore in normal UI. Permanent deletion is absent from ordinary workflows and may be added later only as an exceptional administrator cleanup operation after backups and relationship checks.
 
 ## Domain model
 
@@ -177,21 +170,21 @@ Song relationships:
 
 ### Lyric text
 
-A Lyric text is a strict Song child containing one typed representation. Its mandatory Song foreign key prevents orphaning. Language, script, and representation are explicit metadata rather than encoded in column names, so more combinations can be added without changing the schema.
+A Lyric text is a strict Song child containing one preserved text block. Its mandatory Song foreign key prevents orphaning. Content is required and its order is assigned automatically. Labels and language/script/representation classification are not required.
 
 ### Scan
 
-A scan is an independent child record because one song can have many images/pages with different notebook, page, version, date, and notes. Its song foreign key is mandatory. Source is Notebook or External. Notebook and page remain nullable for incomplete legacy data, while new Notebook scans should require both.
+A Scan is an independent child record because one Song can have many images/pages. Its Song foreign key and media file are mandatory. Notebook and short-text Page are optional; selecting a Notebook identifies a notebook scan, while no Notebook identifies an external scan. A separate Source field, Version, captured Date, ScanText, and Scan Notes are not exposed in the initial editor.
 
 ### Recording
 
-A recording is an independent child record because one song can have multiple performances/versions with separate files, dates, notes, and contributors. Its song foreign key is mandatory.
+A Recording is an independent child record because one Song can have multiple composition-stage fragments, old tunes, alternate takes, accompaniment tracks, and finished performances. Its Song foreign key and original file are mandatory. One required Recording description replaces the overlapping legacy Version and Notes fields; a stable `Recording N` fallback is generated when the editor supplies no description. Recorded date and contributors remain optional.
 
 ### Lookups and credits
 
 - People are canonical records.
-- Song credits link a person to a song with a role such as Writer or Composer.
-- Recording credits link a person to a recording with a role such as Singer; this table is supported even though it is currently empty.
+- Song credits link a person to a song with a role such as Lyricist or Composer.
+- Recording credits link a person to a recording with a role such as Vocals; this table is supported even though it is currently empty, and instrument/production roles can be added when actually needed.
 - Tags, languages, and notebooks are canonical lookup records.
 - Join tables replace comma-separated reference lists in the runtime database.
 
@@ -214,10 +207,11 @@ The AppSheet parent/child concept is correct and should be retained with stronge
 - every Lyric text has exactly one Song;
 - none can exist orphaned;
 - adding children happens through their Song;
-- deleting a Lyric text, Scan, or Recording moves it to Trash first and retains recoverable data for a defined period;
-- deleting a Song is blocked while any Lyric text, Scan, or Recording exists, including trashed children; the UI identifies what must be removed first;
+- removing a Lyric text, Scan, or Recording moves it to Trash and retains recoverable data indefinitely for now;
+- moving a Song to Trash is blocked while any active Lyric text, Scan, or Recording exists; the UI identifies and links to what must be trashed first;
+- permanent Song deletion is blocked while any child exists, including trashed children;
 - there is no cascading Song deletion;
-- deleting an otherwise empty Song moves it to Trash before any later permanent cleanup;
+- removing an otherwise active-child-free Song moves it to Trash before any later permanent cleanup;
 - replacing media uploads the new object and commits the database change before the old object becomes eligible for cleanup.
 
 ## Offline and synchronization behavior
@@ -254,7 +248,6 @@ Included:
 - complete song detail;
 - private scan viewer and recording player while online;
 - online create/edit/trash/restore for songs, lyric texts, scans, and recordings;
-- copy/share action for an individual lyric text;
 - audit identity/timestamps;
 - AppSheet importer with dry-run reconciliation;
 - migration and real-device acceptance checks.
@@ -287,7 +280,7 @@ Build authentication, installation, local catalog cache, list/filter/basic-searc
 
 ### Phase 3 — online editing
 
-Add roles, song forms, lyric-version editing/sharing, child add/edit/upload, trash/restore, guarded Song deletion, audit metadata, validation, and failure-safe media replacement.
+Add roles, song forms, typed-lyric editing, child add/edit/upload, trash/restore, guarded Song deletion, audit metadata, validation, and failure-safe media replacement.
 
 ### Phase 4 — private beta and migration
 
@@ -304,15 +297,15 @@ Turn real queries into automated ranking tests. Port and correct the useful norm
 - Every imported row and referenced media object is reconciled; no child is orphaned.
 - A viewer cannot mutate data or retrieve arbitrary private media.
 - An editor can create/edit a song, attach a scan and recording, and see actor/timestamp metadata.
-- An editor can add separate native/transliterated/translated lyric texts, and a viewer can copy/share one version.
-- Song deletion is refused while any lyric text, scan, or recording record exists.
+- An editor can add, edit, trash, and restore separate typed-lyric blocks, which viewers see sequentially in stable automatic order.
+- Moving a Song to Trash is refused while any active lyric text, scan, or recording exists; permanent deletion is refused while any child record exists at all.
 - Audio play, pause, and seek work on supported real iOS/iPadOS and Android devices.
 - A failed file replacement cannot lose the old working media.
 - Logout removes the cached private catalog from that browser profile.
 
 ## Product defaults to validate through use
 
-- Person filtering starts with “any role” and optionally narrows to Writer, Composer, Singer, or future roles.
+- Person filtering starts with “any role” and optionally narrows to Lyricist, Composer, Vocals, or future roles.
 - Status is preserved in the database but hidden from ordinary views until meaningful states are defined; imported `draft` values are not discarded.
 - Catalog rows initially show Latin title, native title, language, and compact lyric/scan/recording indicators. Tag display is restrained to avoid clutter.
 - These choices are deliberately easy to change after the first real-device prototype. Feedback from actual browsing, editing, sharing, and playback outranks speculative completeness.

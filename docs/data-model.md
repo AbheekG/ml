@@ -20,9 +20,9 @@ Scan ── optional Notebook
 ## Core records
 
 - `songs` stores titles, notes, status, revision, audit fields, and Trash state.
-- `lyric_texts` stores one language/script/representation per typed lyric version. Existing combined workbook text becomes one intact `legacy_combined` record.
-- `scans` stores scan metadata and references exactly one private media object.
-- `recordings` stores recording metadata, an original media object, and an optional browser-compatible playback object.
+- `lyric_texts` currently retains language/script/representation columns for the read-only import, and existing combined workbook text becomes one intact `legacy_combined` record. Before online editing, a forward migration will simplify new lyric records to required content, stable automatic order, and internal legacy-origin tracking; editors will not be required to add labels or classify language, script, or representation.
+- `scans` currently stores imported scan metadata and references exactly one private media object. Before online editing, a forward migration will simplify editor-facing metadata to optional Notebook/Page; legacy Source, Version, Date, ScanText, and Notes need not appear in write forms.
+- `recordings` currently stores imported Version/Notes metadata, an original media object, and an optional browser-compatible playback object. Before online editing, a forward migration will combine Version and the four populated legacy Notes into one required, per-Song-unique Recording description while preserving both source values; recorded date and contributors remain optional.
 - `media_objects` stores private R2 object metadata and recovery state; binary data does not enter D1.
 - `people`, `song_credits`, and `recording_credits` model contributors and roles.
 - `languages`, `tags`, and `notebooks` are controlled lookup records.

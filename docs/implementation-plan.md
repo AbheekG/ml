@@ -46,12 +46,15 @@ Deliverable: repeatable local database creation from `appsheet/data.xlsx` with n
 ## Phase 2 — read-only PWA
 
 1. Build the catalog list, basic local search, filters, and sorting.
-2. Build song detail with lyric variants, scans, recordings, credits, tags, languages, and notes.
+2. Build song detail with typed-lyric blocks, scans, recordings, credits, tags, languages, and notes.
 3. Add IndexedDB catalog storage and atomic background refresh.
 4. Add installable/offline app shell and explicit offline UI.
 5. Add private scan viewing and audio streaming/playback.
    - retain every source recording unchanged;
    - use valid MP3 originals directly and generate MP3 playback derivatives for other or mislabeled formats;
+   - generate and verify each required playback derivative once during import or asynchronously after upload, store it privately, and never transcode on a Play request;
+   - keep new Recordings in a processing state until their original/derivative is verified, with retryable failure handling;
+   - use browser media-capability checks only to select or verify already prepared sources, not to trigger device-specific conversion;
    - support HTTP range requests for seeking and efficient mobile streaming;
    - verify uploads with byte size and SHA-256 before marking media available.
    - show scans in an in-app near-fullscreen lightbox with a small close control, zoom, and optional fullscreen mode instead of opening a bare browser tab;
@@ -63,8 +66,10 @@ Deliverable: a useful staging application that can read the real catalog offline
 
 ## Phase 3 — online editing and safety
 
+Before implementing write forms, confirm the field-level business rules in [editing-rules.md](editing-rules.md). Reconstruct legacy behavior from the AppSheet design and workbook, but treat it as evidence rather than automatically preserving every old choice. Confirm the rules with the owner in small, related groups and enforce accepted rules in the form, API, and database where appropriate.
+
 1. Add viewer/editor/admin authorization.
-2. Add Song and Lyric text create/edit/trash/restore workflows.
+2. Add Song and typed-lyric create/edit/trash/restore workflows without requiring language/script/representation classification.
 3. Add Scan and Recording metadata/upload/replace/trash/restore workflows.
    - inspect actual file signatures/codecs rather than trusting extensions;
    - calculate SHA-256 before creation and reject duplicate content with a link to the existing record;
@@ -74,7 +79,6 @@ Deliverable: a useful staging application that can read the real catalog offline
 5. Enforce no-orphan foreign keys and no-cascade Song deletion.
 6. Refuse Song deletion while any Lyric text, Scan, or Recording exists and link the editor to those dependencies.
 7. Retain replaced/deleted media long enough for recovery and add deliberate later cleanup.
-8. Add copy/share for one lyric representation using the device share sheet with clipboard fallback.
 
 Deliverable: safe online maintenance by the primary editor.
 
@@ -89,8 +93,8 @@ Deliverable: safe online maintenance by the primary editor.
 ## Phase 5 — later improvements
 
 - advanced phonetic/transliteration ranking from tested real queries;
-- optional script suggestions for new lyric text;
-- selected scan/audio sharing with explicit privacy semantics;
+- one-tap system sharing for an individual scan or recording by sharing authenticated file bytes rather than exposing a public media URL, with capability-aware fallback behavior;
+- copy for an individual typed-lyric block, plus system text sharing where supported;
 - favorites, playlists, set lists, or recently viewed only if actual use calls for them;
 - automated transcription/OCR only after the core library is trusted.
 

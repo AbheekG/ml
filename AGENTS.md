@@ -26,8 +26,8 @@ The intended product behavior is:
 - Copy data into a new system; never make the legacy folders the writable runtime store.
 - Do not delete the AppSheet/Google Drive version at cutover. Keep it as a read-only fallback until the new app has been accepted and separately backed up.
 - Treat uploaded media as private. Do not create public buckets or permanent unauthenticated media URLs.
-- Model typed lyric versions as strict Song children with explicit language, script, and representation. Import each existing combined block intact as a legacy lyric record; never auto-split it.
-- Never cascade-delete a Song. Block Song deletion while any lyric text, scan, or recording record exists, including trashed children. Child and empty-Song deletions must be recoverable before later administrative cleanup.
+- Model typed lyrics as strict Song children with required content and stable automatic order; do not require labels or editor classification of language, script, or representation. Import each existing combined block intact and mark its legacy origin internally until an editor deliberately splits and replaces it later; never auto-split it.
+- Never cascade-delete a Song. Block moving a Song to Trash while it has active lyric texts, scans, or recordings; once all active children are separately trashed, the Song may be trashed. Block permanent Song deletion while any child record exists, including trashed children. Normal removal must remain recoverable indefinitely until a later explicit administrator cleanup policy is approved.
 
 ## Product and engineering constraints
 
@@ -36,7 +36,7 @@ The intended product behavior is:
 - The first release must disable editing and uploads while offline, with a clear offline indicator. Offline reading/search is the hard requirement. Do not add an offline mutation queue or conflict-resolution system unless the owner later changes this requirement.
 - Use individual accounts/allowlisted identities, not a shared application password. Sessions should persist on trusted devices so normal use does not repeatedly prompt for login.
 - Support one primary editor initially. Keep authorization role-based so one or two additional editors can be enabled later, and record created/updated timestamps and user identity for mutations.
-- Normalize newly uploaded audio to one browser-safe playback format while retaining the original when appropriate.
+- Normalize newly uploaded non-canonical audio once after upload to one broadly supported playback format while retaining the original. Store the derivative privately and never transcode in response to Play; runtime browser capability checks only choose or verify an already stored source.
 - Build the smallest complete vertical slice first: sign in, sync/cache catalog, basic local search/filtering, song detail, lyrics, scan viewing, and audio playback. Add editing/upload and administration after that slice is accepted. Defer advanced phonetic/transliteration ranking to a later phase.
 - Add automated tests for schema constraints, authorization, import reconciliation, offline startup, local search, and media access. Test on real Safari/iOS and Chrome/Android before cutover.
 
