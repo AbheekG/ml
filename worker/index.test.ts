@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { app, parseByteRange } from "./index";
+import { app, parseByteRange, resolveActiveAppUser, roleAllows, type AppRole } from "./index";
 
 describe("parseByteRange", () => {
   it("parses bounded, open-ended, and suffix ranges", () => {
@@ -15,7 +15,7 @@ describe("parseByteRange", () => {
   });
 });
 
-function localBindings(database?: D1Database) {
+function localBindings(database?: D1Database, localRole?: AppRole) {
   return {
     DB: database ?? {} as D1Database,
     MEDIA: {} as R2Bucket,
@@ -23,10 +23,55 @@ function localBindings(database?: D1Database) {
     ACCESS_AUD: "unused-locally",
     ACCESS_ISSUER: "unused-locally",
     ACCESS_JWKS_URL: "unused-locally",
+    LOCAL_ROLE: localRole,
   };
 }
 
 describe("Worker API", () => {
+  it("uses the viewer/editor/admin role hierarchy", () => {
+    expect(roleAllows("viewer", "viewer")).toBe(true);
+    expect(roleAllows("viewer", "editor")).toBe(false);
+    expect(roleAllows("editor", "viewer")).toBe(true);
+    expect(roleAllows("editor", "admin")).toBe(false);
+    expect(roleAllows("admin", "editor")).toBe(true);
+  });
+
+  it("resolves only an active allowlisted application user", async () => {
+    let boundIdentity = "";
+    const database = {
+      prepare: () => ({
+        bind: (identity: string) => {
+          boundIdentity = identity;
+          return { first: async () => ({
+            identity: "owner@example.test",
+            displayName: "Owner",
+            role: "admin",
+          }) };
+        },
+      }),
+    } as unknown as D1Database;
+
+    await expect(resolveActiveAppUser(database, "Owner@Example.Test")).resolves.toEqual({
+      identity: "owner@example.test",
+      displayName: "Owner",
+      role: "admin",
+    });
+    expect(boundIdentity).toBe("Owner@Example.Test");
+  });
+
+  it("returns the signed-in application role without exposing the identity", async () => {
+    const response = await app.request(
+      "http://local.test/api/session",
+      undefined,
+      localBindings(undefined, "viewer"),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      user: { displayName: "Local developer", role: "viewer" },
+    });
+  });
+
   it("reports a healthy service", async () => {
     const response = await app.request("http://local.test/api/health", undefined, localBindings());
 
@@ -102,9 +147,9 @@ describe("Worker API", () => {
             if (query.includes("FROM recordings\n")) {
               return { results: [{
                 id: "recording-1",
-                version: null,
+                description: "First take",
                 recordedOn: null,
-                notes: null,
+                processingState: "ready",
                 filename: "recording.m4a",
                 hasPlaybackMedia: 1,
               }] };
@@ -114,8 +159,7 @@ describe("Worker API", () => {
                 recordingId: "recording-1",
                 personId: "person-1",
                 fullName: "A person",
-                role: "Singer",
-                notes: null,
+                role: "Vocals",
               }] };
             }
             return { results: [] };

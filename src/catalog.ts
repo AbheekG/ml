@@ -15,7 +15,6 @@ type Credit = {
   personId: string;
   fullName: string;
   role: string;
-  notes: string | null;
 };
 
 export type SongDetail = {
@@ -32,32 +31,23 @@ export type SongDetail = {
   credits: Credit[];
   lyricTexts: Array<{
     id: string;
-    languageId: string | null;
-    languageName: string | null;
-    scriptCode: string | null;
-    representation: string;
-    label: string | null;
     content: string;
+    origin: "user" | "legacy_import";
   }>;
   scans: Array<{
     id: string;
     mediaId: string;
-    version: string | null;
-    capturedOn: string | null;
-    source: string;
     notebookName: string | null;
     pageLabel: string | null;
-    scanText: string | null;
-    notes: string | null;
     filename: string;
   }>;
   recordings: Array<{
     id: string;
     originalMediaId: string;
     playbackMediaId: string | null;
-    version: string | null;
+    description: string;
     recordedOn: string | null;
-    notes: string | null;
+    processingState: "processing" | "ready" | "failed";
     filename: string;
     hasPlaybackMedia: boolean;
     credits: Credit[];

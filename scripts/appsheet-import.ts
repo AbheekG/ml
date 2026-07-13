@@ -71,7 +71,7 @@ type ImportIssue = {
 };
 
 type NormalizedCatalog = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   generatedAt: string;
   source: { workbook: string; mediaRoot: string };
   languages: Array<Record<string, unknown>>;
@@ -147,11 +147,8 @@ export function createLegacyLyricText(song: RowRecord): Record<string, unknown> 
   return {
     id: `lyrics:${songId}:legacy`,
     songId,
-    languageId: null,
-    scriptCode: null,
-    representation: "legacy_combined",
-    label: "Imported combined lyrics",
     content,
+    origin: "legacy_import",
     sortOrder: 0,
     revision: 1,
     createdAt,
@@ -401,6 +398,7 @@ export async function importAppSheet(options: ImportOptions): Promise<{
   const mediaObjects: Array<Record<string, unknown>> = [];
   const normalizedScans: Array<Record<string, unknown>> = [];
   const normalizedRecordings: Array<Record<string, unknown>> = [];
+  const recordingNumberBySong = new Map<string, number>();
   const referencedKeys = new Set<string>();
   const extensionCounts = new Map<string, number>();
   let referencedBytes = 0;
@@ -471,13 +469,13 @@ export async function importAppSheet(options: ImportOptions): Promise<{
       id,
       songId,
       mediaId,
-      version: optionalText(row.Version) || null,
-      capturedOn: asDateOnly(row.Date),
-      source: requiredText(row.Source, "Scans.Source"),
       notebookId,
       pageLabel: optionalText(row.Page) || null,
-      scanText: preserveText(row.ScanText) || null,
-      notes: preserveText(row.Notes) || null,
+      legacyVersion: optionalText(row.Version) || null,
+      legacyCapturedOn: asDateOnly(row.Date),
+      legacySource: requiredText(row.Source, "Scans.Source"),
+      legacyScanText: preserveText(row.ScanText) || null,
+      legacyNotes: preserveText(row.Notes) || null,
       revision: 1,
       createdAt,
       createdBy: actor,
@@ -496,15 +494,26 @@ export async function importAppSheet(options: ImportOptions): Promise<{
     const mediaId = `media:recording:${id}:original`;
     const media = await mediaFromReference(mediaId, row.File, "original_audio", actor, createdAt);
     const playbackMediaId = media.mimeType === "audio/mpeg" ? mediaId : null;
+    const legacyVersion = optionalText(row.Version) || null;
+    const legacyNotes = preserveText(row.Notes) || null;
+    const recordingNumber = (recordingNumberBySong.get(songId) ?? 0) + 1;
+    recordingNumberBySong.set(songId, recordingNumber);
+    const description = legacyVersion
+      ? legacyNotes ? `${legacyVersion}\n\n${legacyNotes}` : legacyVersion
+      : `Recording ${recordingNumber}`;
 
     normalizedRecordings.push({
       id,
       songId,
       originalMediaId: mediaId,
       playbackMediaId,
-      version: optionalText(row.Version) || null,
+      description,
+      normalizedDescription: normalizedName(description),
       recordedOn: asDateOnly(row.Date),
-      notes: preserveText(row.Notes) || null,
+      processingState: "ready",
+      processingError: null,
+      legacyVersion,
+      legacyNotes,
       revision: 1,
       createdAt,
       createdBy: actor,
@@ -529,11 +538,17 @@ export async function importAppSheet(options: ImportOptions): Promise<{
     const createdAt = isoText(row.CreatedAt) ?? new Date(0).toISOString();
     const updatedAt = isoText(row.UpdatedAt) ?? createdAt;
     const actor = optionalText(row.CreatedBy) || LEGACY_ACTOR;
+    const titleLatin = requiredText(row.TitleLatin, "Songs.TitleLatin");
+    const status = optionalText(row.Status) || "draft";
+    if (status !== "draft" && status !== "checked") {
+      errors.push({ category: "invalid_song_status", message: id });
+    }
     return {
       id,
-      titleLatin: requiredText(row.TitleLatin, "Songs.TitleLatin"),
+      titleLatin,
+      normalizedTitleLatin: normalizedName(titleLatin),
       titleNative: optionalText(row.TitleNative) || null,
-      status: optionalText(row.Status) || null,
+      status,
       notes: preserveText(row.Notes) || null,
       revision: 1,
       createdAt,
@@ -545,29 +560,60 @@ export async function importAppSheet(options: ImportOptions): Promise<{
     };
   });
 
+  const normalizedSongTitles = new Set<string>();
+  for (const song of normalizedSongs) {
+    const key = String(song.normalizedTitleLatin);
+    if (normalizedSongTitles.has(key)) {
+      errors.push({ category: "duplicate_song_title", message: String(song.id) });
+    }
+    normalizedSongTitles.add(key);
+    if (!songLanguageRows.some((row) => row.songId === song.id)) {
+      errors.push({ category: "song_missing_language", message: String(song.id) });
+    }
+  }
+
+  const recordingDescriptions = new Set<string>();
+  for (const recording of normalizedRecordings) {
+    const key = `${String(recording.songId)}\0${String(recording.normalizedDescription)}`;
+    if (recordingDescriptions.has(key)) {
+      errors.push({ category: "duplicate_recording_description", message: String(recording.id) });
+    }
+    recordingDescriptions.add(key);
+  }
+
   const catalog: NormalizedCatalog = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt,
     source: { workbook: options.workbookPath, mediaRoot: options.mediaRoot },
     languages: languages.map((row, sortOrder) => {
       const id = requiredText(row.LangID, "Languages.LangID");
+      const displayName = requiredText(row.DisplayName, "Languages.DisplayName");
       return {
         id,
-        displayName: requiredText(row.DisplayName, "Languages.DisplayName"),
+        displayName,
+        normalizedName: normalizedName(displayName),
         bcp47Tag: BCP47_BY_LEGACY_ID[id] ?? null,
         sortOrder,
       };
     }),
-    tags: tags.map((row, sortOrder) => ({
-      id: requiredText(row.TagID, "Tags.TagID"),
-      displayName: requiredText(row.DisplayName, "Tags.DisplayName"),
-      sortOrder,
-    })),
-    notebooks: notebooks.map((row, sortOrder) => ({
-      id: requiredText(row.NotebookID, "Notebooks.NotebookID"),
-      displayName: requiredText(row.DisplayName, "Notebooks.DisplayName"),
-      sortOrder,
-    })),
+    tags: tags.map((row, sortOrder) => {
+      const displayName = requiredText(row.DisplayName, "Tags.DisplayName");
+      return {
+        id: requiredText(row.TagID, "Tags.TagID"),
+        displayName,
+        normalizedName: normalizedName(displayName),
+        sortOrder,
+      };
+    }),
+    notebooks: notebooks.map((row, sortOrder) => {
+      const displayName = requiredText(row.DisplayName, "Notebooks.DisplayName");
+      return {
+        id: requiredText(row.NotebookID, "Notebooks.NotebookID"),
+        displayName,
+        normalizedName: normalizedName(displayName),
+        sortOrder,
+      };
+    }),
     people: people.map((row) => {
       const fullName = requiredText(row.FullName, "People.FullName");
       return {
@@ -586,8 +632,9 @@ export async function importAppSheet(options: ImportOptions): Promise<{
       id: requiredText(row.CreditID, "SongCredits.CreditID"),
       songId: requiredText(row.SongID, "SongCredits.SongID"),
       personId: requiredText(row.PersonID, "SongCredits.PersonID"),
-      role: requiredText(row.Role, "SongCredits.Role"),
-      notes: preserveText(row.Notes) || null,
+      role: requiredText(row.Role, "SongCredits.Role") === "Writer"
+        ? "Lyricist"
+        : requiredText(row.Role, "SongCredits.Role"),
       sortOrder,
     })),
     lyricTexts,
@@ -598,8 +645,9 @@ export async function importAppSheet(options: ImportOptions): Promise<{
       id: requiredText(row.RecCreditID, "RecordingCredits.RecCreditID"),
       recordingId: requiredText(row.RecID, "RecordingCredits.RecID"),
       personId: requiredText(row.PersonID, "RecordingCredits.PersonID"),
-      role: requiredText(row.Role, "RecordingCredits.Role"),
-      notes: preserveText(row.Notes) || null,
+      role: requiredText(row.Role, "RecordingCredits.Role") === "Singer"
+        ? "Vocals"
+        : requiredText(row.Role, "RecordingCredits.Role"),
       sortOrder,
     })),
   };

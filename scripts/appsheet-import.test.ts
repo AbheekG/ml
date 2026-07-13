@@ -36,7 +36,7 @@ describe("AppSheet import helpers", () => {
 
     expect(result).toMatchObject({
       id: "lyrics:song-1:legacy",
-      representation: "legacy_combined",
+      origin: "legacy_import",
       content,
     });
   });

@@ -14,7 +14,6 @@ type RecordingCredit = {
   personId: string;
   fullName: string;
   role: string;
-  notes: string | null;
 };
 
 function groupBy<T, K>(rows: T[], key: (row: T) => K): Map<K, T[]> {
@@ -70,63 +69,50 @@ export async function loadOfflineLibrary(database: D1Database) {
         song_credits.song_id AS songId,
         people.id AS personId,
         people.full_name AS fullName,
-        song_credits.role,
-        song_credits.notes
+        song_credits.role
       FROM song_credits
       JOIN people ON people.id = song_credits.person_id
       ORDER BY song_credits.song_id, song_credits.sort_order, people.full_name
-    `).all<SongChild & { personId: string; fullName: string; role: string; notes: string | null }>(),
+    `).all<SongChild & { personId: string; fullName: string; role: string }>(),
     database.prepare(`
       SELECT
         lyric_texts.song_id AS songId,
         lyric_texts.id,
-        lyric_texts.language_id AS languageId,
-        languages.display_name AS languageName,
-        lyric_texts.script_code AS scriptCode,
-        lyric_texts.representation,
-        lyric_texts.label,
-        lyric_texts.content
+        lyric_texts.content,
+        lyric_texts.origin
       FROM lyric_texts
-      LEFT JOIN languages ON languages.id = lyric_texts.language_id
       WHERE lyric_texts.trashed_at IS NULL
       ORDER BY lyric_texts.song_id, lyric_texts.sort_order, lyric_texts.id
     `).all<SongChild & {
       id: string;
-      languageId: string | null;
-      languageName: string | null;
-      scriptCode: string | null;
-      representation: string;
-      label: string | null;
       content: string;
+      origin: "user" | "legacy_import";
     }>(),
     database.prepare(`
       SELECT
         scans.song_id AS songId,
         scans.id,
         media_objects.id AS mediaId,
-        scans.version,
-        scans.captured_on AS capturedOn,
-        scans.source,
         notebooks.display_name AS notebookName,
         scans.page_label AS pageLabel,
-        scans.scan_text AS scanText,
-        scans.notes,
         media_objects.original_filename AS filename
       FROM scans
       JOIN media_objects ON media_objects.id = scans.media_id
       LEFT JOIN notebooks ON notebooks.id = scans.notebook_id
       WHERE scans.trashed_at IS NULL
-      ORDER BY scans.song_id, scans.captured_on, scans.id
+      ORDER BY
+        scans.song_id,
+        CASE WHEN scans.notebook_id IS NULL THEN 1 ELSE 0 END,
+        notebooks.sort_order,
+        length(scans.page_label),
+        scans.page_label COLLATE NOCASE,
+        scans.created_at,
+        scans.id
     `).all<SongChild & {
       id: string;
       mediaId: string;
-      version: string | null;
-      capturedOn: string | null;
-      source: string;
       notebookName: string | null;
       pageLabel: string | null;
-      scanText: string | null;
-      notes: string | null;
       filename: string;
     }>(),
     database.prepare(`
@@ -135,9 +121,9 @@ export async function loadOfflineLibrary(database: D1Database) {
         recordings.id,
         recordings.original_media_id AS originalMediaId,
         recordings.playback_media_id AS playbackMediaId,
-        recordings.version,
+        recordings.description,
         recordings.recorded_on AS recordedOn,
-        recordings.notes,
+        recordings.processing_state AS processingState,
         media_objects.original_filename AS filename,
         CASE WHEN recordings.playback_media_id IS NULL THEN 0 ELSE 1 END AS hasPlaybackMedia
       FROM recordings
@@ -148,9 +134,9 @@ export async function loadOfflineLibrary(database: D1Database) {
       id: string;
       originalMediaId: string;
       playbackMediaId: string | null;
-      version: string | null;
+      description: string;
       recordedOn: string | null;
-      notes: string | null;
+      processingState: "processing" | "ready" | "failed";
       filename: string;
       hasPlaybackMedia: number;
     }>(),
@@ -159,8 +145,7 @@ export async function loadOfflineLibrary(database: D1Database) {
         recording_credits.recording_id AS recordingId,
         people.id AS personId,
         people.full_name AS fullName,
-        recording_credits.role,
-        recording_credits.notes
+        recording_credits.role
       FROM recording_credits
       JOIN recordings ON recordings.id = recording_credits.recording_id
       JOIN people ON people.id = recording_credits.person_id

@@ -39,6 +39,13 @@ The first local read-only vertical slice is operational:
 - the complete catalog, metadata, and typed lyrics are atomically cached in IndexedDB, while the production app shell and hashed assets are precached by a service worker;
 - type checks, importer/schema/API tests, production builds, and local end-to-end API smoke tests pass.
 
+The first online-editing foundation is also implemented locally but is not yet applied to staging:
+
+- a reconciled forward migration enforces normalized active Song titles, statuses, controlled lookup keys, simplified typed lyrics, Recording descriptions, and Trash safety;
+- all imported row and media-reference counts remain unchanged, with legacy Scan/Recording metadata retained privately;
+- authenticated identities must map to an active `app_users` record, with reusable viewer/editor/admin authorization guards;
+- write endpoints and editing forms are the next incremental slice.
+
 The private staging catalog is loaded into an APAC-primary D1 database for the application's users in India. All 1,325 workbook-linked media files are stored in private APAC R2 and delivered only through the authenticated API. Two unassigned legacy recordings and two unlinked scans remain local for later identification.
 
 Schema-only staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.

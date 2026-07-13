@@ -194,7 +194,7 @@ function MetadataList({ song }: { song: SongDetail }) {
         {song.credits.map((credit) => (
           <div key={`${credit.personId}:${credit.role}`}>
             <dt>{credit.role}</dt>
-            <dd>{credit.fullName}{credit.notes ? ` · ${credit.notes}` : ""}</dd>
+            <dd>{credit.fullName}</dd>
           </div>
         ))}
       </dl>
@@ -265,8 +265,7 @@ function SongDetailPage({ isOnline }: { isOnline: boolean }) {
         <div className="detail-main">
           {song.lyricTexts.map((lyrics) => (
             <section className="detail-card lyrics-card" key={lyrics.id} aria-labelledby={`${lyrics.id}-title`}>
-              <p className="eyebrow">{lyrics.languageName ?? lyrics.representation.replaceAll("_", " ")}</p>
-              <h2 id={`${lyrics.id}-title`}>{lyrics.label ?? "Typed lyrics"}</h2>
+              <h2 id={`${lyrics.id}-title`}>Typed lyrics</h2>
               <pre>{lyrics.content}</pre>
             </section>
           ))}
@@ -278,13 +277,15 @@ function SongDetailPage({ isOnline }: { isOnline: boolean }) {
                 {song.recordings.map((recording) => (
                   <li key={recording.id}>
                     <div className="recording-item">
-                      <strong>{recording.version || "Recording"}</strong>
+                      <strong>{recording.description}</strong>
                       <span>{recording.recordedOn || recording.filename}</span>
-                      <audio
-                        controls
-                        preload="metadata"
-                        src={`/api/media/${encodeURIComponent(recording.playbackMediaId ?? recording.originalMediaId)}`}
-                      />
+                      {recording.processingState === "ready"
+                        ? <audio
+                            controls
+                            preload="metadata"
+                            src={`/api/media/${encodeURIComponent(recording.playbackMediaId ?? recording.originalMediaId)}`}
+                          />
+                        : <span>{recording.processingState === "processing" ? "Preparing audio…" : "Audio needs attention"}</span>}
                     </div>
                   </li>
                 ))}
@@ -299,7 +300,7 @@ function SongDetailPage({ isOnline }: { isOnline: boolean }) {
               <ul className="media-list">
                 {song.scans.map((scan) => (
                   <li key={scan.id}>
-                    <div><strong>{scan.version || scan.source}</strong><span>{[scan.notebookName, scan.pageLabel].filter(Boolean).join(" · ") || scan.filename}</span></div>
+                    <div><strong>{[scan.notebookName, scan.pageLabel].filter(Boolean).join(" · ") || "Scanned page"}</strong><span>{scan.filename}</span></div>
                     <a className="media-action" href={`/api/media/${encodeURIComponent(scan.mediaId)}`} target="_blank" rel="noreferrer">View</a>
                   </li>
                 ))}

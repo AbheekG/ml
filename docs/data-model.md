@@ -20,9 +20,9 @@ Scan ── optional Notebook
 ## Core records
 
 - `songs` stores titles, notes, status, revision, audit fields, and Trash state.
-- `lyric_texts` currently retains language/script/representation columns for the read-only import, and existing combined workbook text becomes one intact `legacy_combined` record. Before online editing, a forward migration will simplify new lyric records to required content, stable automatic order, and internal legacy-origin tracking; editors will not be required to add labels or classify language, script, or representation.
-- `scans` currently stores imported scan metadata and references exactly one private media object. Before online editing, a forward migration will simplify editor-facing metadata to optional Notebook/Page; legacy Source, Version, Date, ScanText, and Notes need not appear in write forms.
-- `recordings` currently stores imported Version/Notes metadata, an original media object, and an optional browser-compatible playback object. Before online editing, a forward migration will combine Version and the four populated legacy Notes into one required, per-Song-unique Recording description while preserving both source values; recorded date and contributors remain optional.
+- `lyric_texts` stores required content, stable automatic order, audit/Trash fields, and a hidden `user`/`legacy_import` origin. Existing combined workbook text remains intact; editors do not classify language, script, representation, or label.
+- `scans` references exactly one private media object and exposes optional Notebook/Page metadata. Imported Source, Version, Date, ScanText, and Notes remain preserved in hidden `legacy_*` columns but are not part of the initial editor model.
+- `recordings` stores one required, normalized-unique per-Song description, optional recorded date and contributors, processing state, an original media object, and an optional playback object. Imported Version and the four populated Notes are combined losslessly for display and also remain in hidden `legacy_*` columns.
 - `media_objects` stores private R2 object metadata and recovery state; binary data does not enter D1.
 - `people`, `song_credits`, and `recording_credits` model contributors and roles.
 - `languages`, `tags`, and `notebooks` are controlled lookup records.
@@ -51,7 +51,7 @@ Scan ── optional Notebook
 7. reports counts/errors without printing song content;
 8. writes private output only when `--write` is supplied.
 
-`scripts/load-local-db.ts` creates a temporary database, applies the migration, imports all normalized rows in one transaction, runs `PRAGMA foreign_key_check`, and atomically replaces the ignored local database only after success.
+`scripts/load-local-db.ts` creates a temporary database, applies every numbered migration in order, imports all normalized rows in one transaction, runs `PRAGMA foreign_key_check`, and atomically replaces the ignored local database only after success.
 
 ## Media preservation and playback
 

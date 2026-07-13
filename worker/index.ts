@@ -1,6 +1,14 @@
 import { Hono } from "hono";
+import { createMiddleware } from "hono/factory";
 import { verifyWithJwks } from "hono/jwt";
 import { loadOfflineLibrary } from "./offline-library";
+
+export type AppRole = "viewer" | "editor" | "admin";
+export type AppUser = {
+  identity: string;
+  displayName: string | null;
+  role: AppRole;
+};
 
 type Bindings = {
   DB: D1Database;
@@ -9,6 +17,7 @@ type Bindings = {
   ACCESS_AUD: string;
   ACCESS_ISSUER: string;
   ACCESS_JWKS_URL: string;
+  LOCAL_ROLE?: AppRole;
 };
 
 type Variables = {
@@ -16,7 +25,39 @@ type Variables = {
     email: string;
     subject: string;
   };
+  appUser: AppUser;
 };
+
+const ROLE_RANK: Record<AppRole, number> = {
+  viewer: 0,
+  editor: 1,
+  admin: 2,
+};
+
+export function roleAllows(actual: AppRole, required: AppRole): boolean {
+  return ROLE_RANK[actual] >= ROLE_RANK[required];
+}
+
+export async function resolveActiveAppUser(database: D1Database, email: string): Promise<AppUser | null> {
+  return database.prepare(`
+    SELECT
+      identity,
+      display_name AS displayName,
+      role
+    FROM app_users
+    WHERE identity = ? COLLATE NOCASE AND is_active = 1
+  `).bind(email).first<AppUser>();
+}
+
+export const requireRole = (required: AppRole) => createMiddleware<{
+  Bindings: Bindings;
+  Variables: Variables;
+}>(async (context, next) => {
+  if (!roleAllows(context.get("appUser").role, required)) {
+    return context.json({ error: "insufficient_role", requiredRole: required }, 403);
+  }
+  await next();
+});
 
 type CatalogSongRow = {
   id: string;
@@ -44,7 +85,6 @@ type RecordingCreditRow = {
   personId: string;
   fullName: string;
   role: string;
-  notes: string | null;
 };
 
 type MediaRow = {
@@ -84,6 +124,11 @@ export const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 app.use("/api/*", async (context, next) => {
   if (context.env.AUTH_MODE === "local") {
     context.set("accessIdentity", { email: "local@example.invalid", subject: "local-development" });
+    context.set("appUser", {
+      identity: "local@example.invalid",
+      displayName: "Local developer",
+      role: context.env.LOCAL_ROLE ?? "admin",
+    });
     await next();
     return;
   }
@@ -102,6 +147,7 @@ app.use("/api/*", async (context, next) => {
     return context.json({ error: "authentication_required" }, 401);
   }
 
+  let verifiedIdentity: { email: string; subject: string };
   try {
     const payload = await verifyWithJwks(token, {
       jwks_uri: context.env.ACCESS_JWKS_URL,
@@ -116,9 +162,21 @@ app.use("/api/*", async (context, next) => {
       return context.json({ error: "invalid_identity" }, 401);
     }
 
-    context.set("accessIdentity", { email: payload.email, subject: payload.sub });
+    verifiedIdentity = { email: payload.email, subject: payload.sub };
   } catch {
     return context.json({ error: "invalid_access_token" }, 401);
+  }
+
+  context.set("accessIdentity", verifiedIdentity);
+  try {
+    const user = await resolveActiveAppUser(context.env.DB, verifiedIdentity.email);
+
+    if (!user) {
+      return context.json({ error: "access_not_authorized" }, 403);
+    }
+    context.set("appUser", user);
+  } catch {
+    return context.json({ error: "authorization_unavailable" }, 503);
   }
 
   await next();
@@ -128,6 +186,16 @@ app.get("/api/health", (context) => {
   return context.json({
     service: "music-library",
     status: "ok",
+  });
+});
+
+app.get("/api/session", (context) => {
+  const user = context.get("appUser");
+  return context.json({
+    user: {
+      displayName: user.displayName,
+      role: user.role,
+    },
   });
 });
 
@@ -205,62 +273,48 @@ app.get("/api/songs/:songId", async (context) => {
       SELECT
         people.id AS personId,
         people.full_name AS fullName,
-        song_credits.role,
-        song_credits.notes
+        song_credits.role
       FROM song_credits
       JOIN people ON people.id = song_credits.person_id
       WHERE song_credits.song_id = ?
       ORDER BY song_credits.sort_order, people.full_name
-    `).bind(songId).all<{ personId: string; fullName: string; role: string; notes: string | null }>(),
+    `).bind(songId).all<{ personId: string; fullName: string; role: string }>(),
     context.env.DB.prepare(`
       SELECT
         lyric_texts.id,
-        lyric_texts.language_id AS languageId,
-        languages.display_name AS languageName,
-        lyric_texts.script_code AS scriptCode,
-        lyric_texts.representation,
-        lyric_texts.label,
-        lyric_texts.content
+        lyric_texts.content,
+        lyric_texts.origin
       FROM lyric_texts
-      LEFT JOIN languages ON languages.id = lyric_texts.language_id
       WHERE lyric_texts.song_id = ? AND lyric_texts.trashed_at IS NULL
       ORDER BY lyric_texts.sort_order, lyric_texts.id
     `).bind(songId).all<{
       id: string;
-      languageId: string | null;
-      languageName: string | null;
-      scriptCode: string | null;
-      representation: string;
-      label: string | null;
       content: string;
+      origin: "user" | "legacy_import";
     }>(),
     context.env.DB.prepare(`
       SELECT
         scans.id,
         media_objects.id AS mediaId,
-        scans.version,
-        scans.captured_on AS capturedOn,
-        scans.source,
         notebooks.display_name AS notebookName,
         scans.page_label AS pageLabel,
-        scans.scan_text AS scanText,
-        scans.notes,
         media_objects.original_filename AS filename
       FROM scans
       JOIN media_objects ON media_objects.id = scans.media_id
       LEFT JOIN notebooks ON notebooks.id = scans.notebook_id
       WHERE scans.song_id = ? AND scans.trashed_at IS NULL
-      ORDER BY scans.captured_on, scans.id
+      ORDER BY
+        CASE WHEN scans.notebook_id IS NULL THEN 1 ELSE 0 END,
+        notebooks.sort_order,
+        length(scans.page_label),
+        scans.page_label COLLATE NOCASE,
+        scans.created_at,
+        scans.id
     `).bind(songId).all<{
       id: string;
       mediaId: string;
-      version: string | null;
-      capturedOn: string | null;
-      source: string;
       notebookName: string | null;
       pageLabel: string | null;
-      scanText: string | null;
-      notes: string | null;
       filename: string;
     }>(),
     context.env.DB.prepare(`
@@ -268,9 +322,9 @@ app.get("/api/songs/:songId", async (context) => {
         recordings.id,
         recordings.original_media_id AS originalMediaId,
         recordings.playback_media_id AS playbackMediaId,
-        recordings.version,
+        recordings.description,
         recordings.recorded_on AS recordedOn,
-        recordings.notes,
+        recordings.processing_state AS processingState,
         media_objects.original_filename AS filename,
         CASE WHEN recordings.playback_media_id IS NULL THEN 0 ELSE 1 END AS hasPlaybackMedia
       FROM recordings
@@ -281,9 +335,9 @@ app.get("/api/songs/:songId", async (context) => {
       id: string;
       originalMediaId: string;
       playbackMediaId: string | null;
-      version: string | null;
+      description: string;
       recordedOn: string | null;
-      notes: string | null;
+      processingState: "processing" | "ready" | "failed";
       filename: string;
       hasPlaybackMedia: number;
     }>(),
@@ -292,8 +346,7 @@ app.get("/api/songs/:songId", async (context) => {
         recording_credits.recording_id AS recordingId,
         people.id AS personId,
         people.full_name AS fullName,
-        recording_credits.role,
-        recording_credits.notes
+        recording_credits.role
       FROM recording_credits
       JOIN recordings ON recordings.id = recording_credits.recording_id
       JOIN people ON people.id = recording_credits.person_id

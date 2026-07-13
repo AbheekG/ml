@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
@@ -18,17 +18,17 @@ const TABLE_MAPPINGS: TableMapping[] = [
   {
     table: "languages",
     catalogKey: "languages",
-    columns: [["id", "id"], ["display_name", "displayName"], ["bcp47_tag", "bcp47Tag"], ["sort_order", "sortOrder"]],
+    columns: [["id", "id"], ["display_name", "displayName"], ["normalized_name", "normalizedName"], ["bcp47_tag", "bcp47Tag"], ["sort_order", "sortOrder"]],
   },
   {
     table: "tags",
     catalogKey: "tags",
-    columns: [["id", "id"], ["display_name", "displayName"], ["sort_order", "sortOrder"]],
+    columns: [["id", "id"], ["display_name", "displayName"], ["normalized_name", "normalizedName"], ["sort_order", "sortOrder"]],
   },
   {
     table: "notebooks",
     catalogKey: "notebooks",
-    columns: [["id", "id"], ["display_name", "displayName"], ["sort_order", "sortOrder"]],
+    columns: [["id", "id"], ["display_name", "displayName"], ["normalized_name", "normalizedName"], ["sort_order", "sortOrder"]],
   },
   {
     table: "people",
@@ -39,7 +39,7 @@ const TABLE_MAPPINGS: TableMapping[] = [
     table: "songs",
     catalogKey: "songs",
     columns: [
-      ["id", "id"], ["title_latin", "titleLatin"], ["title_native", "titleNative"],
+      ["id", "id"], ["title_latin", "titleLatin"], ["normalized_title_latin", "normalizedTitleLatin"], ["title_native", "titleNative"],
       ["status", "status"], ["notes", "notes"], ["revision", "revision"],
       ["created_at", "createdAt"], ["created_by", "createdBy"],
       ["updated_at", "updatedAt"], ["updated_by", "updatedBy"],
@@ -64,15 +64,14 @@ const TABLE_MAPPINGS: TableMapping[] = [
   {
     table: "song_credits",
     catalogKey: "songCredits",
-    columns: [["id", "id"], ["song_id", "songId"], ["person_id", "personId"], ["role", "role"], ["notes", "notes"], ["sort_order", "sortOrder"]],
+    columns: [["id", "id"], ["song_id", "songId"], ["person_id", "personId"], ["role", "role"], ["sort_order", "sortOrder"]],
   },
   {
     table: "lyric_texts",
     catalogKey: "lyricTexts",
     columns: [
-      ["id", "id"], ["song_id", "songId"], ["language_id", "languageId"],
-      ["script_code", "scriptCode"], ["representation", "representation"], ["label", "label"],
-      ["content", "content"], ["sort_order", "sortOrder"], ["revision", "revision"],
+      ["id", "id"], ["song_id", "songId"], ["content", "content"], ["origin", "origin"],
+      ["sort_order", "sortOrder"], ["revision", "revision"],
       ["created_at", "createdAt"], ["created_by", "createdBy"],
       ["updated_at", "updatedAt"], ["updated_by", "updatedBy"],
       ["trashed_at", "trashedAt"], ["trashed_by", "trashedBy"],
@@ -93,9 +92,10 @@ const TABLE_MAPPINGS: TableMapping[] = [
     catalogKey: "scans",
     columns: [
       ["id", "id"], ["song_id", "songId"], ["media_id", "mediaId"],
-      ["version", "version"], ["captured_on", "capturedOn"], ["source", "source"],
       ["notebook_id", "notebookId"], ["page_label", "pageLabel"],
-      ["scan_text", "scanText"], ["notes", "notes"], ["revision", "revision"],
+      ["legacy_version", "legacyVersion"], ["legacy_captured_on", "legacyCapturedOn"],
+      ["legacy_source", "legacySource"], ["legacy_scan_text", "legacyScanText"],
+      ["legacy_notes", "legacyNotes"], ["revision", "revision"],
       ["created_at", "createdAt"], ["created_by", "createdBy"],
       ["updated_at", "updatedAt"], ["updated_by", "updatedBy"],
       ["trashed_at", "trashedAt"], ["trashed_by", "trashedBy"],
@@ -106,8 +106,10 @@ const TABLE_MAPPINGS: TableMapping[] = [
     catalogKey: "recordings",
     columns: [
       ["id", "id"], ["song_id", "songId"], ["original_media_id", "originalMediaId"],
-      ["playback_media_id", "playbackMediaId"], ["version", "version"], ["recorded_on", "recordedOn"],
-      ["notes", "notes"], ["revision", "revision"],
+      ["playback_media_id", "playbackMediaId"], ["description", "description"],
+      ["normalized_description", "normalizedDescription"], ["recorded_on", "recordedOn"],
+      ["processing_state", "processingState"], ["processing_error", "processingError"],
+      ["legacy_version", "legacyVersion"], ["legacy_notes", "legacyNotes"], ["revision", "revision"],
       ["created_at", "createdAt"], ["created_by", "createdBy"],
       ["updated_at", "updatedAt"], ["updated_by", "updatedBy"],
       ["trashed_at", "trashedAt"], ["trashed_by", "trashedBy"],
@@ -116,7 +118,7 @@ const TABLE_MAPPINGS: TableMapping[] = [
   {
     table: "recording_credits",
     catalogKey: "recordingCredits",
-    columns: [["id", "id"], ["recording_id", "recordingId"], ["person_id", "personId"], ["role", "role"], ["notes", "notes"], ["sort_order", "sortOrder"]],
+    columns: [["id", "id"], ["recording_id", "recordingId"], ["person_id", "personId"], ["role", "role"], ["sort_order", "sortOrder"]],
   },
 ];
 
@@ -220,13 +222,16 @@ export async function loadLocalDatabase(
   catalogPath: string,
   databasePath: string,
 ): Promise<Record<string, number>> {
-  const migrationPath = resolve("migrations/0001_initial.sql");
-  const [catalogJson, migration] = await Promise.all([
+  const migrationsDirectory = resolve("migrations");
+  const migrationNames = (await readdir(migrationsDirectory))
+    .filter((name) => /^\d+.*\.sql$/.test(name))
+    .sort();
+  const [catalogJson, migrations] = await Promise.all([
     readFile(catalogPath, "utf8"),
-    readFile(migrationPath, "utf8"),
+    Promise.all(migrationNames.map((name) => readFile(resolve(migrationsDirectory, name), "utf8"))),
   ]);
   const catalog = JSON.parse(catalogJson) as Catalog;
-  if (catalog.schemaVersion !== 1) throw new Error(`Unsupported catalog schema: ${catalog.schemaVersion}`);
+  if (catalog.schemaVersion !== 2) throw new Error(`Unsupported catalog schema: ${catalog.schemaVersion}`);
 
   await mkdir(dirname(databasePath), { recursive: true });
   const temporaryPath = `${databasePath}.tmp`;
@@ -236,7 +241,7 @@ export async function loadLocalDatabase(
   const counts: Record<string, number> = {};
 
   try {
-    database.exec(migration);
+    for (const migration of migrations) database.exec(migration);
     database.exec("BEGIN IMMEDIATE");
     try {
       for (const mapping of TABLE_MAPPINGS) {

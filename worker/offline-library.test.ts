@@ -21,21 +21,17 @@ describe("loadOfflineLibrary", () => {
           if (query.includes("FROM lyric_texts")) return { results: [{
             songId: "song-1",
             id: "lyrics-1",
-            languageId: "bn",
-            languageName: "Bengali",
-            scriptCode: null,
-            representation: "original",
-            label: null,
             content: "Lyrics",
+            origin: "user",
           }] };
           if (query.includes("FROM recordings\n")) return { results: [{
             songId: "song-1",
             id: "recording-1",
             originalMediaId: "media-1",
             playbackMediaId: null,
-            version: null,
+            description: "First take",
             recordedOn: null,
-            notes: null,
+            processingState: "ready",
             filename: "recording.mp3",
             hasPlaybackMedia: 0,
           }] };
@@ -43,8 +39,7 @@ describe("loadOfflineLibrary", () => {
             recordingId: "recording-1",
             personId: "person-1",
             fullName: "A person",
-            role: "Singer",
-            notes: null,
+            role: "Vocals",
           }] };
           return { results: [] };
         },
