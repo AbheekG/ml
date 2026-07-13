@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { ScanViewer } from "./ScanViewer";
+import { CatalogControls } from "./CatalogControls";
 import {
   ApiError,
   createLookup,
@@ -46,6 +47,7 @@ import {
   type TrashedScan,
   type TrashedSong,
 } from "./catalog";
+import { emptyCatalogFilters, filterAndSortCatalog, type CatalogSort } from "./catalog-view";
 import { findSimilarLookupItems } from "./lookup-similarity";
 import { shouldOfferDirectCameraCapture } from "./device-capabilities";
 import { scanDisplayName } from "./scan-viewer";
@@ -111,6 +113,8 @@ function useOnlineStatus(): boolean {
 function SongsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
   const [songs, setSongs] = useState<CatalogSong[]>([]);
   const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState(emptyCatalogFilters);
+  const [sort, setSort] = useState<CatalogSort>("latin-asc");
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -145,10 +149,7 @@ function SongsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
     return () => { cancelled = true; };
   }, [isOnline]);
 
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-  const visibleSongs = normalizedQuery
-    ? songs.filter((song) => `${song.titleLatin} ${song.titleNative ?? ""}`.toLocaleLowerCase().includes(normalizedQuery))
-    : songs;
+  const visibleSongs = filterAndSortCatalog(songs, query, filters, sort);
 
   return (
     <main className="page-shell" id="main-content">
@@ -165,22 +166,15 @@ function SongsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
           : <button className="primary-action" type="button" disabled title={isOnline ? "Editor access is required" : "Go online to add a song"}>Add song</button>}
       </section>
 
-      <section className="catalog-tools" aria-label="Catalog tools">
-        <label className="search-field">
-          <span className="sr-only">Search songs</span>
-          <span aria-hidden="true">⌕</span>
-          <input
-            type="search"
-            placeholder="Search song titles"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            disabled={songs.length === 0}
-          />
-        </label>
-        <button className="secondary-action" type="button" disabled>
-          Filters
-        </button>
-      </section>
+      <CatalogControls
+        songs={songs}
+        query={query}
+        filters={filters}
+        sort={sort}
+        onQueryChange={setQuery}
+        onFiltersChange={setFilters}
+        onSortChange={setSort}
+      />
 
       {error && <p className="catalog-message error-message" role="alert">{error}</p>}
       {syncedAt && <p className="sync-note">Available offline · updated {new Date(syncedAt).toLocaleString()}</p>}
@@ -197,7 +191,7 @@ function SongsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
                   {song.titleNative && <span lang="und">{song.titleNative}</span>}
                 </span>
                 <span className="song-meta">
-                  {song.languageIds.join(" · ")}
+                  {song.languages.map((language) => language.displayName).join(" · ")}
                   <span aria-label={`${song.lyricCount} lyric texts, ${song.scanCount} scans, ${song.recordingCount} recordings`}>
                     T{song.lyricCount} · S{song.scanCount} · R{song.recordingCount}
                   </span>
@@ -210,7 +204,7 @@ function SongsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
         <section className="empty-state" aria-labelledby="empty-title">
           <div className="empty-mark" aria-hidden="true">♪</div>
           <h2 id="empty-title">{songs.length > 0 ? "No matching songs" : "Catalog is empty"}</h2>
-          <p>{songs.length > 0 ? "Try a different title." : "Run the verified local import to load songs."}</p>
+          <p>{songs.length > 0 ? "Try a different title or clear some filters." : "Run the verified local import to load songs."}</p>
         </section>
       )}
     </main>

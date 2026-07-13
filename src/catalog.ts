@@ -1,17 +1,24 @@
 import Dexie, { type EntityTable } from "dexie";
+import { createCatalogSongIndex } from "./catalog-view";
 
 export type CatalogSong = {
   id: string;
   titleLatin: string;
   titleNative: string | null;
+  status: string | null;
+  createdAt: string;
   updatedAt: string;
   languageIds: string[];
+  languages: Array<{ id: string; displayName: string }>;
+  tags: Array<{ id: string; displayName: string }>;
+  credits: Credit[];
+  notebooks: Array<{ id: string; displayName: string }>;
   lyricCount: number;
   scanCount: number;
   recordingCount: number;
 };
 
-type Credit = {
+export type Credit = {
   personId: string;
   fullName: string;
   role: string;
@@ -91,38 +98,43 @@ export async function readCachedCatalog(): Promise<{
     database.songs.orderBy("titleLatin").toArray(),
     database.metadata.get("catalog"),
   ]);
-  return { songs, syncedAt: metadata?.syncedAt ?? null };
-}
 
-export async function refreshCatalog(): Promise<{
-  songs: CatalogSong[];
-  syncedAt: string;
-}> {
-  const response = await fetch("/api/catalog", {
-    headers: { Accept: "application/json" },
+  if (songs.every(hasExpandedCatalogFields)) {
+    return { songs: songs.map(normalizeStoredCatalogSong), syncedAt: metadata?.syncedAt ?? null };
+  }
+
+  const songDetails = await database.songDetails.toArray();
+  const detailsById = new Map(songDetails.map((song) => [song.id, song]));
+  const expandedSongs = songs.map((song) => {
+    const detail = detailsById.get(song.id);
+    return detail ? createCatalogSongIndex(detail) : normalizeStoredCatalogSong(song);
   });
-  if (!response.ok) throw new Error(`Catalog request failed (${response.status})`);
-
-  const payload = await response.json() as { songs: CatalogSong[] };
-  const syncedAt = new Date().toISOString();
-  await database.transaction("rw", database.songs, database.metadata, async () => {
-    await database.songs.clear();
-    await database.songs.bulkPut(payload.songs);
-    await database.metadata.put({ key: "catalog", syncedAt });
-  });
-  return { songs: payload.songs, syncedAt };
-}
-
-function summarizeSong(song: SongDetail): CatalogSong {
+  await database.songs.bulkPut(expandedSongs).catch(() => undefined);
   return {
-    id: song.id,
-    titleLatin: song.titleLatin,
-    titleNative: song.titleNative,
-    updatedAt: song.updatedAt,
-    languageIds: song.languages.map((language) => language.id),
-    lyricCount: song.lyricTexts.length,
-    scanCount: song.scans.length,
-    recordingCount: song.recordings.length,
+    songs: expandedSongs,
+    syncedAt: metadata?.syncedAt ?? null,
+  };
+}
+
+function hasExpandedCatalogFields(song: CatalogSong): boolean {
+  const stored = song as Partial<CatalogSong>;
+  return typeof stored.createdAt === "string"
+    && Array.isArray(stored.languages)
+    && Array.isArray(stored.tags)
+    && Array.isArray(stored.credits)
+    && Array.isArray(stored.notebooks);
+}
+
+function normalizeStoredCatalogSong(song: CatalogSong): CatalogSong {
+  const stored = song as Partial<CatalogSong>;
+  return {
+    ...song,
+    status: stored.status ?? null,
+    createdAt: stored.createdAt ?? song.updatedAt,
+    languages: stored.languages ?? song.languageIds.map((id) => ({ id, displayName: id })),
+    tags: stored.tags ?? [],
+    credits: stored.credits ?? [],
+    notebooks: stored.notebooks ?? [],
   };
 }
 
@@ -136,7 +148,7 @@ export async function refreshOfflineLibrary(): Promise<{
   if (!response.ok) throw new Error(`Offline library request failed (${response.status})`);
 
   const payload = await response.json() as { songs: SongDetail[] };
-  const songs = payload.songs.map(summarizeSong);
+  const songs = payload.songs.map(createCatalogSongIndex);
   const syncedAt = new Date().toISOString();
   await database.transaction("rw", database.songs, database.songDetails, database.metadata, async () => {
     await Promise.all([database.songs.clear(), database.songDetails.clear()]);
@@ -160,7 +172,12 @@ export async function refreshSong(songId: string): Promise<SongDetail> {
   if (!response.ok) throw new Error(`Song request failed (${response.status})`);
 
   const payload = await response.json() as { song: SongDetail };
-  await database.songDetails.put(payload.song);
+  await database.transaction("rw", database.songs, database.songDetails, async () => {
+    await Promise.all([
+      database.songs.put(createCatalogSongIndex(payload.song)),
+      database.songDetails.put(payload.song),
+    ]);
+  });
   return payload.song;
 }
 
