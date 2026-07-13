@@ -34,6 +34,7 @@ export type SongDetail = {
     id: string;
     content: string;
     origin: "user" | "legacy_import";
+    revision: number;
   }>;
   scans: Array<{
     id: string;
@@ -198,8 +199,11 @@ function apiErrorMessage(code: string): string {
     invalid_reference: "A selected Language or Tag no longer exists. Reload the form.",
     insufficient_role: "Your account cannot edit songs.",
     song_not_found: "This song is no longer available.",
+    duplicate_lyric_text: "This song already has an identical typed-lyrics block.",
+    lyric_edit_conflict: "These typed lyrics changed after you opened them. Reload and try again.",
+    lyric_not_found: "These typed lyrics are no longer available.",
   };
-  return messages[code] ?? "The song could not be saved.";
+  return messages[code] ?? "The change could not be saved.";
 }
 
 async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -249,4 +253,36 @@ export async function updateSong(
     },
   );
   return response.song;
+}
+
+export async function createLyric(
+  songId: string,
+  content: string,
+): Promise<{ id: string; revision: number }> {
+  const response = await apiJson<{ lyric: { id: string; revision: number } }>(
+    `/api/songs/${encodeURIComponent(songId)}/lyrics`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    },
+  );
+  return response.lyric;
+}
+
+export async function updateLyric(
+  songId: string,
+  lyricId: string,
+  content: string,
+  revision: number,
+): Promise<{ id: string; revision: number }> {
+  const response = await apiJson<{ lyric: { id: string; revision: number } }>(
+    `/api/songs/${encodeURIComponent(songId)}/lyrics/${encodeURIComponent(lyricId)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, revision }),
+    },
+  );
+  return response.lyric;
 }

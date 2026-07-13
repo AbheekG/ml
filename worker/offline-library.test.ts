@@ -23,6 +23,7 @@ describe("loadOfflineLibrary", () => {
             id: "lyrics-1",
             content: "Lyrics",
             origin: "user",
+            revision: 2,
           }] };
           if (query.includes("FROM recordings\n")) return { results: [{
             songId: "song-1",
@@ -51,7 +52,7 @@ describe("loadOfflineLibrary", () => {
     expect(songs).toEqual([expect.objectContaining({
       id: "song-1",
       languages: [{ id: "bn", displayName: "Bengali" }],
-      lyricTexts: [expect.objectContaining({ content: "Lyrics" })],
+      lyricTexts: [expect.objectContaining({ content: "Lyrics", revision: 2 })],
       recordings: [expect.objectContaining({
         id: "recording-1",
         hasPlaybackMedia: false,

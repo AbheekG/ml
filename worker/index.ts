@@ -3,6 +3,11 @@ import { createMiddleware } from "hono/factory";
 import { verifyWithJwks } from "hono/jwt";
 import { loadOfflineLibrary } from "./offline-library";
 import {
+  parseLyricCreate,
+  parseLyricUpdate,
+  type LyricUpdateInput,
+} from "./lyric-writes";
+import {
   parseSongCreate,
   parseSongUpdate,
   type SongWriteInput,
@@ -124,6 +129,17 @@ function songWriteError(error: unknown): { error: string; status: 400 | 409 | 50
     return { error: "invalid_reference", status: 400 };
   }
   return { error: "song_write_failed", status: 500 };
+}
+
+function lyricWriteError(error: unknown): { error: string; status: 400 | 409 | 500 } {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("lyric_texts") && message.includes("UNIQUE")) {
+    return { error: "duplicate_lyric_text", status: 409 };
+  }
+  if (message.includes("FOREIGN KEY")) {
+    return { error: "song_not_found", status: 400 };
+  }
+  return { error: "lyric_write_failed", status: 500 };
 }
 
 function languageStatementsForUpdate(
@@ -439,6 +455,132 @@ app.put("/api/songs/:songId", requireRole("editor"), async (context) => {
   }
 });
 
+app.post("/api/songs/:songId/lyrics", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseLyricCreate(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_lyric", fields: parsed.fields }, 400);
+  }
+
+  const songId = context.req.param("songId");
+  const lyricId = crypto.randomUUID();
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        INSERT INTO lyric_texts (
+          id, song_id, content, origin, sort_order, revision,
+          created_at, created_by, updated_at, updated_by
+        )
+        SELECT
+          ?, songs.id, ?, 'user',
+          COALESCE((
+            SELECT MAX(existing.sort_order) + 1
+            FROM lyric_texts AS existing
+            WHERE existing.song_id = songs.id
+          ), 0),
+          1, ?, ?, ?, ?
+        FROM songs
+        WHERE songs.id = ? AND songs.trashed_at IS NULL
+      `).bind(
+        lyricId, parsed.data.content,
+        timestamp, actor, timestamp, actor,
+        songId,
+      ),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM lyric_texts
+            WHERE id = ? AND song_id = songs.id
+          )
+      `).bind(timestamp, actor, songId, lyricId),
+    ]);
+    if (results[0].meta.changes === 0) {
+      return context.json({ error: "song_not_found" }, 404);
+    }
+    return context.json({ lyric: { id: lyricId, revision: 1 } }, 201);
+  } catch (error) {
+    const response = lyricWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
+app.put("/api/songs/:songId/lyrics/:lyricId", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseLyricUpdate(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_lyric", fields: parsed.fields }, 400);
+  }
+  const lyric: LyricUpdateInput = parsed.data;
+  const songId = context.req.param("songId");
+  const lyricId = context.req.param("lyricId");
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        UPDATE lyric_texts
+        SET content = ?,
+            revision = revision + 1,
+            updated_at = ?,
+            updated_by = ?
+        WHERE id = ?
+          AND song_id = ?
+          AND revision = ?
+          AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM songs
+            WHERE songs.id = lyric_texts.song_id AND songs.trashed_at IS NULL
+          )
+      `).bind(lyric.content, timestamp, actor, lyricId, songId, lyric.revision),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM lyric_texts
+            WHERE id = ?
+              AND song_id = songs.id
+              AND revision = ?
+              AND updated_at = ?
+              AND updated_by = ?
+          )
+      `).bind(timestamp, actor, songId, lyricId, lyric.revision + 1, timestamp, actor),
+    ]);
+    if (results[0].meta.changes === 0) {
+      const current = await context.env.DB.prepare(`
+        SELECT lyric_texts.revision
+        FROM lyric_texts
+        JOIN songs ON songs.id = lyric_texts.song_id
+        WHERE lyric_texts.id = ?
+          AND lyric_texts.song_id = ?
+          AND lyric_texts.trashed_at IS NULL
+          AND songs.trashed_at IS NULL
+      `).bind(lyricId, songId).first<{ revision: number }>();
+      if (!current) return context.json({ error: "lyric_not_found" }, 404);
+      return context.json({ error: "lyric_edit_conflict", currentRevision: current.revision }, 409);
+    }
+    return context.json({ lyric: { id: lyricId, revision: lyric.revision + 1 } });
+  } catch (error) {
+    const response = lyricWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
 app.get("/api/catalog", async (context) => {
   const result = await context.env.DB.prepare(`
     SELECT
@@ -524,7 +666,8 @@ app.get("/api/songs/:songId", async (context) => {
       SELECT
         lyric_texts.id,
         lyric_texts.content,
-        lyric_texts.origin
+        lyric_texts.origin,
+        lyric_texts.revision
       FROM lyric_texts
       WHERE lyric_texts.song_id = ? AND lyric_texts.trashed_at IS NULL
       ORDER BY lyric_texts.sort_order, lyric_texts.id
@@ -532,6 +675,7 @@ app.get("/api/songs/:songId", async (context) => {
       id: string;
       content: string;
       origin: "user" | "legacy_import";
+      revision: number;
     }>(),
     context.env.DB.prepare(`
       SELECT

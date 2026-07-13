@@ -18,6 +18,7 @@ Rules should be enforced at every relevant layer:
 - A Song must have at least one Language before it can be saved. Multiple Languages are allowed, Languages must come from the controlled Language lookup, and no primary Language is required.
 - Song Status is required and restricted to `draft` or `checked`, with `draft` selected for new Songs. It remains useful for finding unverified/incomplete Songs; revisit the workflow if more states are actually needed.
 - Tags are optional and must come from the controlled Tag lookup.
+- The initial Song form may show Tags as checkboxes while the lookup is small. When the list grows, replace them with an accessible searchable multi-select: typing filters existing Tags, selecting one adds a removable chip, and the editor can continue typing to add more. Keep Tag creation in the dedicated lookup-management workflow rather than accepting arbitrary new values in the Song form.
 - Aliases are an optional list of alternative transliterations for later search. Normalize them to title case, remove repeated whitespace, and prevent normalized duplicates within the same Song.
 - Notes are optional free-form text.
 - A Song cannot be permanently deleted while any typed lyric, scan, or recording exists, including trashed children. The user must remove those children first.

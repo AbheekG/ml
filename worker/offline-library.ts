@@ -81,7 +81,8 @@ export async function loadOfflineLibrary(database: D1Database) {
         lyric_texts.song_id AS songId,
         lyric_texts.id,
         lyric_texts.content,
-        lyric_texts.origin
+        lyric_texts.origin,
+        lyric_texts.revision
       FROM lyric_texts
       WHERE lyric_texts.trashed_at IS NULL
       ORDER BY lyric_texts.song_id, lyric_texts.sort_order, lyric_texts.id
@@ -89,6 +90,7 @@ export async function loadOfflineLibrary(database: D1Database) {
       id: string;
       content: string;
       origin: "user" | "legacy_import";
+      revision: number;
     }>(),
     database.prepare(`
       SELECT

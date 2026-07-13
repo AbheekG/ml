@@ -195,6 +195,124 @@ describe("Worker API", () => {
     await expect(response.json()).resolves.toEqual({ error: "edit_conflict", currentRevision: 7 });
   });
 
+  it("creates typed lyrics without rewriting their content", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    let batch: FakeStatement[] = [];
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => {
+        batch = statements;
+        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+    const content = "  প্রথম লাইন\r\n\r\nSecond line  ";
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/lyrics",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(201);
+    expect(batch[0].query).toContain("INSERT INTO lyric_texts");
+    expect(batch[0].query).toContain("MAX(existing.sort_order) + 1");
+    expect(batch[0].values[1]).toBe(content);
+    expect(batch[1].query).toContain("UPDATE songs");
+  });
+
+  it("rejects blank typed lyrics before issuing database writes", async () => {
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/lyrics",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: " \n\t " }),
+      },
+      localBindings(),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "invalid_lyric",
+      fields: { content: ["Typed lyrics must not be blank"] },
+    });
+  });
+
+  it("reports an optimistic typed-lyric edit conflict", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+          first: async () => query.includes("SELECT lyric_texts.revision") ? { revision: 4 } : null,
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => statements.map(() => ({
+        success: true,
+        results: [],
+        meta: { changes: 0 },
+      })),
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/lyrics/lyrics-1",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "Changed", revision: 2 }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "lyric_edit_conflict",
+      currentRevision: 4,
+    });
+  });
+
+  it("maps duplicate typed lyrics to a useful conflict", async () => {
+    const database = {
+      prepare: () => ({ bind: () => ({}) }),
+      batch: async () => {
+        throw new Error("UNIQUE constraint failed: lyric_texts.song_id, lyric_texts.content");
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/lyrics",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "Same" }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "duplicate_lyric_text" });
+  });
+
   it("reports a healthy service", async () => {
     const response = await app.request("http://local.test/api/health", undefined, localBindings());
 

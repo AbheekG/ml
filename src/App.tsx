@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import {
   ApiError,
+  createLyric,
   createSong,
   loadSession,
   loadSongEditorOptions,
@@ -9,6 +10,7 @@ import {
   readCachedSong,
   refreshOfflineLibrary,
   refreshSong,
+  updateLyric,
   updateSong,
   type AppSession,
   type CatalogSong,
@@ -287,10 +289,17 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
         <div className="detail-main">
           {song.lyricTexts.map((lyrics) => (
             <section className="detail-card lyrics-card" key={lyrics.id} aria-labelledby={`${lyrics.id}-title`}>
-              <h2 id={`${lyrics.id}-title`}>Typed lyrics</h2>
+              <div className="card-heading">
+                <h2 id={`${lyrics.id}-title`}>Typed lyrics</h2>
+                {isOnline && canEdit === true && <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(song.id)}/lyrics/${encodeURIComponent(lyrics.id)}/edit`}>Edit</Link>}
+              </div>
               <pre>{lyrics.content}</pre>
             </section>
           ))}
+
+          {isOnline && canEdit === true && (
+            <Link className="secondary-action action-link add-child-action" to={`/songs/${encodeURIComponent(song.id)}/lyrics/new`}>Add typed lyrics</Link>
+          )}
 
           {song.recordings.length > 0 && (
             <section className="detail-card" aria-labelledby="recordings-title">
@@ -332,6 +341,127 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
         </div>
         <aside><MetadataList song={song} /></aside>
       </div>
+    </main>
+  );
+}
+
+function LyricEditorPage({
+  mode,
+  isOnline,
+  canEdit,
+}: {
+  mode: "create" | "edit";
+  isOnline: boolean;
+  canEdit: boolean | null;
+}) {
+  const { songId = "", lyricId = "" } = useParams();
+  const navigate = useNavigate();
+  const [songTitle, setSongTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [revision, setRevision] = useState<number | null>(null);
+  const [isLegacyImport, setIsLegacyImport] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load(): Promise<void> {
+      if (!isOnline || canEdit !== true) {
+        setIsLoading(false);
+        return;
+      }
+      try {
+        const song = await refreshSong(songId);
+        if (cancelled) return;
+        setSongTitle(song.titleLatin);
+        if (mode === "edit") {
+          const lyric = song.lyricTexts.find((item) => item.id === lyricId);
+          if (!lyric) {
+            setError("These typed lyrics are no longer available.");
+            return;
+          }
+          setContent(lyric.content);
+          setRevision(lyric.revision);
+          setIsLegacyImport(lyric.origin === "legacy_import");
+        }
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The typed-lyrics editor could not be loaded.");
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, [canEdit, isOnline, lyricId, mode, songId]);
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!isOnline || canEdit !== true || isSaving) return;
+    setIsSaving(true);
+    setError(null);
+    setFieldErrors({});
+    try {
+      if (mode === "create") {
+        await createLyric(songId, content);
+      } else {
+        await updateLyric(songId, lyricId, content, revision ?? 0);
+      }
+      await refreshOfflineLibrary().catch(() => undefined);
+      navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
+    } catch (saveError) {
+      if (saveError instanceof ApiError) {
+        setError(saveError.message);
+        setFieldErrors(saveError.fields ?? {});
+      } else {
+        setError(saveError instanceof Error ? saveError.message : "The typed lyrics could not be saved.");
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  const songUrl = `/songs/${encodeURIComponent(songId)}`;
+  if (!isOnline) {
+    return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Cancel</Link><section className="empty-state"><h1>Editing is offline</h1><p>Reconnect to create or change typed lyrics. Saved lyrics remain available to read.</p></section></main>;
+  }
+  if (canEdit === null) return <main className="page-shell" id="main-content"><p>Checking editor access…</p></main>;
+  if (!canEdit) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Editor access required</h1></section></main>;
+  if (isLoading) return <main className="page-shell" id="main-content"><p>Loading typed lyrics…</p></main>;
+  if (mode === "edit" && revision === null) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Typed lyrics unavailable</h1><p>{error}</p></section></main>;
+
+  return (
+    <main className="page-shell editor-page" id="main-content">
+      <Link className="back-link" to={songUrl}>← Cancel</Link>
+      <header className="editor-heading">
+        <p className="eyebrow">{songTitle || "Song"}</p>
+        <h1>{mode === "create" ? "Add typed lyrics" : "Edit typed lyrics"}</h1>
+        <p className="lede">Spaces, blank lines, capitalization, and script are saved exactly as entered.</p>
+        {isLegacyImport && <p className="editor-note">This is an imported combined block. It remains marked for the later split-and-review workflow.</p>}
+      </header>
+      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <form className="song-form" onSubmit={(event) => { void submit(event); }}>
+        <section className="form-card">
+          <label className="form-field">
+            <span>Typed lyrics <strong aria-hidden="true">*</strong></span>
+            <textarea
+              className="lyrics-input"
+              required
+              rows={22}
+              maxLength={500_000}
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              autoFocus
+            />
+            {fieldErrors.content?.map((message) => <em key={message}>{message}</em>)}
+          </label>
+        </section>
+        <div className="form-actions">
+          <Link className="secondary-action action-link" to={songUrl}>Cancel</Link>
+          <button className="primary-action" type="submit" disabled={isSaving || content.trim().length === 0}>{isSaving ? "Saving…" : mode === "create" ? "Add lyrics" : "Save changes"}</button>
+        </div>
+      </form>
     </main>
   );
 }
@@ -603,6 +733,8 @@ export function App() {
         <Route path="/songs" element={<SongsPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/new" element={<SongEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/edit" element={<SongEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs/:songId/lyrics/new" element={<LyricEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs/:songId/lyrics/:lyricId/edit" element={<LyricEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId" element={<SongDetailPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/account" element={<AccountPage session={session} />} />
         <Route path="*" element={<Navigate to="/songs" replace />} />
