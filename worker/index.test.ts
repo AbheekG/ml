@@ -350,19 +350,29 @@ describe("Worker API", () => {
     await expect(response.json()).resolves.toMatchObject({ lyric: { revision: 3 } });
   });
 
-  it("lists trashed typed lyrics only for editors and normalizes parent state", async () => {
+  it("lists trashed typed lyrics and Scans only for editors", async () => {
     const database = {
-      prepare: () => ({
-        all: async () => ({ results: [{
-          id: "lyrics-1",
-          songId: "song-1",
-          songTitle: "A song",
-          content: "Text",
-          origin: "user",
-          revision: 3,
-          trashedAt: "2026-07-13T00:00:00.000Z",
-          songIsTrashed: 0,
-        }] }),
+      prepare: (query: string) => ({
+        all: async () => ({ results: query.includes("FROM lyric_texts") ? [{
+            id: "lyrics-1",
+            songId: "song-1",
+            songTitle: "A song",
+            content: "Text",
+            origin: "user",
+            revision: 3,
+            trashedAt: "2026-07-13T00:00:00.000Z",
+            songIsTrashed: 0,
+          }] : [{
+            id: "scan-1",
+            songId: "song-1",
+            songTitle: "A song",
+            filename: "page.jpg",
+            notebookName: "Book",
+            pageLabel: "3",
+            revision: 2,
+            trashedAt: "2026-07-13T00:00:00.000Z",
+            songIsTrashed: 0,
+          }] }),
       }),
     } as unknown as D1Database;
 
@@ -374,6 +384,7 @@ describe("Worker API", () => {
     expect(editorResponse.status).toBe(200);
     await expect(editorResponse.json()).resolves.toMatchObject({
       lyrics: [{ id: "lyrics-1", songIsTrashed: false }],
+      scans: [{ id: "scan-1", songIsTrashed: false }],
     });
 
     const viewerResponse = await app.request(
@@ -452,6 +463,124 @@ describe("Worker API", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: "duplicate_lyric_text" });
+  });
+
+  it("updates Scan metadata and records the parent Song update", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    let batch: FakeStatement[] = [];
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+          all: async () => ({ results: query.includes("FROM notebooks") ? [{ id: "book-1" }] : [] }),
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => {
+        batch = statements;
+        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/scans/scan-1",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notebookId: "book-1", pageLabel: " 12A ", revision: 2 }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(batch[0].query).toContain("UPDATE scans");
+    expect(batch[0].values.slice(0, 2)).toEqual(["book-1", "12A"]);
+    expect(batch[1].query).toContain("UPDATE songs");
+    await expect(response.json()).resolves.toEqual({ scan: { id: "scan-1", revision: 3 } });
+  });
+
+  it("moves a Scan and its private media object to Trash without deleting either", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    let batch: FakeStatement[] = [];
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => {
+        batch = statements;
+        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/scans/scan-1/trash",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: 2 }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(batch[0].query).toContain("UPDATE scans");
+    expect(batch[1].query).toContain("UPDATE media_objects");
+    expect(batch.every((statement) => !statement.query.includes("DELETE FROM"))).toBe(true);
+  });
+
+  it("restores a Scan and its private media object together", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    let batch: FakeStatement[] = [];
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+          first: async () => query.includes("SELECT scans.song_id AS songId")
+            ? { songId: "song-1" }
+            : null,
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => {
+        batch = statements;
+        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/trash/scans/scan-1/restore",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: 3 }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(batch[0].query).toContain("UPDATE scans");
+    expect(batch[1].query).toContain("UPDATE media_objects");
+    await expect(response.json()).resolves.toEqual({
+      scan: { id: "scan-1", songId: "song-1", revision: 4 },
+    });
   });
 
   it("reports a healthy service", async () => {

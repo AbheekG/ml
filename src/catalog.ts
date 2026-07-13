@@ -20,8 +20,10 @@ type Credit = {
 export type SongScan = {
   id: string;
   mediaId: string;
+  notebookId: string | null;
   notebookName: string | null;
   pageLabel: string | null;
+  revision: number;
   filename: string;
 };
 
@@ -193,6 +195,22 @@ export type TrashedLyric = {
   songIsTrashed: boolean;
 };
 
+export type TrashedScan = {
+  id: string;
+  songId: string;
+  songTitle: string;
+  filename: string;
+  notebookName: string | null;
+  pageLabel: string | null;
+  revision: number;
+  trashedAt: string;
+  songIsTrashed: boolean;
+};
+
+export type ScanEditorOptions = {
+  notebooks: Array<{ id: string; displayName: string }>;
+};
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -218,6 +236,13 @@ function apiErrorMessage(code: string): string {
     lyric_already_trashed: "These typed lyrics are already in Trash.",
     lyric_not_trashed: "These typed lyrics have already been restored.",
     lyric_parent_trashed: "Restore the parent Song before restoring these typed lyrics.",
+    invalid_scan_reference: "The selected Notebook is no longer available. Reload the form.",
+    scan_edit_conflict: "This Scan changed after you opened it. Reload and try again.",
+    scan_not_found: "This Scan is no longer available.",
+    scan_already_trashed: "This Scan is already in Trash.",
+    scan_not_trashed: "This Scan has already been restored.",
+    scan_parent_trashed: "Restore the parent Song before restoring this Scan.",
+    scan_media_unavailable: "The Scan file is not in the expected recovery state.",
   };
   return messages[code] ?? "The change could not be saved.";
 }
@@ -319,8 +344,8 @@ export async function trashLyric(
   return response.lyric;
 }
 
-export async function loadTrash(): Promise<{ lyrics: TrashedLyric[] }> {
-  return apiJson<{ lyrics: TrashedLyric[] }>("/api/trash");
+export async function loadTrash(): Promise<{ lyrics: TrashedLyric[]; scans: TrashedScan[] }> {
+  return apiJson<{ lyrics: TrashedLyric[]; scans: TrashedScan[] }>("/api/trash");
 }
 
 export async function restoreLyric(
@@ -335,4 +360,54 @@ export async function restoreLyric(
     body: JSON.stringify({ revision }),
   });
   return response.lyric;
+}
+
+export async function loadScanEditorOptions(): Promise<ScanEditorOptions> {
+  return apiJson<ScanEditorOptions>("/api/scan-editor/options");
+}
+
+export async function updateScan(
+  songId: string,
+  scanId: string,
+  payload: { notebookId: string | null; pageLabel: string | null; revision: number },
+): Promise<{ id: string; revision: number }> {
+  const response = await apiJson<{ scan: { id: string; revision: number } }>(
+    `/api/songs/${encodeURIComponent(songId)}/scans/${encodeURIComponent(scanId)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  return response.scan;
+}
+
+export async function trashScan(
+  songId: string,
+  scanId: string,
+  revision: number,
+): Promise<{ id: string; revision: number }> {
+  const response = await apiJson<{ scan: { id: string; revision: number } }>(
+    `/api/songs/${encodeURIComponent(songId)}/scans/${encodeURIComponent(scanId)}/trash`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision }),
+    },
+  );
+  return response.scan;
+}
+
+export async function restoreScan(
+  scanId: string,
+  revision: number,
+): Promise<{ id: string; songId: string; revision: number }> {
+  const response = await apiJson<{
+    scan: { id: string; songId: string; revision: number };
+  }>(`/api/trash/scans/${encodeURIComponent(scanId)}/restore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ revision }),
+  });
+  return response.scan;
 }

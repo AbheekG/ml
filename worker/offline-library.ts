@@ -97,8 +97,10 @@ export async function loadOfflineLibrary(database: D1Database) {
         scans.song_id AS songId,
         scans.id,
         media_objects.id AS mediaId,
+        scans.notebook_id AS notebookId,
         notebooks.display_name AS notebookName,
         scans.page_label AS pageLabel,
+        scans.revision,
         media_objects.original_filename AS filename
       FROM scans
       JOIN media_objects ON media_objects.id = scans.media_id
@@ -115,8 +117,10 @@ export async function loadOfflineLibrary(database: D1Database) {
     `).all<SongChild & {
       id: string;
       mediaId: string;
+      notebookId: string | null;
       notebookName: string | null;
       pageLabel: string | null;
+      revision: number;
       filename: string;
     }>(),
     database.prepare(`

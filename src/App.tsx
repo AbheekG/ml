@@ -6,6 +6,7 @@ import {
   createLyric,
   createSong,
   loadTrash,
+  loadScanEditorOptions,
   loadSession,
   loadSongEditorOptions,
   readCachedCatalog,
@@ -13,7 +14,10 @@ import {
   refreshOfflineLibrary,
   refreshSong,
   restoreLyric,
+  restoreScan,
+  trashScan,
   trashLyric,
+  updateScan,
   updateLyric,
   updateSong,
   type AppSession,
@@ -21,7 +25,9 @@ import {
   type SongEditorOptions,
   type SongDetail,
   type SongWritePayload,
+  type ScanEditorOptions,
   type TrashedLyric,
+  type TrashedScan,
 } from "./catalog";
 import { scanDisplayName } from "./scan-viewer";
 
@@ -343,7 +349,10 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                 {song.scans.map((scan) => (
                   <li key={scan.id}>
                     <div><strong>{scanDisplayName(scan)}</strong><span>{scan.filename}</span></div>
-                    <button className="media-action" type="button" disabled={!isOnline} title={isOnline ? "View scan" : "Scans require an internet connection"} onClick={() => setViewerScanId(scan.id)}>View</button>
+                    <div className="media-item-actions">
+                      <button className="media-action" type="button" disabled={!isOnline} title={isOnline ? "View scan" : "Scans require an internet connection"} onClick={() => setViewerScanId(scan.id)}>View</button>
+                      {isOnline && canEdit === true && <Link className="media-action" to={`/songs/${encodeURIComponent(song.id)}/scans/${encodeURIComponent(scan.id)}/edit`}>Edit</Link>}
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -515,8 +524,162 @@ function LyricEditorPage({
   );
 }
 
+function ScanEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
+  const { songId = "", scanId = "" } = useParams();
+  const navigate = useNavigate();
+  const [options, setOptions] = useState<ScanEditorOptions | null>(null);
+  const [songTitle, setSongTitle] = useState("");
+  const [filename, setFilename] = useState("");
+  const [notebookId, setNotebookId] = useState("");
+  const [pageLabel, setPageLabel] = useState("");
+  const [revision, setRevision] = useState<number | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTrashing, setIsTrashing] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load(): Promise<void> {
+      if (!isOnline || canEdit !== true) {
+        setIsLoading(false);
+        return;
+      }
+      try {
+        const [editorOptions, song] = await Promise.all([
+          loadScanEditorOptions(),
+          refreshSong(songId),
+        ]);
+        if (cancelled) return;
+        const scan = song.scans.find((item) => item.id === scanId);
+        setOptions(editorOptions);
+        setSongTitle(song.titleLatin);
+        if (!scan) {
+          setError("This Scan is no longer available.");
+          return;
+        }
+        setFilename(scan.filename);
+        setNotebookId(scan.notebookId ?? "");
+        setPageLabel(scan.pageLabel ?? "");
+        setRevision(scan.revision);
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The Scan editor could not be loaded.");
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, [canEdit, isOnline, scanId, songId]);
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!isOnline || canEdit !== true || revision === null || isSaving || isTrashing) return;
+    setIsSaving(true);
+    setError(null);
+    setFieldErrors({});
+    try {
+      await updateScan(songId, scanId, {
+        notebookId: notebookId || null,
+        pageLabel: notebookId ? pageLabel || null : null,
+        revision,
+      });
+      await refreshOfflineLibrary().catch(() => undefined);
+      navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
+    } catch (saveError) {
+      if (saveError instanceof ApiError) {
+        setError(saveError.message);
+        setFieldErrors(saveError.fields ?? {});
+      } else {
+        setError(saveError instanceof Error ? saveError.message : "The Scan could not be saved.");
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function moveToTrash(): Promise<void> {
+    if (!isOnline || canEdit !== true || revision === null || isSaving || isTrashing) return;
+    const confirmed = window.confirm(
+      "Move this Scan to Trash? Its private file will be retained and can be restored later.",
+    );
+    if (!confirmed) return;
+
+    setIsTrashing(true);
+    setError(null);
+    try {
+      await trashScan(songId, scanId, revision);
+      await refreshOfflineLibrary().catch(() => undefined);
+      navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
+    } catch (trashError) {
+      setError(trashError instanceof Error ? trashError.message : "The Scan could not be moved to Trash.");
+    } finally {
+      setIsTrashing(false);
+    }
+  }
+
+  const songUrl = `/songs/${encodeURIComponent(songId)}`;
+  if (!isOnline) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Cancel</Link><section className="empty-state"><h1>Editing is offline</h1><p>Reconnect to change or remove a Scan. Saved Song information remains available to read.</p></section></main>;
+  if (canEdit === null) return <main className="page-shell" id="main-content"><p>Checking editor access…</p></main>;
+  if (!canEdit) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Editor access required</h1></section></main>;
+  if (isLoading) return <main className="page-shell" id="main-content"><p>Loading Scan…</p></main>;
+  if (revision === null) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Scan unavailable</h1><p>{error}</p></section></main>;
+
+  return (
+    <main className="page-shell editor-page" id="main-content">
+      <Link className="back-link" to={songUrl}>← Cancel</Link>
+      <header className="editor-heading">
+        <p className="eyebrow">{songTitle || "Song"}</p>
+        <h1>Edit Scan</h1>
+        <p className="lede">Choose a Notebook and optional Page, or leave both empty for an external Scan.</p>
+      </header>
+      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <form className="song-form" onSubmit={(event) => { void submit(event); }}>
+        <section className="form-card">
+          <div className="form-file-summary">
+            <span>Private file</span>
+            <strong>{filename}</strong>
+          </div>
+          <label className="form-field">
+            <span>Notebook</span>
+            <select value={notebookId} onChange={(event) => {
+              const value = event.target.value;
+              setNotebookId(value);
+              if (!value) setPageLabel("");
+            }}>
+              <option value="">No Notebook — external Scan</option>
+              {options?.notebooks.map((notebook) => <option key={notebook.id} value={notebook.id}>{notebook.displayName}</option>)}
+            </select>
+            {fieldErrors.notebookId?.map((message) => <em key={message}>{message}</em>)}
+          </label>
+          {notebookId && (
+            <label className="form-field compact-field">
+              <span>Page</span>
+              <input maxLength={100} value={pageLabel} onChange={(event) => setPageLabel(event.target.value)} placeholder="For example: 12A or cover" />
+              {fieldErrors.pageLabel?.map((message) => <em key={message}>{message}</em>)}
+            </label>
+          )}
+        </section>
+        <div className="form-actions">
+          <Link className="secondary-action action-link" to={songUrl}>Cancel</Link>
+          <button className="primary-action" type="submit" disabled={isSaving || isTrashing}>{isSaving ? "Saving…" : "Save changes"}</button>
+        </div>
+      </form>
+      <section className="danger-zone" aria-labelledby="remove-scan-title">
+        <div>
+          <h2 id="remove-scan-title">Remove this Scan</h2>
+          <p>This moves both the Scan and its private file to recoverable Trash. Nothing is permanently deleted.</p>
+        </div>
+        <button className="danger-action" type="button" disabled={isSaving || isTrashing} onClick={() => { void moveToTrash(); }}>{isTrashing ? "Moving…" : "Move to Trash"}</button>
+      </section>
+    </main>
+  );
+}
+
 function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
   const [lyrics, setLyrics] = useState<TrashedLyric[]>([]);
+  const [scans, setScans] = useState<TrashedScan[]>([]);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -532,6 +695,7 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
         const result = await loadTrash();
         if (!cancelled) {
           setLyrics(result.lyrics);
+          setScans(result.scans);
           setError(null);
         }
       } catch (loadError) {
@@ -559,6 +723,21 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
     }
   }
 
+  async function restoreTrashedScan(scan: TrashedScan): Promise<void> {
+    if (!isOnline || canEdit !== true || restoringId !== null || scan.songIsTrashed) return;
+    setRestoringId(scan.id);
+    setError(null);
+    try {
+      await restoreScan(scan.id, scan.revision);
+      await refreshOfflineLibrary().catch(() => undefined);
+      setScans((current) => current.filter((item) => item.id !== scan.id));
+    } catch (restoreError) {
+      setError(restoreError instanceof Error ? restoreError.message : "The Scan could not be restored.");
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
   if (!isOnline) {
     return <main className="page-shell" id="main-content"><section className="empty-state"><h1>Trash is available online</h1><p>Reconnect to review or restore removed items. Your saved library remains available to read.</p></section></main>;
   }
@@ -577,30 +756,59 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
       {error && <p className="catalog-message error-message" role="alert">{error}</p>}
       {isLoading ? (
         <section className="empty-state"><p>Loading Trash…</p></section>
-      ) : lyrics.length === 0 ? (
-        <section className="empty-state"><div className="empty-mark" aria-hidden="true">✓</div><h2>Trash is empty</h2><p>Removed typed lyrics will appear here.</p></section>
+      ) : lyrics.length === 0 && scans.length === 0 ? (
+        <section className="empty-state"><div className="empty-mark" aria-hidden="true">✓</div><h2>Trash is empty</h2><p>Removed typed lyrics and Scans will appear here.</p></section>
       ) : (
-        <ol className="trash-list" aria-label="Trashed typed lyrics">
-          {lyrics.map((lyric) => (
-            <li className="detail-card trash-item" key={lyric.id}>
-              <div className="trash-item-heading">
-                <div>
-                  <span>Typed lyrics</span>
-                  {lyric.songIsTrashed
-                    ? <strong>{lyric.songTitle}</strong>
-                    : <Link to={`/songs/${encodeURIComponent(lyric.songId)}`}>{lyric.songTitle}</Link>}
-                  <small>Moved {new Date(lyric.trashedAt).toLocaleString()}</small>
-                </div>
-                <button className="primary-action" type="button" disabled={restoringId !== null || lyric.songIsTrashed} onClick={() => { void restore(lyric); }}>{restoringId === lyric.id ? "Restoring…" : "Restore"}</button>
-              </div>
-              {lyric.songIsTrashed && <p className="media-note">Restore the parent Song before restoring this block.</p>}
-              <details className="trash-preview">
-                <summary>View content</summary>
-                <pre>{lyric.content}</pre>
-              </details>
-            </li>
-          ))}
-        </ol>
+        <div className="trash-sections">
+          {scans.length > 0 && (
+            <section className="trash-section" aria-labelledby="trashed-scans-title">
+              <h2 id="trashed-scans-title">Scans <span>{scans.length}</span></h2>
+              <ol className="trash-list" aria-label="Trashed Scans">
+                {scans.map((scan) => (
+                  <li className="detail-card trash-item" key={scan.id}>
+                    <div className="trash-item-heading">
+                      <div>
+                        <span>Scan · {[scan.notebookName, scan.pageLabel].filter(Boolean).join(" · ") || "External"}</span>
+                        {scan.songIsTrashed
+                          ? <strong>{scan.songTitle}</strong>
+                          : <Link to={`/songs/${encodeURIComponent(scan.songId)}`}>{scan.songTitle}</Link>}
+                        <small>{scan.filename} · moved {new Date(scan.trashedAt).toLocaleString()}</small>
+                      </div>
+                      <button className="primary-action" type="button" disabled={restoringId !== null || scan.songIsTrashed} onClick={() => { void restoreTrashedScan(scan); }}>{restoringId === scan.id ? "Restoring…" : "Restore"}</button>
+                    </div>
+                    {scan.songIsTrashed && <p className="media-note">Restore the parent Song before restoring this Scan.</p>}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+          {lyrics.length > 0 && (
+            <section className="trash-section" aria-labelledby="trashed-lyrics-title">
+              <h2 id="trashed-lyrics-title">Typed lyrics <span>{lyrics.length}</span></h2>
+              <ol className="trash-list" aria-label="Trashed typed lyrics">
+                {lyrics.map((lyric) => (
+                  <li className="detail-card trash-item" key={lyric.id}>
+                    <div className="trash-item-heading">
+                      <div>
+                        <span>Typed lyrics</span>
+                        {lyric.songIsTrashed
+                          ? <strong>{lyric.songTitle}</strong>
+                          : <Link to={`/songs/${encodeURIComponent(lyric.songId)}`}>{lyric.songTitle}</Link>}
+                        <small>Moved {new Date(lyric.trashedAt).toLocaleString()}</small>
+                      </div>
+                      <button className="primary-action" type="button" disabled={restoringId !== null || lyric.songIsTrashed} onClick={() => { void restore(lyric); }}>{restoringId === lyric.id ? "Restoring…" : "Restore"}</button>
+                    </div>
+                    {lyric.songIsTrashed && <p className="media-note">Restore the parent Song before restoring this block.</p>}
+                    <details className="trash-preview">
+                      <summary>View content</summary>
+                      <pre>{lyric.content}</pre>
+                    </details>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+        </div>
       )}
     </main>
   );
@@ -875,6 +1083,7 @@ export function App() {
         <Route path="/songs/:songId/edit" element={<SongEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/lyrics/new" element={<LyricEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/lyrics/:lyricId/edit" element={<LyricEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs/:songId/scans/:scanId/edit" element={<ScanEditorPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId" element={<SongDetailPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/trash" element={<TrashPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/account" element={<AccountPage session={session} />} />

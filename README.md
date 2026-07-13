@@ -30,36 +30,32 @@ Do not commit song titles, lyrics, names, email addresses, media, credentials, g
 
 ## Current status
 
-The first local read-only vertical slice is operational:
+The private staging application is operational:
 
 - the normalized D1 schema and guarded relationships are implemented;
 - the AppSheet importer validates and loads all 454 songs plus related lyrics and media metadata into local D1;
 - the responsive catalog reads real local data and searches Latin/native titles;
 - song detail displays metadata, typed lyrics, scan records, and recording records;
 - the complete catalog, metadata, and typed lyrics are atomically cached in IndexedDB, while the production app shell and hashed assets are precached by a service worker;
+- private scans open in an in-app zoom/pan viewer and recordings stream with seeking;
 - type checks, importer/schema/API tests, production builds, and local end-to-end API smoke tests pass.
-
-The first online-editing foundation is deployed to staging:
 
 - a reconciled forward migration enforces normalized active Song titles, statuses, controlled lookup keys, simplified typed lyrics, Recording descriptions, and Trash safety;
 - all imported row and media-reference counts remain unchanged, with legacy Scan/Recording metadata retained privately;
 - authenticated identities must map to an active `app_users` record, with reusable viewer/editor/admin authorization guards;
-- the authenticated session exposes the current viewer/editor/admin role without exposing the identity.
-
-The first Song-writing slice is implemented and validated locally, but is not yet applied to staging:
-
+- the authenticated session exposes the current viewer/editor/admin role without exposing the identity;
 - editors/admins can create and update Song titles, status, Languages, Tags, Aliases, and Notes only while online;
 - the API normalizes title case, validates controlled references, records actor/timestamps, and updates all Song relationships atomically;
 - revisions and per-request mutation identifiers reject stale concurrent edits without allowing their related Language/Tag/Alias changes to leak through;
-- typed-lyric, credit, Trash/restore, lookup-management, and media writes remain later incremental slices.
+- editors/admins can create, edit, move to Trash, and restore typed-lyric blocks;
+- editors/admins can edit Scan Notebook/Page metadata and move existing Scans and their private media to recoverable Trash or restore them;
+- Scan upload/replace, Recording writes, credit editing, and lookup management remain later incremental slices.
 
 The private staging catalog is loaded into an APAC-primary D1 database for the application's users in India. All 1,325 workbook-linked media files are stored in private APAC R2 and delivered only through the authenticated API. Two unassigned legacy recordings and two unlinked scans remain local for later identification.
 
-Schema-only staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
+Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
 
 Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker also validates Access JWT signatures, issuer, and audience on every API request. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.
-
-Cloud resources will be created from documented configuration only after local validation.
 
 ## Local development
 

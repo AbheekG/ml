@@ -10,8 +10,8 @@ import {
 } from "./scan-viewer";
 
 const scans = [
-  { id: "one", mediaId: "m1", notebookName: "Book", pageLabel: "1", filename: "1.jpg" },
-  { id: "two", mediaId: "m2", notebookName: null, pageLabel: null, filename: "2.jpg" },
+  { id: "one", mediaId: "m1", notebookId: "book", notebookName: "Book", pageLabel: "1", revision: 1, filename: "1.jpg" },
+  { id: "two", mediaId: "m2", notebookId: null, notebookName: null, pageLabel: null, revision: 1, filename: "2.jpg" },
 ];
 
 describe("scan viewer helpers", () => {

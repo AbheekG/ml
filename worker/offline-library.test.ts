@@ -25,6 +25,16 @@ describe("loadOfflineLibrary", () => {
             origin: "user",
             revision: 2,
           }] };
+          if (query.includes("FROM scans")) return { results: [{
+            songId: "song-1",
+            id: "scan-1",
+            mediaId: "scan-media-1",
+            notebookId: "notebook-1",
+            notebookName: "Blue notebook",
+            pageLabel: "Page 12",
+            revision: 3,
+            filename: "page.jpg",
+          }] };
           if (query.includes("FROM recordings\n")) return { results: [{
             songId: "song-1",
             id: "recording-1",
@@ -53,6 +63,12 @@ describe("loadOfflineLibrary", () => {
       id: "song-1",
       languages: [{ id: "bn", displayName: "Bengali" }],
       lyricTexts: [expect.objectContaining({ content: "Lyrics", revision: 2 })],
+      scans: [expect.objectContaining({
+        id: "scan-1",
+        notebookId: "notebook-1",
+        pageLabel: "Page 12",
+        revision: 3,
+      })],
       recordings: [expect.objectContaining({
         id: "recording-1",
         hasPlaybackMedia: false,

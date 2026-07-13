@@ -9,6 +9,11 @@ import {
   type LyricUpdateInput,
 } from "./lyric-writes";
 import {
+  parseScanRevision,
+  parseScanUpdate,
+  type ScanUpdateInput,
+} from "./scan-writes";
+import {
   parseSongCreate,
   parseSongUpdate,
   type SongWriteInput,
@@ -113,7 +118,14 @@ type LyricStateRow = {
   songTrashedAt: string | null;
 };
 
-type LookupTable = "languages" | "tags";
+type ScanStateRow = {
+  revision: number;
+  trashedAt: string | null;
+  songTrashedAt: string | null;
+  mediaState: "active" | "trashed";
+};
+
+type LookupTable = "languages" | "tags" | "notebooks";
 
 async function lookupIdsExist(database: D1Database, table: LookupTable, ids: string[]): Promise<boolean> {
   if (ids.length === 0) return true;
@@ -149,6 +161,14 @@ function lyricWriteError(error: unknown): { error: string; status: 400 | 409 | 5
   return { error: "lyric_write_failed", status: 500 };
 }
 
+function scanWriteError(error: unknown): { error: string; status: 400 | 500 } {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("FOREIGN KEY") || message.includes("CHECK constraint")) {
+    return { error: "invalid_scan_reference", status: 400 };
+  }
+  return { error: "scan_write_failed", status: 500 };
+}
+
 async function loadLyricState(
   database: D1Database,
   songId: string,
@@ -163,6 +183,24 @@ async function loadLyricState(
     JOIN songs ON songs.id = lyric_texts.song_id
     WHERE lyric_texts.id = ? AND lyric_texts.song_id = ?
   `).bind(lyricId, songId).first<LyricStateRow>();
+}
+
+async function loadScanState(
+  database: D1Database,
+  songId: string,
+  scanId: string,
+): Promise<ScanStateRow | null> {
+  return database.prepare(`
+    SELECT
+      scans.revision,
+      scans.trashed_at AS trashedAt,
+      songs.trashed_at AS songTrashedAt,
+      media_objects.state AS mediaState
+    FROM scans
+    JOIN songs ON songs.id = scans.song_id
+    JOIN media_objects ON media_objects.id = scans.media_id
+    WHERE scans.id = ? AND scans.song_id = ?
+  `).bind(scanId, songId).first<ScanStateRow>();
 }
 
 function languageStatementsForUpdate(
@@ -355,6 +393,15 @@ app.get("/api/song-editor/options", requireRole("editor"), async (context) => {
     tags: tags.results,
     statuses: ["draft", "checked"],
   });
+});
+
+app.get("/api/scan-editor/options", requireRole("editor"), async (context) => {
+  const notebooks = await context.env.DB.prepare(`
+    SELECT id, display_name AS displayName
+    FROM notebooks
+    ORDER BY sort_order, display_name COLLATE NOCASE
+  `).all<{ id: string; displayName: string }>();
+  return context.json({ notebooks: notebooks.results });
 });
 
 app.post("/api/songs", requireRole("editor"), async (context) => {
@@ -604,6 +651,75 @@ app.put("/api/songs/:songId/lyrics/:lyricId", requireRole("editor"), async (cont
   }
 });
 
+app.put("/api/songs/:songId/scans/:scanId", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseScanUpdate(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_scan", fields: parsed.fields }, 400);
+  }
+  const scan: ScanUpdateInput = parsed.data;
+  if (scan.notebookId && !await lookupIdsExist(context.env.DB, "notebooks", [scan.notebookId])) {
+    return context.json({ error: "invalid_scan_reference" }, 400);
+  }
+
+  const songId = context.req.param("songId");
+  const scanId = context.req.param("scanId");
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        UPDATE scans
+        SET notebook_id = ?,
+            page_label = ?,
+            revision = revision + 1,
+            updated_at = ?,
+            updated_by = ?
+        WHERE id = ?
+          AND song_id = ?
+          AND revision = ?
+          AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM songs
+            WHERE songs.id = scans.song_id AND songs.trashed_at IS NULL
+          )
+      `).bind(
+        scan.notebookId, scan.pageLabel, timestamp, actor,
+        scanId, songId, scan.revision,
+      ),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM scans
+            WHERE id = ?
+              AND song_id = songs.id
+              AND revision = ?
+              AND updated_at = ?
+              AND updated_by = ?
+          )
+      `).bind(timestamp, actor, songId, scanId, scan.revision + 1, timestamp, actor),
+    ]);
+    if (results[0].meta.changes === 0) {
+      const current = await loadScanState(context.env.DB, songId, scanId);
+      if (!current || current.trashedAt !== null || current.songTrashedAt !== null) {
+        return context.json({ error: "scan_not_found" }, 404);
+      }
+      return context.json({ error: "scan_edit_conflict", currentRevision: current.revision }, 409);
+    }
+    return context.json({ scan: { id: scanId, revision: scan.revision + 1 } });
+  } catch (error) {
+    const response = scanWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
 app.post("/api/songs/:songId/lyrics/:lyricId/trash", requireRole("editor"), async (context) => {
   let body: unknown;
   try {
@@ -669,35 +785,156 @@ app.post("/api/songs/:songId/lyrics/:lyricId/trash", requireRole("editor"), asyn
   }
 });
 
+app.post("/api/songs/:songId/scans/:scanId/trash", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseScanRevision(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_scan", fields: parsed.fields }, 400);
+  }
+  const songId = context.req.param("songId");
+  const scanId = context.req.param("scanId");
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        UPDATE scans
+        SET trashed_at = ?,
+            trashed_by = ?,
+            revision = revision + 1,
+            updated_at = ?,
+            updated_by = ?
+        WHERE id = ?
+          AND song_id = ?
+          AND revision = ?
+          AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM songs
+            WHERE songs.id = scans.song_id AND songs.trashed_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM media_objects
+            WHERE media_objects.id = scans.media_id
+              AND media_objects.kind = 'scan'
+              AND media_objects.state = 'active'
+          )
+      `).bind(timestamp, actor, timestamp, actor, scanId, songId, parsed.data.revision),
+      context.env.DB.prepare(`
+        UPDATE media_objects
+        SET state = 'trashed', trashed_at = ?, trashed_by = ?
+        WHERE kind = 'scan' AND state = 'active'
+          AND id = (
+            SELECT media_id FROM scans
+            WHERE id = ?
+              AND song_id = ?
+              AND revision = ?
+              AND trashed_at = ?
+              AND trashed_by = ?
+          )
+      `).bind(timestamp, actor, scanId, songId, parsed.data.revision + 1, timestamp, actor),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM scans
+            WHERE id = ?
+              AND song_id = songs.id
+              AND revision = ?
+              AND trashed_at = ?
+              AND trashed_by = ?
+          )
+      `).bind(timestamp, actor, songId, scanId, parsed.data.revision + 1, timestamp, actor),
+    ]);
+    if (results[0].meta.changes === 0) {
+      const current = await loadScanState(context.env.DB, songId, scanId);
+      if (!current || current.songTrashedAt !== null) {
+        return context.json({ error: "scan_not_found" }, 404);
+      }
+      if (current.trashedAt !== null) {
+        return context.json({ error: "scan_already_trashed", currentRevision: current.revision }, 409);
+      }
+      if (current.mediaState !== "active") {
+        return context.json({ error: "scan_media_unavailable" }, 409);
+      }
+      return context.json({ error: "scan_edit_conflict", currentRevision: current.revision }, 409);
+    }
+    return context.json({ scan: { id: scanId, revision: parsed.data.revision + 1 } });
+  } catch (error) {
+    const response = scanWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
 app.get("/api/trash", requireRole("editor"), async (context) => {
-  const lyrics = await context.env.DB.prepare(`
-    SELECT
-      lyric_texts.id,
-      lyric_texts.song_id AS songId,
-      songs.title_latin AS songTitle,
-      lyric_texts.content,
-      lyric_texts.origin,
-      lyric_texts.revision,
-      lyric_texts.trashed_at AS trashedAt,
-      CASE WHEN songs.trashed_at IS NULL THEN 0 ELSE 1 END AS songIsTrashed
-    FROM lyric_texts
-    JOIN songs ON songs.id = lyric_texts.song_id
-    WHERE lyric_texts.trashed_at IS NOT NULL
-    ORDER BY lyric_texts.trashed_at DESC, lyric_texts.id
-  `).all<{
-    id: string;
-    songId: string;
-    songTitle: string;
-    content: string;
-    origin: "user" | "legacy_import";
-    revision: number;
-    trashedAt: string;
-    songIsTrashed: number;
-  }>();
+  const [lyrics, scans] = await Promise.all([
+    context.env.DB.prepare(`
+      SELECT
+        lyric_texts.id,
+        lyric_texts.song_id AS songId,
+        songs.title_latin AS songTitle,
+        lyric_texts.content,
+        lyric_texts.origin,
+        lyric_texts.revision,
+        lyric_texts.trashed_at AS trashedAt,
+        CASE WHEN songs.trashed_at IS NULL THEN 0 ELSE 1 END AS songIsTrashed
+      FROM lyric_texts
+      JOIN songs ON songs.id = lyric_texts.song_id
+      WHERE lyric_texts.trashed_at IS NOT NULL
+      ORDER BY lyric_texts.trashed_at DESC, lyric_texts.id
+    `).all<{
+      id: string;
+      songId: string;
+      songTitle: string;
+      content: string;
+      origin: "user" | "legacy_import";
+      revision: number;
+      trashedAt: string;
+      songIsTrashed: number;
+    }>(),
+    context.env.DB.prepare(`
+      SELECT
+        scans.id,
+        scans.song_id AS songId,
+        songs.title_latin AS songTitle,
+        media_objects.original_filename AS filename,
+        notebooks.display_name AS notebookName,
+        scans.page_label AS pageLabel,
+        scans.revision,
+        scans.trashed_at AS trashedAt,
+        CASE WHEN songs.trashed_at IS NULL THEN 0 ELSE 1 END AS songIsTrashed
+      FROM scans
+      JOIN songs ON songs.id = scans.song_id
+      JOIN media_objects ON media_objects.id = scans.media_id
+      LEFT JOIN notebooks ON notebooks.id = scans.notebook_id
+      WHERE scans.trashed_at IS NOT NULL
+      ORDER BY scans.trashed_at DESC, scans.id
+    `).all<{
+      id: string;
+      songId: string;
+      songTitle: string;
+      filename: string;
+      notebookName: string | null;
+      pageLabel: string | null;
+      revision: number;
+      trashedAt: string;
+      songIsTrashed: number;
+    }>(),
+  ]);
   return context.json({
     lyrics: lyrics.results.map((lyric) => ({
       ...lyric,
       songIsTrashed: lyric.songIsTrashed === 1,
+    })),
+    scans: scans.results.map((scan) => ({
+      ...scan,
+      songIsTrashed: scan.songIsTrashed === 1,
     })),
   });
 });
@@ -774,6 +1011,105 @@ app.post("/api/trash/lyrics/:lyricId/restore", requireRole("editor"), async (con
     });
   } catch (error) {
     const response = lyricWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
+app.post("/api/trash/scans/:scanId/restore", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseScanRevision(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_scan", fields: parsed.fields }, 400);
+  }
+  const scanId = context.req.param("scanId");
+  const current = await context.env.DB.prepare(`
+    SELECT scans.song_id AS songId
+    FROM scans
+    JOIN songs ON songs.id = scans.song_id
+    WHERE scans.id = ?
+  `).bind(scanId).first<{ songId: string }>();
+  if (!current) return context.json({ error: "scan_not_found" }, 404);
+
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        UPDATE scans
+        SET trashed_at = NULL,
+            trashed_by = NULL,
+            revision = revision + 1,
+            updated_at = ?,
+            updated_by = ?
+        WHERE id = ?
+          AND revision = ?
+          AND trashed_at IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM songs
+            WHERE songs.id = scans.song_id AND songs.trashed_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM media_objects
+            WHERE media_objects.id = scans.media_id
+              AND media_objects.kind = 'scan'
+              AND media_objects.state = 'trashed'
+          )
+      `).bind(timestamp, actor, scanId, parsed.data.revision),
+      context.env.DB.prepare(`
+        UPDATE media_objects
+        SET state = 'active', trashed_at = NULL, trashed_by = NULL
+        WHERE kind = 'scan' AND state = 'trashed'
+          AND id = (
+            SELECT media_id FROM scans
+            WHERE id = ?
+              AND revision = ?
+              AND trashed_at IS NULL
+              AND updated_at = ?
+              AND updated_by = ?
+          )
+      `).bind(scanId, parsed.data.revision + 1, timestamp, actor),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM scans
+            WHERE id = ?
+              AND song_id = songs.id
+              AND revision = ?
+              AND trashed_at IS NULL
+              AND updated_at = ?
+              AND updated_by = ?
+          )
+      `).bind(
+        timestamp, actor, current.songId, scanId,
+        parsed.data.revision + 1, timestamp, actor,
+      ),
+    ]);
+    if (results[0].meta.changes === 0) {
+      const state = await loadScanState(context.env.DB, current.songId, scanId);
+      if (!state) return context.json({ error: "scan_not_found" }, 404);
+      if (state.songTrashedAt !== null) {
+        return context.json({ error: "scan_parent_trashed" }, 409);
+      }
+      if (state.trashedAt === null) {
+        return context.json({ error: "scan_not_trashed", currentRevision: state.revision }, 409);
+      }
+      if (state.mediaState !== "trashed") {
+        return context.json({ error: "scan_media_unavailable" }, 409);
+      }
+      return context.json({ error: "scan_edit_conflict", currentRevision: state.revision }, 409);
+    }
+    return context.json({
+      scan: { id: scanId, songId: current.songId, revision: parsed.data.revision + 1 },
+    });
+  } catch (error) {
+    const response = scanWriteError(error);
     return context.json({ error: response.error }, response.status);
   }
 });
@@ -878,8 +1214,10 @@ app.get("/api/songs/:songId", async (context) => {
       SELECT
         scans.id,
         media_objects.id AS mediaId,
+        scans.notebook_id AS notebookId,
         notebooks.display_name AS notebookName,
         scans.page_label AS pageLabel,
+        scans.revision,
         media_objects.original_filename AS filename
       FROM scans
       JOIN media_objects ON media_objects.id = scans.media_id
@@ -895,8 +1233,10 @@ app.get("/api/songs/:songId", async (context) => {
     `).bind(songId).all<{
       id: string;
       mediaId: string;
+      notebookId: string | null;
       notebookName: string | null;
       pageLabel: string | null;
+      revision: number;
       filename: string;
     }>(),
     context.env.DB.prepare(`

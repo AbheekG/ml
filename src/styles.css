@@ -504,6 +504,13 @@ button:disabled {
   gap: 0.2rem;
 }
 
+.media-list li > .media-item-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: row;
+  gap: 0.45rem;
+}
+
 .media-list li span {
   overflow: hidden;
   color: var(--muted);
@@ -635,6 +642,27 @@ button:disabled {
   tab-size: 2;
 }
 
+.form-file-summary {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  background: #fffaf1;
+}
+
+.form-file-summary span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.form-file-summary strong {
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+}
+
 .form-field textarea {
   resize: vertical;
   line-height: 1.5;
@@ -750,6 +778,28 @@ button:disabled {
   margin: 2rem 0 0;
   padding: 0;
   list-style: none;
+}
+
+.trash-sections {
+  display: grid;
+  gap: 2rem;
+  margin-top: 2rem;
+}
+
+.trash-section > h2 {
+  margin-bottom: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.35rem, 3vw, 1.8rem);
+  font-weight: 500;
+}
+
+.trash-section > h2 span {
+  color: var(--muted);
+  font-size: 0.8em;
+}
+
+.trash-section .trash-list {
+  margin-top: 0.8rem;
 }
 
 .trash-item-heading {

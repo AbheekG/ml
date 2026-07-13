@@ -193,6 +193,52 @@ describe("initial database schema", () => {
     expect(output).toBe("line one\n\nline two|3\n");
   });
 
+  it("can trash and restore a Scan and its media without changing either record", () => {
+    const output = runSql(`
+      INSERT INTO notebooks (id, display_name, normalized_name, sort_order)
+      VALUES ('notebook-1', 'Blue notebook', 'blue notebook', 1);
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'media-1', 'scans/test.jpg', 'page.jpg', 'image/jpeg', 1234, 'hash-1', 'scan',
+        '${timestamp}', 'test'
+      );
+      INSERT INTO scans (
+        id, song_id, media_id, notebook_id, page_label,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'scan-1', 'song-1', 'media-1', 'notebook-1', 'Page 12',
+        '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      UPDATE scans
+      SET trashed_at = '${timestamp}', trashed_by = 'test', revision = revision + 1
+      WHERE id = 'scan-1';
+      UPDATE media_objects
+      SET state = 'trashed', trashed_at = '${timestamp}', trashed_by = 'test'
+      WHERE id = 'media-1';
+      UPDATE scans
+      SET trashed_at = NULL, trashed_by = NULL, revision = revision + 1
+      WHERE id = 'scan-1';
+      UPDATE media_objects
+      SET state = 'active', trashed_at = NULL, trashed_by = NULL
+      WHERE id = 'media-1';
+      SELECT
+        scans.notebook_id || '|' || scans.page_label || '|' || scans.revision || '|' ||
+        media_objects.object_key || '|' || media_objects.original_filename || '|' ||
+        media_objects.byte_size || '|' || media_objects.sha256 || '|' || media_objects.state
+      FROM scans
+      JOIN media_objects ON media_objects.id = scans.media_id
+      WHERE scans.id = 'scan-1';
+    `);
+
+    expect(output).toBe("notebook-1|Page 12|3|scans/test.jpg|page.jpg|1234|hash-1|active\n");
+  });
+
   it("rejects restoring typed lyrics when identical active content now exists", () => {
     expect(() => runSql(`
       INSERT INTO songs (
