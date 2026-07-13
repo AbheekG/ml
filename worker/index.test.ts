@@ -1175,3 +1175,101 @@ describe("Worker API", () => {
     await expect(response.json()).resolves.toEqual({ error: "authentication_not_configured" });
   });
 });
+
+describe("controlled lookup API", () => {
+  it("returns all controlled lists to editors", async () => {
+    const database = {
+      prepare: (query: string) => ({
+        all: async () => ({
+          results: query.includes("FROM languages")
+            ? [{ id: "language-1", name: "Bengali" }]
+            : query.includes("FROM tags")
+              ? [{ id: "tag-1", name: "Original" }]
+              : query.includes("FROM notebooks")
+                ? [{ id: "notebook-1", name: "Blue Book" }]
+                : [{ id: "person-1", name: "A. R. Rahman" }],
+        }),
+      }),
+    } as unknown as D1Database;
+
+    const response = await app.request("http://local.test/api/lookups", undefined, localBindings(database));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      languages: [{ id: "language-1", name: "Bengali" }],
+      tags: [{ id: "tag-1", name: "Original" }],
+      notebooks: [{ id: "notebook-1", name: "Blue Book" }],
+      people: [{ id: "person-1", name: "A. R. Rahman" }],
+    });
+  });
+
+  it("normalizes whitespace before creating a list item", async () => {
+    let values: unknown[] = [];
+    const database = {
+      prepare: () => ({
+        bind: (...bound: unknown[]) => {
+          values = bound;
+          return { run: async () => ({ meta: { changes: 1 } }) };
+        },
+      }),
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/lookups/people",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "  A.  R. Rahman  " }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(201);
+    expect(values[1]).toBe("A. R. Rahman");
+    expect(values[2]).toBe("a. r. rahman");
+  });
+
+  it("maps database uniqueness protection to a useful duplicate response", async () => {
+    const database = {
+      prepare: () => ({
+        bind: () => ({ run: async () => { throw new Error("UNIQUE constraint failed: tags.normalized_name"); } }),
+      }),
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/lookups/tags",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Original" }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "duplicate_lookup_name" });
+  });
+
+  it("detects a stale rename without overwriting the current name", async () => {
+    const database = {
+      prepare: (query: string) => ({
+        bind: () => query.includes("UPDATE tags")
+          ? { run: async () => ({ meta: { changes: 0 } }) }
+          : { first: async () => ({ name: "Current name" }) },
+      }),
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/lookups/tags/tag-1",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "New name", currentName: "Old name" }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "lookup_edit_conflict", currentName: "Current name" });
+  });
+});

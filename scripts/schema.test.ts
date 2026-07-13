@@ -159,6 +159,26 @@ describe("initial database schema", () => {
     `)).toThrow(/song_requires_language/);
   });
 
+  it("blocks normalized lookup duplicates and deletion of referenced lookup items", () => {
+    expect(() => runSql(`
+      INSERT INTO tags (id, display_name, normalized_name)
+      VALUES ('tag-1', 'Original', 'original');
+      INSERT INTO tags (id, display_name, normalized_name)
+      VALUES ('tag-2', 'ORIGINAL', 'original');
+    `)).toThrow(/UNIQUE constraint failed/);
+
+    expect(() => runSql(`
+      INSERT INTO tags (id, display_name, normalized_name)
+      VALUES ('tag-1', 'Original', 'original');
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO song_tags (song_id, tag_id) VALUES ('song-1', 'tag-1');
+      DELETE FROM tags WHERE id = 'tag-1';
+    `)).toThrow(/FOREIGN KEY constraint failed/);
+  });
+
   it("allows one Person to hold both Song roles but rejects a duplicate role", () => {
     const output = runSql(`
       INSERT INTO songs (

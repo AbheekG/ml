@@ -241,6 +241,11 @@ export type RecordingEditorOptions = {
   people: Array<{ id: string; fullName: string }>;
 };
 
+export const LOOKUP_KINDS = ["languages", "tags", "notebooks", "people"] as const;
+export type LookupKind = typeof LOOKUP_KINDS[number];
+export type LookupItem = { id: string; name: string };
+export type LookupCollections = Record<LookupKind, LookupItem[]>;
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -285,6 +290,10 @@ function apiErrorMessage(code: string): string {
     recording_not_trashed: "This Recording has already been restored.",
     recording_parent_trashed: "Restore the parent Song before restoring this Recording.",
     recording_media_unavailable: "The Recording files are not in the expected recovery state.",
+    duplicate_lookup_name: "That name already exists in this list.",
+    lookup_edit_conflict: "This name changed after you opened it. Reload the list and try again.",
+    lookup_not_found: "This list item is no longer available.",
+    invalid_lookup: "Enter a valid name.",
   };
   return messages[code] ?? "The change could not be saved.";
 }
@@ -312,6 +321,36 @@ export async function loadSession(): Promise<AppSession> {
 
 export async function loadSongEditorOptions(): Promise<SongEditorOptions> {
   return apiJson<SongEditorOptions>("/api/song-editor/options");
+}
+
+export async function loadLookups(): Promise<LookupCollections> {
+  return apiJson<LookupCollections>("/api/lookups");
+}
+
+export async function createLookup(kind: LookupKind, name: string): Promise<LookupItem> {
+  const response = await apiJson<{ item: LookupItem }>(`/api/lookups/${encodeURIComponent(kind)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  return response.item;
+}
+
+export async function updateLookup(
+  kind: LookupKind,
+  id: string,
+  name: string,
+  currentName: string,
+): Promise<LookupItem> {
+  const response = await apiJson<{ item: LookupItem }>(
+    `/api/lookups/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, currentName }),
+    },
+  );
+  return response.item;
 }
 
 export async function createSong(payload: SongWritePayload): Promise<{ id: string; revision: number }> {

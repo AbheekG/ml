@@ -26,7 +26,7 @@ Rules should be enforced at every relevant layer:
 ### Controlled lookup records
 
 - Editors and administrators may manage Languages, Tags, Notebooks, and People through dedicated management screens. Song/child forms select existing values rather than accepting hidden free-form lookup values.
-- Lookup display names are required, whitespace-normalized, and title-cased where appropriate.
+- Lookup display names are required and whitespace-normalized. Preserve editor-entered capitalization because People, acronyms, and Notebook codes may have intentional casing; lookup management warns about capitalization-only duplicates instead of rewriting the display name.
 - Block exact normalized duplicates, ignoring capitalization and repeated surrounding/internal spaces. Show likely similar existing names before allowing a genuinely different value to be created.
 - Do not delete a Language, Tag, Notebook, or Person while another record references it.
 

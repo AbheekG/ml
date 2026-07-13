@@ -27,10 +27,12 @@ The product should optimize for:
 
 ## Information architecture
 
-The initial application has two top-level destinations:
+The application has these top-level destinations:
 
 1. **Songs** — the main catalog, filtering, sorting, and basic search.
-2. **Account/settings** — session, offline catalog status, last successful sync, storage/version information, and logout.
+2. **Trash** (editors only) — recovery of removed Songs and children.
+3. **Lists** (editors only) — controlled Languages, Tags, Notebooks, and People.
+4. **Account/settings** — session, offline catalog status, last successful sync, storage/version information, and logout.
 
 **Add song** is a prominent online-only editor action on the catalog, not a permanent navigation destination. “Recently viewed” can be added later as a local convenience if real use justifies it.
 
@@ -143,7 +145,7 @@ Mixed legacy formats remain preserved. Import or post-upload processing creates 
 - Song metadata is edited in one form.
 - Contributor inputs should evolve from full checkbox lists to compact repeatable rows when the People list or form grows. Each row searches/selects one controlled Person, chooses a controlled Role, and has an individual remove control; duplicate Person/Role pairs remain blocked while one Person may hold different Roles.
 - Lyric texts, scans, and recordings are added from inside a song detail, so the parent is implicit and cannot be omitted or changed accidentally.
-- Lookup administration for tags, people, languages, and notebooks can be added after the primary song workflow works.
+- Lookup administration provides searchable tabs for Tags, People, Languages, and Notebooks. Editors can add and rename items; exact normalized duplicates are blocked and likely similar names require explicit confirmation. Deletion is intentionally unavailable while references may exist.
 - Use indefinite Trash/restore in normal UI. Permanent deletion is absent from ordinary workflows and may be added later only as an exceptional administrator cleanup operation after backups and relationship checks.
 
 ## Domain model

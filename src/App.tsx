@@ -3,9 +3,11 @@ import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-rou
 import { ScanViewer } from "./ScanViewer";
 import {
   ApiError,
+  createLookup,
   createLyric,
   createSong,
   loadRecordingEditorOptions,
+  loadLookups,
   loadTrash,
   loadScanEditorOptions,
   loadSession,
@@ -25,10 +27,14 @@ import {
   updateScan,
   updateLyric,
   updateRecording,
+  updateLookup,
   updateSong,
   type AppSession,
   type CatalogSong,
   type RecordingEditorOptions,
+  type LookupCollections,
+  type LookupItem,
+  type LookupKind,
   type SongEditorOptions,
   type SongDetail,
   type SongWritePayload,
@@ -38,6 +44,7 @@ import {
   type TrashedScan,
   type TrashedSong,
 } from "./catalog";
+import { findSimilarLookupItems } from "./lookup-similarity";
 import { scanDisplayName } from "./scan-viewer";
 
 function useOnlineStatus(): boolean {
@@ -1362,6 +1369,216 @@ function AccountPage({ session }: { session: AppSession | null }) {
   );
 }
 
+const LOOKUP_LABELS: Record<LookupKind, { singular: string; plural: string }> = {
+  languages: { singular: "Language", plural: "Languages" },
+  tags: { singular: "Tag", plural: "Tags" },
+  notebooks: { singular: "Notebook", plural: "Notebooks" },
+  people: { singular: "Person", plural: "People" },
+};
+
+function sortLookupItems(items: LookupItem[]): LookupItem[] {
+  return [...items].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+}
+
+function ManageLookupsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
+  const [collections, setCollections] = useState<LookupCollections | null>(null);
+  const [activeKind, setActiveKind] = useState<LookupKind>("languages");
+  const [filter, setFilter] = useState("");
+  const [addName, setAddName] = useState("");
+  const [confirmSimilar, setConfirmSimilar] = useState(false);
+  const [editing, setEditing] = useState<{ id: string; currentName: string; name: string; confirmSimilar: boolean } | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isOnline || canEdit !== true) return () => { cancelled = true; };
+    setCollections(null);
+    loadLookups().then((loaded) => {
+      if (!cancelled) {
+        setCollections(loaded);
+        setError(null);
+      }
+    }).catch((loadError) => {
+      if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Lists could not be loaded.");
+    });
+    return () => { cancelled = true; };
+  }, [isOnline, canEdit]);
+
+  if (!isOnline) {
+    return <main className="page-shell" id="main-content"><section className="empty-state"><h1>Lists are available online</h1><p>Reconnect before adding or renaming list items.</p></section></main>;
+  }
+  if (canEdit === null) return <main className="page-shell" id="main-content"><p>Checking editor access…</p></main>;
+  if (!canEdit) return <main className="page-shell" id="main-content"><section className="empty-state"><h1>Editor access required</h1></section></main>;
+
+  const items = collections?.[activeKind] ?? [];
+  const addMatch = findSimilarLookupItems(addName, items);
+  const normalizedFilter = filter.trim().toLocaleLowerCase();
+  const visibleItems = normalizedFilter
+    ? items.filter((item) => item.name.toLocaleLowerCase().includes(normalizedFilter))
+    : items;
+
+  function replaceItem(kind: LookupKind, item: LookupItem): void {
+    setCollections((current) => current && ({
+      ...current,
+      [kind]: sortLookupItems(current[kind].filter((existing) => existing.id !== item.id).concat(item)),
+    }));
+  }
+
+  async function addItem(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    if (isSaving || !addName.trim() || addMatch.exact || (addMatch.similar.length > 0 && !confirmSimilar)) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      const item = await createLookup(activeKind, addName);
+      replaceItem(activeKind, item);
+      setAddName("");
+      setConfirmSimilar(false);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "The item could not be added.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function saveRename(): Promise<void> {
+    if (!editing || isSaving) return;
+    const renameMatch = findSimilarLookupItems(editing.name, items, editing.id);
+    if (!editing.name.trim() || renameMatch.exact || (renameMatch.similar.length > 0 && !editing.confirmSimilar)) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      const item = await updateLookup(activeKind, editing.id, editing.name, editing.currentName);
+      replaceItem(activeKind, item);
+      setEditing(null);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "The name could not be changed.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <main className="page-shell lookup-page" id="main-content">
+      <header className="catalog-heading">
+        <div>
+          <p className="eyebrow">Editor tools</p>
+          <h1>Library lists</h1>
+          <p className="lede">Manage the shared choices used by Songs, Scans, and Recordings.</p>
+        </div>
+      </header>
+
+      <div className="lookup-tabs" role="tablist" aria-label="Library lists">
+        {(Object.keys(LOOKUP_LABELS) as LookupKind[]).map((kind) => (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeKind === kind}
+            className={activeKind === kind ? "active" : ""}
+            key={kind}
+            onClick={() => {
+              setActiveKind(kind);
+              setFilter("");
+              setAddName("");
+              setConfirmSimilar(false);
+              setEditing(null);
+              setError(null);
+            }}
+          >
+            {LOOKUP_LABELS[kind].plural}
+            <span>{collections?.[kind].length ?? "–"}</span>
+          </button>
+        ))}
+      </div>
+
+      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      {!collections ? (
+        <section className="empty-state"><p>Loading library lists…</p></section>
+      ) : (
+        <div className="lookup-layout">
+          <section className="detail-card lookup-add" aria-labelledby="lookup-add-title">
+            <div>
+              <p className="eyebrow">New choice</p>
+              <h2 id="lookup-add-title">Add {LOOKUP_LABELS[activeKind].singular.toLocaleLowerCase()}</h2>
+            </div>
+            <form onSubmit={(event) => { void addItem(event); }}>
+              <label className="form-field">
+                <span>Name</span>
+                <input
+                  value={addName}
+                  maxLength={200}
+                  onChange={(event) => { setAddName(event.target.value); setConfirmSimilar(false); }}
+                  autoComplete="off"
+                />
+              </label>
+              {addMatch.exact && <p className="lookup-warning" role="alert"><strong>Already exists:</strong> {addMatch.exact.name}</p>}
+              {!addMatch.exact && addMatch.similar.length > 0 && (
+                <div className="lookup-warning">
+                  <strong>Similar existing {addMatch.similar.length === 1 ? "name" : "names"}:</strong> {addMatch.similar.map((item) => item.name).join(", ")}
+                  <label><input type="checkbox" checked={confirmSimilar} onChange={(event) => setConfirmSimilar(event.target.checked)} /> This is a different {LOOKUP_LABELS[activeKind].singular.toLocaleLowerCase()}; add it anyway</label>
+                </div>
+              )}
+              <button className="primary-action" type="submit" disabled={isSaving || !addName.trim() || Boolean(addMatch.exact) || (addMatch.similar.length > 0 && !confirmSimilar)}>{isSaving ? "Saving…" : "Add"}</button>
+            </form>
+          </section>
+
+          <section className="detail-card lookup-existing" aria-labelledby="lookup-existing-title">
+            <div className="lookup-list-heading">
+              <div>
+                <p className="eyebrow">Existing choices</p>
+                <h2 id="lookup-existing-title">{LOOKUP_LABELS[activeKind].plural}</h2>
+              </div>
+              <label className="search-field compact-search">
+                <span className="sr-only">Filter {LOOKUP_LABELS[activeKind].plural}</span>
+                <span aria-hidden="true">⌕</span>
+                <input type="search" placeholder="Filter names" value={filter} onChange={(event) => setFilter(event.target.value)} />
+              </label>
+            </div>
+            {visibleItems.length === 0 ? <p className="media-note">No matching names.</p> : (
+              <ul className="lookup-list">
+                {visibleItems.map((item) => {
+                  const isEditing = editing?.id === item.id;
+                  const renameMatch = isEditing ? findSimilarLookupItems(editing.name, items, item.id) : { exact: null, similar: [] };
+                  return (
+                    <li key={item.id}>
+                      {isEditing ? (
+                        <div className="lookup-edit-row">
+                          <label className="form-field">
+                            <span className="sr-only">Rename {item.name}</span>
+                            <input value={editing.name} maxLength={200} autoFocus onChange={(event) => setEditing({ ...editing, name: event.target.value, confirmSimilar: false })} />
+                          </label>
+                          {renameMatch.exact && <p className="lookup-warning" role="alert"><strong>Already exists:</strong> {renameMatch.exact.name}</p>}
+                          {!renameMatch.exact && renameMatch.similar.length > 0 && (
+                            <div className="lookup-warning">
+                              <strong>Similar:</strong> {renameMatch.similar.map((similar) => similar.name).join(", ")}
+                              <label><input type="checkbox" checked={editing.confirmSimilar} onChange={(event) => setEditing({ ...editing, confirmSimilar: event.target.checked })} /> This is intentionally different</label>
+                            </div>
+                          )}
+                          <div className="lookup-row-actions">
+                            <button className="secondary-action" type="button" disabled={isSaving} onClick={() => setEditing(null)}>Cancel</button>
+                            <button className="primary-action" type="button" disabled={isSaving || !editing.name.trim() || Boolean(renameMatch.exact) || (renameMatch.similar.length > 0 && !editing.confirmSimilar)} onClick={() => { void saveRename(); }}>{isSaving ? "Saving…" : "Save"}</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <span>{item.name}</span>
+                          <button className="secondary-action" type="button" disabled={isSaving} onClick={() => setEditing({ id: item.id, currentName: item.name, name: item.name, confirmSimilar: false })}>Rename</button>
+                        </>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <p className="media-note">Items cannot be deleted because Songs, Scans, or Recordings may refer to them.</p>
+          </section>
+        </div>
+      )}
+    </main>
+  );
+}
+
 export function App() {
   const isOnline = useOnlineStatus();
   const [session, setSession] = useState<AppSession | null>(null);
@@ -1411,6 +1628,7 @@ export function App() {
         <Route path="/songs/:songId/recordings/:recordingId/edit" element={<RecordingEditorPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId" element={<SongDetailPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/trash" element={<TrashPage isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/manage" element={<ManageLookupsPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/account" element={<AccountPage session={session} />} />
         <Route path="*" element={<Navigate to="/songs" replace />} />
       </Routes>
@@ -1418,6 +1636,7 @@ export function App() {
       <nav className="bottom-nav" aria-label="Primary navigation">
         <Link to="/songs">Songs</Link>
         {canEdit === true && <Link to="/trash">Trash</Link>}
+        {canEdit === true && <Link to="/manage">Lists</Link>}
         <Link to="/account">Account</Link>
       </nav>
     </div>

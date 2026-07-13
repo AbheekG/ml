@@ -3,6 +3,12 @@ import { createMiddleware } from "hono/factory";
 import { verifyWithJwks } from "hono/jwt";
 import { loadOfflineLibrary } from "./offline-library";
 import {
+  parseLookupCreate,
+  parseLookupKind,
+  parseLookupUpdate,
+  type LookupKind,
+} from "./lookup-writes";
+import {
   parseLyricCreate,
   parseLyricRevision,
   parseLyricUpdate,
@@ -152,6 +158,17 @@ type SongDependencies = {
 
 type LookupTable = "languages" | "tags" | "notebooks" | "people";
 
+const LOOKUP_CONFIG: Record<LookupKind, {
+  table: LookupTable;
+  nameColumn: "display_name" | "full_name";
+  ordered: boolean;
+}> = {
+  languages: { table: "languages", nameColumn: "display_name", ordered: true },
+  tags: { table: "tags", nameColumn: "display_name", ordered: true },
+  notebooks: { table: "notebooks", nameColumn: "display_name", ordered: true },
+  people: { table: "people", nameColumn: "full_name", ordered: false },
+};
+
 async function lookupIdsExist(database: D1Database, table: LookupTable, ids: string[]): Promise<boolean> {
   if (ids.length === 0) return true;
   const placeholders = ids.map(() => "?").join(", ");
@@ -207,6 +224,20 @@ function recordingWriteError(error: unknown): { error: string; status: 400 | 409
     return { error: "invalid_recording", status: 400 };
   }
   return { error: "recording_write_failed", status: 500 };
+}
+
+function lookupWriteError(error: unknown): { error: string; status: 400 | 409 | 500 } {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("UNIQUE constraint failed") || message.includes("normalized_name_idx")) {
+    return { error: "duplicate_lookup_name", status: 409 };
+  }
+  if (message.includes("invalid_language_name")
+    || message.includes("invalid_tag_name")
+    || message.includes("invalid_notebook_name")
+    || message.includes("CHECK constraint")) {
+    return { error: "invalid_lookup", status: 400 };
+  }
+  return { error: "lookup_write_failed", status: 500 };
 }
 
 async function loadLyricState(
@@ -527,6 +558,119 @@ app.get("/api/recording-editor/options", requireRole("editor"), async (context) 
     ORDER BY full_name COLLATE NOCASE, id
   `).all<{ id: string; fullName: string }>();
   return context.json({ people: people.results });
+});
+
+app.get("/api/lookups", requireRole("editor"), async (context) => {
+  const [languages, tags, notebooks, people] = await Promise.all([
+    context.env.DB.prepare(`
+      SELECT id, display_name AS name
+      FROM languages
+      ORDER BY sort_order, display_name COLLATE NOCASE, id
+    `).all<{ id: string; name: string }>(),
+    context.env.DB.prepare(`
+      SELECT id, display_name AS name
+      FROM tags
+      ORDER BY sort_order, display_name COLLATE NOCASE, id
+    `).all<{ id: string; name: string }>(),
+    context.env.DB.prepare(`
+      SELECT id, display_name AS name
+      FROM notebooks
+      ORDER BY sort_order, display_name COLLATE NOCASE, id
+    `).all<{ id: string; name: string }>(),
+    context.env.DB.prepare(`
+      SELECT id, full_name AS name
+      FROM people
+      ORDER BY full_name COLLATE NOCASE, id
+    `).all<{ id: string; name: string }>(),
+  ]);
+  return context.json({
+    languages: languages.results,
+    tags: tags.results,
+    notebooks: notebooks.results,
+    people: people.results,
+  });
+});
+
+app.post("/api/lookups/:kind", requireRole("editor"), async (context) => {
+  const kind = parseLookupKind(context.req.param("kind"));
+  if (!kind) return context.json({ error: "lookup_not_found" }, 404);
+
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseLookupCreate(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_lookup", fields: parsed.fields }, 400);
+  }
+
+  const config = LOOKUP_CONFIG[kind];
+  const id = crypto.randomUUID();
+  const timestamp = new Date().toISOString();
+  try {
+    if (config.ordered) {
+      await context.env.DB.prepare(`
+        INSERT INTO ${config.table} (id, ${config.nameColumn}, normalized_name, sort_order)
+        VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM ${config.table}))
+      `).bind(id, parsed.data.name, parsed.data.normalizedName).run();
+    } else {
+      await context.env.DB.prepare(`
+        INSERT INTO people (id, full_name, normalized_name, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).bind(id, parsed.data.name, parsed.data.normalizedName, timestamp, timestamp).run();
+    }
+  } catch (error) {
+    const mapped = lookupWriteError(error);
+    return context.json({ error: mapped.error }, mapped.status);
+  }
+
+  return context.json({ item: { id, name: parsed.data.name } }, 201);
+});
+
+app.put("/api/lookups/:kind/:id", requireRole("editor"), async (context) => {
+  const kind = parseLookupKind(context.req.param("kind"));
+  if (!kind) return context.json({ error: "lookup_not_found" }, 404);
+
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseLookupUpdate(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_lookup", fields: parsed.fields }, 400);
+  }
+
+  const config = LOOKUP_CONFIG[kind];
+  try {
+    const timestampUpdate = kind === "people" ? ", updated_at = ?" : "";
+    const values = kind === "people"
+      ? [parsed.data.name, parsed.data.normalizedName, new Date().toISOString(), context.req.param("id"), parsed.data.currentName]
+      : [parsed.data.name, parsed.data.normalizedName, context.req.param("id"), parsed.data.currentName];
+    const result = await context.env.DB.prepare(`
+      UPDATE ${config.table}
+      SET ${config.nameColumn} = ?, normalized_name = ?${timestampUpdate}
+      WHERE id = ? AND ${config.nameColumn} = ?
+    `).bind(...values).run();
+
+    if (result.meta.changes === 0) {
+      const current = await context.env.DB.prepare(`
+        SELECT ${config.nameColumn} AS name
+        FROM ${config.table}
+        WHERE id = ?
+      `).bind(context.req.param("id")).first<{ name: string }>();
+      if (!current) return context.json({ error: "lookup_not_found" }, 404);
+      return context.json({ error: "lookup_edit_conflict", currentName: current.name }, 409);
+    }
+  } catch (error) {
+    const mapped = lookupWriteError(error);
+    return context.json({ error: mapped.error }, mapped.status);
+  }
+
+  return context.json({ item: { id: context.req.param("id"), name: parsed.data.name } });
 });
 
 app.post("/api/songs", requireRole("editor"), async (context) => {
