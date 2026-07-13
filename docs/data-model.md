@@ -60,4 +60,5 @@ Scan ── optional Notebook
 - Other inputs receive a generated MP3 `playback_audio` derivative; conversion never replaces or deletes the original.
 - File signatures and decodability are checked from content rather than trusting filename extensions.
 - SHA-256 is recorded for upload verification and duplicate detection. Equal content does not automatically merge distinct historical records.
+- New Scan creation currently accepts verified JPEG, PNG, or WebP files up to 25 MB, stores the original privately, and rejects an existing Scan fingerprint before uploading. If D1 finalization fails after R2 storage, the uncommitted object is removed. Readability-sized image derivatives and replacement are separate later work.
 - Files present on disk but absent from the workbook are quarantined for review and are not silently uploaded or deleted.

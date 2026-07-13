@@ -5,6 +5,7 @@ import {
   ApiError,
   createLookup,
   createLyric,
+  createScan,
   createSong,
   loadRecordingEditorOptions,
   loadLookups,
@@ -31,6 +32,7 @@ import {
   updateSong,
   type AppSession,
   type CatalogSong,
+  type DuplicateScanDetails,
   type RecordingEditorOptions,
   type LookupCollections,
   type LookupItem,
@@ -45,6 +47,7 @@ import {
   type TrashedSong,
 } from "./catalog";
 import { findSimilarLookupItems } from "./lookup-similarity";
+import { shouldOfferDirectCameraCapture } from "./device-capabilities";
 import { scanDisplayName } from "./scan-viewer";
 
 function useOnlineStatus(): boolean {
@@ -380,6 +383,9 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
               </ul>
             </section>
           )}
+          {isOnline && canEdit === true && (
+            <Link className="secondary-action action-link add-child-action" to={`/songs/${encodeURIComponent(song.id)}/scans/new`}>Add Scan</Link>
+          )}
         </div>
         <aside><MetadataList song={song} /></aside>
       </div>
@@ -546,20 +552,45 @@ function LyricEditorPage({
   );
 }
 
-function ScanEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
+function ScanEditorPage({
+  mode,
+  isOnline,
+  canEdit,
+}: {
+  mode: "create" | "edit";
+  isOnline: boolean;
+  canEdit: boolean | null;
+}) {
   const { songId = "", scanId = "" } = useParams();
   const navigate = useNavigate();
   const [options, setOptions] = useState<ScanEditorOptions | null>(null);
   const [songTitle, setSongTitle] = useState("");
   const [filename, setFilename] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
+  const [offerDirectCamera] = useState(() => shouldOfferDirectCameraCapture(
+    navigator.userAgent,
+    navigator.maxTouchPoints,
+  ));
   const [notebookId, setNotebookId] = useState("");
   const [pageLabel, setPageLabel] = useState("");
   const [revision, setRevision] = useState<number | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
+  const [duplicateScan, setDuplicateScan] = useState<DuplicateScanDetails | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isTrashing, setIsTrashing] = useState(false);
+
+  useEffect(() => {
+    if (!file) {
+      setFilePreviewUrl(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(file);
+    setFilePreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file]);
 
   useEffect(() => {
     let cancelled = false;
@@ -574,17 +605,19 @@ function ScanEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
           refreshSong(songId),
         ]);
         if (cancelled) return;
-        const scan = song.scans.find((item) => item.id === scanId);
         setOptions(editorOptions);
         setSongTitle(song.titleLatin);
-        if (!scan) {
-          setError("This Scan is no longer available.");
-          return;
+        if (mode === "edit") {
+          const scan = song.scans.find((item) => item.id === scanId);
+          if (!scan) {
+            setError("This Scan is no longer available.");
+            return;
+          }
+          setFilename(scan.filename);
+          setNotebookId(scan.notebookId ?? "");
+          setPageLabel(scan.pageLabel ?? "");
+          setRevision(scan.revision);
         }
-        setFilename(scan.filename);
-        setNotebookId(scan.notebookId ?? "");
-        setPageLabel(scan.pageLabel ?? "");
-        setRevision(scan.revision);
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The Scan editor could not be loaded.");
       } finally {
@@ -593,26 +626,41 @@ function ScanEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
     }
     void load();
     return () => { cancelled = true; };
-  }, [canEdit, isOnline, scanId, songId]);
+  }, [canEdit, isOnline, mode, scanId, songId]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!isOnline || canEdit !== true || revision === null || isSaving || isTrashing) return;
+    if (!isOnline || canEdit !== true || isSaving || isTrashing) return;
+    if (mode === "edit" && revision === null) return;
+    if (mode === "create" && !file) {
+      setFieldErrors({ file: ["Choose an image file"] });
+      return;
+    }
     setIsSaving(true);
     setError(null);
+    setDuplicateScan(null);
     setFieldErrors({});
     try {
-      await updateScan(songId, scanId, {
-        notebookId: notebookId || null,
-        pageLabel: notebookId ? pageLabel || null : null,
-        revision,
-      });
+      if (mode === "create") {
+        await createScan(songId, {
+          file: file!,
+          notebookId: notebookId || null,
+          pageLabel: notebookId ? pageLabel || null : null,
+        });
+      } else {
+        await updateScan(songId, scanId, {
+          notebookId: notebookId || null,
+          pageLabel: notebookId ? pageLabel || null : null,
+          revision: revision!,
+        });
+      }
       await refreshOfflineLibrary().catch(() => undefined);
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (saveError) {
       if (saveError instanceof ApiError) {
         setError(saveError.message);
         setFieldErrors(saveError.fields ?? {});
+        setDuplicateScan(saveError.existingScan ?? null);
       } else {
         setError(saveError instanceof Error ? saveError.message : "The Scan could not be saved.");
       }
@@ -642,27 +690,98 @@ function ScanEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
   }
 
   const songUrl = `/songs/${encodeURIComponent(songId)}`;
-  if (!isOnline) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Cancel</Link><section className="empty-state"><h1>Editing is offline</h1><p>Reconnect to change or remove a Scan. Saved Song information remains available to read.</p></section></main>;
+  function chooseFile(selectedFile: File | null): void {
+    setFile(selectedFile);
+    setDuplicateScan(null);
+    setError(null);
+    setFieldErrors((current) => ({ ...current, file: [] }));
+  }
+  if (!isOnline) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Cancel</Link><section className="empty-state"><h1>Editing is offline</h1><p>Reconnect to add, change, or remove a Scan. Saved Song information remains available to read.</p></section></main>;
   if (canEdit === null) return <main className="page-shell" id="main-content"><p>Checking editor access…</p></main>;
   if (!canEdit) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Editor access required</h1></section></main>;
   if (isLoading) return <main className="page-shell" id="main-content"><p>Loading Scan…</p></main>;
-  if (revision === null) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Scan unavailable</h1><p>{error}</p></section></main>;
+  if (mode === "edit" && revision === null) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Scan unavailable</h1><p>{error}</p></section></main>;
 
   return (
     <main className="page-shell editor-page" id="main-content">
       <Link className="back-link" to={songUrl}>← Cancel</Link>
       <header className="editor-heading">
         <p className="eyebrow">{songTitle || "Song"}</p>
-        <h1>Edit Scan</h1>
-        <p className="lede">Choose a Notebook and optional Page, or leave both empty for an external Scan.</p>
+        <h1>{mode === "create" ? "Add Scan" : "Edit Scan"}</h1>
+        <p className="lede">{mode === "create" ? "Upload a private image, then optionally identify its Notebook and Page." : "Choose a Notebook and optional Page, or leave both empty for an external Scan."}</p>
       </header>
       {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      {duplicateScan && (
+        <section className="duplicate-scan-notice" aria-labelledby="duplicate-scan-title">
+          <div>
+            <strong id="duplicate-scan-title">Existing Scan details</strong>
+            <span>Song: {duplicateScan.songTitle}</span>
+            <span>File: {duplicateScan.filename}</span>
+            {duplicateScan.notebookName ? <span>Notebook: {duplicateScan.notebookName}</span> : <span>Type: External Scan</span>}
+            {duplicateScan.pageLabel && <span>Page: {duplicateScan.pageLabel}</span>}
+            {duplicateScan.isTrashed && <span>This Scan or its Song is currently in Trash.</span>}
+          </div>
+          <Link className="secondary-action action-link" to={duplicateScan.isTrashed ? "/trash" : `/songs/${encodeURIComponent(duplicateScan.songId)}`}>{duplicateScan.isTrashed ? "Open Trash" : "Open Song"}</Link>
+        </section>
+      )}
       <form className="song-form" onSubmit={(event) => { void submit(event); }}>
         <section className="form-card">
-          <div className="form-file-summary">
-            <span>Private file</span>
-            <strong>{filename}</strong>
-          </div>
+          {mode === "create" ? (
+            <div className="form-field">
+              <span>Scan image <strong aria-hidden="true">*</strong></span>
+              {file ? (
+                <div className="selected-scan-file">
+                  {filePreviewUrl && <img src={filePreviewUrl} alt={`Preview of ${file.name}`} />}
+                  <div>
+                    <strong>{file.name}</strong>
+                    <span>{(file.size / (1024 * 1024)).toFixed(1)} MB</span>
+                    <button className="secondary-action" type="button" disabled={isSaving} onClick={() => chooseFile(null)}>Remove and choose again</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="scan-source-options">
+                  <label>
+                    <strong>Choose image</strong>
+                    <span>Open your photo library or files</span>
+                    <span className="scan-source-action">Browse images</span>
+                    <input
+                      className="scan-source-input"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                      onChange={(event) => {
+                        chooseFile(event.target.files?.[0] ?? null);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                  {offerDirectCamera && (
+                    <label>
+                      <strong>Take photo</strong>
+                      <span>Open the camera; rear camera preferred</span>
+                      <span className="scan-source-action">Open camera</span>
+                      <input
+                        className="scan-source-input"
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={(event) => {
+                          chooseFile(event.target.files?.[0] ?? null);
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+              )}
+              <small>JPEG, PNG, or WebP · maximum 25 MB. The actual file content is checked before it is stored.</small>
+              {fieldErrors.file?.map((message) => <em key={message}>{message}</em>)}
+            </div>
+          ) : (
+            <div className="form-file-summary">
+              <span>Private file</span>
+              <strong>{filename}</strong>
+            </div>
+          )}
           <label className="form-field">
             <span>Notebook</span>
             <select value={notebookId} onChange={(event) => {
@@ -685,16 +804,16 @@ function ScanEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
         </section>
         <div className="form-actions">
           <Link className="secondary-action action-link" to={songUrl}>Cancel</Link>
-          <button className="primary-action" type="submit" disabled={isSaving || isTrashing}>{isSaving ? "Saving…" : "Save changes"}</button>
+          <button className="primary-action" type="submit" disabled={isSaving || isTrashing || (mode === "create" && !file)}>{isSaving ? mode === "create" ? "Uploading…" : "Saving…" : mode === "create" ? "Add Scan" : "Save changes"}</button>
         </div>
       </form>
-      <section className="danger-zone" aria-labelledby="remove-scan-title">
+      {mode === "edit" && <section className="danger-zone" aria-labelledby="remove-scan-title">
         <div>
           <h2 id="remove-scan-title">Remove this Scan</h2>
           <p>This moves both the Scan and its private file to recoverable Trash. Nothing is permanently deleted.</p>
         </div>
         <button className="danger-action" type="button" disabled={isSaving || isTrashing} onClick={() => { void moveToTrash(); }}>{isTrashing ? "Moving…" : "Move to Trash"}</button>
-      </section>
+      </section>}
     </main>
   );
 }
@@ -1624,7 +1743,8 @@ export function App() {
         <Route path="/songs/:songId/edit" element={<SongEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/lyrics/new" element={<LyricEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/lyrics/:lyricId/edit" element={<LyricEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
-        <Route path="/songs/:songId/scans/:scanId/edit" element={<ScanEditorPage isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs/:songId/scans/new" element={<ScanEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs/:songId/scans/:scanId/edit" element={<ScanEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/recordings/:recordingId/edit" element={<RecordingEditorPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId" element={<SongDetailPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/trash" element={<TrashPage isOnline={isOnline} canEdit={canEdit} />} />

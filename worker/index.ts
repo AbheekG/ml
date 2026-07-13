@@ -15,6 +15,13 @@ import {
   type LyricUpdateInput,
 } from "./lyric-writes";
 import {
+  MAX_SCAN_UPLOAD_BYTES,
+  inspectScanImage,
+  safeUploadFilename,
+  sha256Hex,
+} from "./media-upload";
+import {
+  parseScanCreate,
   parseScanRevision,
   parseScanUpdate,
   type ScanUpdateInput,
@@ -956,6 +963,167 @@ app.post("/api/songs/:songId/lyrics", requireRole("editor"), async (context) => 
     const response = lyricWriteError(error);
     return context.json({ error: response.error }, response.status);
   }
+});
+
+app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
+  let form: FormData;
+  try {
+    form = await context.req.formData();
+  } catch {
+    return context.json({ error: "invalid_scan_upload" }, 400);
+  }
+
+  const fileValue = form.get("file");
+  if (!(fileValue instanceof File)) {
+    return context.json({ error: "scan_file_required", fields: { file: ["Choose an image file"] } }, 400);
+  }
+  if (fileValue.size === 0) {
+    return context.json({ error: "empty_scan_file", fields: { file: ["The selected file is empty"] } }, 400);
+  }
+  if (fileValue.size > MAX_SCAN_UPLOAD_BYTES) {
+    return context.json({ error: "scan_file_too_large", fields: { file: ["The maximum Scan size is 25 MB"] } }, 413);
+  }
+
+  const parsed = parseScanCreate({
+    notebookId: typeof form.get("notebookId") === "string" ? form.get("notebookId") : null,
+    pageLabel: typeof form.get("pageLabel") === "string" ? form.get("pageLabel") : null,
+  });
+  if (!parsed.success) {
+    return context.json({ error: "invalid_scan", fields: parsed.fields }, 400);
+  }
+  if (parsed.data.notebookId
+    && !await lookupIdsExist(context.env.DB, "notebooks", [parsed.data.notebookId])) {
+    return context.json({ error: "invalid_scan_reference" }, 400);
+  }
+
+  const songId = context.req.param("songId");
+  const activeSong = await context.env.DB.prepare(`
+    SELECT id FROM songs WHERE id = ? AND trashed_at IS NULL
+  `).bind(songId).first<{ id: string }>();
+  if (!activeSong) return context.json({ error: "song_not_found" }, 404);
+
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await fileValue.arrayBuffer());
+  } catch {
+    return context.json({ error: "scan_file_unreadable" }, 400);
+  }
+  const imageType = inspectScanImage(bytes);
+  if (!imageType) {
+    return context.json({
+      error: "unsupported_scan_file",
+      fields: { file: ["Use a JPEG, PNG, or WebP image with a recognized file signature"] },
+    }, 415);
+  }
+
+  const fingerprint = await sha256Hex(bytes);
+  const duplicate = await context.env.DB.prepare(`
+    SELECT
+      scans.id AS scanId,
+      scans.song_id AS songId,
+      songs.title_latin AS songTitle,
+      media_objects.original_filename AS filename,
+      notebooks.display_name AS notebookName,
+      scans.page_label AS pageLabel,
+      CASE WHEN scans.trashed_at IS NULL THEN 0 ELSE 1 END AS scanIsTrashed,
+      CASE WHEN songs.trashed_at IS NULL THEN 0 ELSE 1 END AS songIsTrashed
+    FROM media_objects
+    JOIN scans ON scans.media_id = media_objects.id
+    JOIN songs ON songs.id = scans.song_id
+    LEFT JOIN notebooks ON notebooks.id = scans.notebook_id
+    WHERE media_objects.kind = 'scan' AND media_objects.sha256 = ?
+    LIMIT 1
+  `).bind(fingerprint).first<{
+    scanId: string;
+    songId: string;
+    songTitle: string;
+    filename: string;
+    notebookName: string | null;
+    pageLabel: string | null;
+    scanIsTrashed: number;
+    songIsTrashed: number;
+  }>();
+  if (duplicate) {
+    return context.json({
+      error: "duplicate_scan_file",
+      existing: {
+        scanId: duplicate.scanId,
+        songId: duplicate.songId,
+        songTitle: duplicate.songTitle,
+        filename: duplicate.filename,
+        notebookName: duplicate.notebookName,
+        pageLabel: duplicate.pageLabel,
+        isTrashed: Boolean(duplicate.scanIsTrashed || duplicate.songIsTrashed),
+      },
+    }, 409);
+  }
+
+  const scanId = crypto.randomUUID();
+  const mediaId = crypto.randomUUID();
+  const objectKey = `scans/${mediaId}.${imageType.extension}`;
+  const filename = safeUploadFilename(fileValue.name, imageType.extension);
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+
+  try {
+    await context.env.MEDIA.put(objectKey, bytes, {
+      httpMetadata: {
+        contentType: imageType.mimeType,
+        contentDisposition: "inline",
+      },
+    });
+  } catch {
+    return context.json({ error: "scan_storage_failed" }, 503);
+  }
+
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        INSERT INTO media_objects (
+          id, object_key, original_filename, mime_type, byte_size, sha256,
+          kind, state, created_at, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, 'scan', 'active', ?, ?)
+      `).bind(
+        mediaId, objectKey, filename, imageType.mimeType, bytes.byteLength, fingerprint,
+        timestamp, actor,
+      ),
+      context.env.DB.prepare(`
+        INSERT INTO scans (
+          id, song_id, media_id, notebook_id, page_label, revision,
+          created_at, created_by, updated_at, updated_by
+        )
+        SELECT ?, songs.id, ?, ?, ?, 1, ?, ?, ?, ?
+        FROM songs
+        WHERE songs.id = ? AND songs.trashed_at IS NULL
+      `).bind(
+        scanId, mediaId, parsed.data.notebookId, parsed.data.pageLabel,
+        timestamp, actor, timestamp, actor, songId,
+      ),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (SELECT 1 FROM scans WHERE id = ? AND song_id = songs.id)
+      `).bind(timestamp, actor, songId, scanId),
+    ]);
+    if (results[1].meta.changes === 0) {
+      await context.env.DB.prepare(`DELETE FROM media_objects WHERE id = ?`).bind(mediaId).run();
+      await context.env.MEDIA.delete(objectKey);
+      return context.json({ error: "song_not_found" }, 404);
+    }
+  } catch (error) {
+    try {
+      await context.env.MEDIA.delete(objectKey);
+    } catch {
+      console.error("Failed to remove an uncommitted Scan object", mediaId);
+    }
+    const response = scanWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+
+  return context.json({
+    scan: { id: scanId, mediaId, revision: 1, filename },
+  }, 201);
 });
 
 app.put("/api/songs/:songId/lyrics/:lyricId", requireRole("editor"), async (context) => {

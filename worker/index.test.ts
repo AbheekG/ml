@@ -1273,3 +1273,134 @@ describe("controlled lookup API", () => {
     await expect(response.json()).resolves.toEqual({ error: "lookup_edit_conflict", currentName: "Current name" });
   });
 });
+
+describe("Scan upload API", () => {
+  function scanUploadBody(): FormData {
+    const body = new FormData();
+    body.set("file", new File([new Uint8Array([0xff, 0xd8, 0xff, 0x00])], "page.txt", { type: "text/plain" }));
+    body.set("notebookId", "");
+    body.set("pageLabel", "");
+    return body;
+  }
+
+  it("stores verified image bytes before atomically creating Scan records", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    const database = {
+      prepare: (query: string) => ({
+        query,
+        values: [],
+        bind(...values: unknown[]) {
+          const statement = this as unknown as FakeStatement;
+          return {
+            ...statement,
+            values,
+            first: async () => query.includes("FROM songs")
+              ? { id: "song-1" }
+              : null,
+          };
+        },
+      }),
+      batch: async (statements: FakeStatement[]) => {
+        expect(statements[0].query).toContain("INSERT INTO media_objects");
+        expect(statements[0].values[3]).toBe("image/jpeg");
+        expect(statements[0].values[4]).toBe(4);
+        expect(statements[0].values[5]).toMatch(/^[a-f0-9]{64}$/);
+        expect(statements[1].query).toContain("INSERT INTO scans");
+        return statements.map(() => ({ meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+    let storedKey = "";
+    let storedBytes = 0;
+    const media = {
+      put: async (key: string, value: Uint8Array) => {
+        storedKey = key;
+        storedBytes = value.byteLength;
+        return {};
+      },
+    } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/scans",
+      { method: "POST", body: scanUploadBody() },
+      { ...localBindings(database), MEDIA: media },
+    );
+
+    expect(response.status).toBe(201);
+    expect(storedKey).toMatch(/^scans\/[a-f0-9-]+\.jpg$/);
+    expect(storedBytes).toBe(4);
+    await expect(response.json()).resolves.toMatchObject({ scan: { revision: 1, filename: "page.txt" } });
+  });
+
+  it("rejects duplicate bytes before writing to private storage", async () => {
+    const database = {
+      prepare: (query: string) => ({
+        bind: () => ({
+          first: async () => query.includes("FROM songs")
+            ? { id: "song-1" }
+            : {
+                scanId: "scan-existing",
+                songId: "song-existing",
+                songTitle: "Existing Song",
+                filename: "existing.jpg",
+                notebookName: "Blue Book",
+                pageLabel: "12A",
+                scanIsTrashed: 0,
+                songIsTrashed: 0,
+              },
+        }),
+      }),
+    } as unknown as D1Database;
+    let wroteMedia = false;
+    const media = { put: async () => { wroteMedia = true; } } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/scans",
+      { method: "POST", body: scanUploadBody() },
+      { ...localBindings(database), MEDIA: media },
+    );
+
+    expect(response.status).toBe(409);
+    expect(wroteMedia).toBe(false);
+    await expect(response.json()).resolves.toEqual({
+      error: "duplicate_scan_file",
+      existing: {
+        scanId: "scan-existing",
+        songId: "song-existing",
+        songTitle: "Existing Song",
+        filename: "existing.jpg",
+        notebookName: "Blue Book",
+        pageLabel: "12A",
+        isTrashed: false,
+      },
+    });
+  });
+
+  it("removes an uploaded object when the database transaction fails", async () => {
+    const database = {
+      prepare: (query: string) => ({
+        query,
+        bind: (...values: unknown[]) => ({
+          query,
+          values,
+          first: async () => query.includes("FROM songs") ? { id: "song-1" } : null,
+        }),
+      }),
+      batch: async () => { throw new Error("database unavailable"); },
+    } as unknown as D1Database;
+    let uploadedKey = "";
+    let deletedKey = "";
+    const media = {
+      put: async (key: string) => { uploadedKey = key; return {}; },
+      delete: async (key: string) => { deletedKey = key; },
+    } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/scans",
+      { method: "POST", body: scanUploadBody() },
+      { ...localBindings(database), MEDIA: media },
+    );
+
+    expect(response.status).toBe(500);
+    expect(deletedKey).toBe(uploadedKey);
+  });
+});

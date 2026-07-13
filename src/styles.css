@@ -663,6 +663,113 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+.scan-source-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.7rem;
+}
+
+.scan-source-options label {
+  position: relative;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: #fffaf1;
+  cursor: pointer;
+}
+
+.scan-source-options label:hover,
+.scan-source-options label:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgb(124 63 44 / 12%);
+}
+
+.scan-source-options label > span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+
+.scan-source-options .scan-source-action {
+  justify-self: start;
+  margin-top: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  color: var(--ink);
+  background: white;
+  font-weight: 750;
+}
+
+.form-field .scan-source-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.selected-scan-file {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.45fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: #fffaf1;
+}
+
+.selected-scan-file img {
+  width: 100%;
+  max-height: 16rem;
+  object-fit: contain;
+  border-radius: 0.55rem;
+  background: #eee5d7;
+}
+
+.selected-scan-file > div {
+  display: grid;
+  justify-items: start;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.selected-scan-file > div > strong {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.selected-scan-file > div > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.duplicate-scan-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: 48rem;
+  margin: 0 0 1rem;
+  padding: 1rem;
+  border: 1px solid #ddbd78;
+  border-radius: 0.8rem;
+  background: #fff4d8;
+}
+
+.duplicate-scan-notice > div {
+  display: grid;
+  gap: 0.25rem;
+  color: #5d4318;
+  font-size: 0.86rem;
+}
+
 .form-field textarea {
   resize: vertical;
   line-height: 1.5;
@@ -1331,6 +1438,19 @@ button:disabled {
 }
 
 @media (max-width: 37rem) {
+  .scan-source-options {
+    grid-template-columns: 1fr;
+  }
+
+  .selected-scan-file {
+    grid-template-columns: 1fr;
+  }
+
+  .duplicate-scan-notice {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .lookup-tabs {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

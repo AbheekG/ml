@@ -75,6 +75,7 @@ Rules should be enforced at every relevant layer:
 - Never transcode audio in response to a playback request. Asynchronous conversion uses a `processing` state and exposes the player only after the derivative is verified and the Recording becomes `ready`; a failed job preserves the original and reports a retryable error.
 - The client may query browser decoding support for the stored MIME/codec and select among already prepared sources. Capability detection never changes the stored original or starts conversion.
 - Generate correctly oriented, readability-preserving Scan derivatives suitable for A4 pages. Retain Scan originals until derivative quality and backups are accepted; only then consider a deliberate archival/deletion policy.
+- Until that derivative pipeline is implemented, new Scan upload accepts only browser-compatible JPEG, PNG, or WebP originals up to 25 MB. It still verifies byte signatures and SHA-256, rejects exact duplicates, and never exposes the R2 object publicly.
 - Future one-tap sharing sends authenticated file bytes through the device share interface where supported, with safe fallbacks; it does not create a permanent public media URL.
 
 ### General safety

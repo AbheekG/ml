@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseScanRevision, parseScanUpdate } from "./scan-writes";
+import { parseScanCreate, parseScanRevision, parseScanUpdate } from "./scan-writes";
 
 describe("Scan validation", () => {
   it("normalizes optional Notebook and Page values", () => {
@@ -17,6 +17,13 @@ describe("Scan validation", () => {
     expect(parseScanUpdate({ notebookId: null, pageLabel: null, revision: 1 })).toEqual({
       success: true,
       data: { notebookId: null, pageLabel: null, revision: 1 },
+    });
+  });
+
+  it("validates create metadata without requiring a revision", () => {
+    expect(parseScanCreate({ notebookId: " notebook-1 ", pageLabel: " cover " })).toEqual({
+      success: true,
+      data: { notebookId: "notebook-1", pageLabel: "cover" },
     });
   });
 

@@ -191,6 +191,7 @@ export type TrashedLyric = {
   id: string;
   songId: string;
   songTitle: string;
+  filename: string;
   content: string;
   origin: "user" | "legacy_import";
   revision: number;
@@ -246,12 +247,23 @@ export type LookupKind = typeof LOOKUP_KINDS[number];
 export type LookupItem = { id: string; name: string };
 export type LookupCollections = Record<LookupKind, LookupItem[]>;
 
+export type DuplicateScanDetails = {
+  scanId: string;
+  songId: string;
+  songTitle: string;
+  filename: string;
+  notebookName: string | null;
+  pageLabel: string | null;
+  isTrashed: boolean;
+};
+
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
     readonly code: string,
     readonly fields?: Record<string, string[]>,
+    readonly existingScan?: DuplicateScanDetails,
   ) {
     super(message);
   }
@@ -276,6 +288,13 @@ function apiErrorMessage(code: string): string {
     lyric_not_trashed: "These typed lyrics have already been restored.",
     lyric_parent_trashed: "Restore the parent Song before restoring these typed lyrics.",
     invalid_scan_reference: "The selected Notebook is no longer available. Reload the form.",
+    scan_file_required: "Choose a Scan image.",
+    empty_scan_file: "The selected Scan file is empty.",
+    scan_file_too_large: "The Scan is larger than the 25 MB upload limit.",
+    scan_file_unreadable: "The selected Scan file could not be read.",
+    unsupported_scan_file: "Use a JPEG, PNG, or WebP image with a recognized file signature.",
+    duplicate_scan_file: "This exact image is already stored as a Scan. The duplicate was not uploaded.",
+    scan_storage_failed: "The private Scan file could not be stored. Try again when the connection is stable.",
     scan_edit_conflict: "This Scan changed after you opened it. Reload and try again.",
     scan_not_found: "This Scan is no longer available.",
     scan_already_trashed: "This Scan is already in Trash.",
@@ -306,10 +325,11 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
   const payload = await response.json().catch(() => ({})) as {
     error?: string;
     fields?: Record<string, string[]>;
+    existing?: DuplicateScanDetails;
   } & T;
   if (!response.ok) {
     const code = payload.error ?? "request_failed";
-    throw new ApiError(apiErrorMessage(code), response.status, code, payload.fields);
+    throw new ApiError(apiErrorMessage(code), response.status, code, payload.fields, payload.existing);
   }
   return payload;
 }
@@ -479,6 +499,23 @@ export async function restoreLyric(
 
 export async function loadScanEditorOptions(): Promise<ScanEditorOptions> {
   return apiJson<ScanEditorOptions>("/api/scan-editor/options");
+}
+
+export async function createScan(
+  songId: string,
+  payload: { file: File; notebookId: string | null; pageLabel: string | null },
+): Promise<{ id: string; mediaId: string; revision: number; filename: string }> {
+  const body = new FormData();
+  body.set("file", payload.file);
+  body.set("notebookId", payload.notebookId ?? "");
+  body.set("pageLabel", payload.pageLabel ?? "");
+  const response = await apiJson<{
+    scan: { id: string; mediaId: string; revision: number; filename: string };
+  }>(`/api/songs/${encodeURIComponent(songId)}/scans`, {
+    method: "POST",
+    body,
+  });
+  return response.scan;
 }
 
 export async function updateScan(
