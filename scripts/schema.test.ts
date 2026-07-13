@@ -60,7 +60,7 @@ describe("initial database schema", () => {
       SELECT legacy_version || '|' || legacy_notes FROM recordings;
     `);
 
-    expect(output).toBe("legacy_import\nLyricist\nOld verse\n\nDifferent tune\nOld verse|Different tune\n");
+    expect(output).toBe("legacy_import\nlyrics\nOld verse\n\nDifferent tune\nOld verse|Different tune\n");
   });
 
   it("rejects orphan lyric texts", () => {

@@ -24,7 +24,7 @@ Scan ── optional Notebook
 - `scans` references exactly one private media object and exposes optional Notebook/Page metadata. Imported Source, Version, Date, ScanText, and Notes remain preserved in hidden `legacy_*` columns but are not part of the initial editor model.
 - `recordings` stores one required, normalized-unique per-Song description, optional recorded date and contributors, processing state, an original media object, and an optional playback object. Imported Version and the four populated Notes are combined losslessly for display and also remain in hidden `legacy_*` columns.
 - `media_objects` stores private R2 object metadata and recovery state; binary data does not enter D1.
-- `people`, `song_credits`, and `recording_credits` model contributors and roles.
+- `people`, `song_credits`, and `recording_credits` model contributors using stable contribution codes (`lyrics`, `music`, `vocals`, and later instrument/production codes) with friendly display labels.
 - `languages`, `tags`, and `notebooks` are controlled lookup records.
 - join tables model Song languages and tags without comma-separated IDs.
 - `app_users` stores viewer/editor/admin authorization independently of historical audit identity strings.

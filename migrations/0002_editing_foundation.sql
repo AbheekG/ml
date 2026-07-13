@@ -145,7 +145,7 @@ CREATE TABLE song_credits_v2 (
   id TEXT PRIMARY KEY,
   song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE RESTRICT,
   person_id TEXT NOT NULL REFERENCES people(id) ON DELETE RESTRICT,
-  role TEXT NOT NULL CHECK (role IN ('Lyricist', 'Composer')),
+  role TEXT NOT NULL CHECK (role IN ('lyrics', 'music')),
   sort_order INTEGER NOT NULL DEFAULT 0,
   UNIQUE (song_id, person_id, role)
 );
@@ -155,7 +155,11 @@ SELECT
   id,
   song_id,
   person_id,
-  CASE WHEN role = 'Writer' THEN 'Lyricist' ELSE role END,
+  CASE
+    WHEN role IN ('Writer', 'Lyricist', 'Lyrics') THEN 'lyrics'
+    WHEN role IN ('Composer', 'Music') THEN 'music'
+    ELSE lower(trim(role))
+  END,
   sort_order
 FROM song_credits;
 
@@ -270,7 +274,10 @@ SELECT
   id,
   recording_id,
   person_id,
-  CASE WHEN role = 'Singer' THEN 'Vocals' ELSE role END,
+  CASE
+    WHEN role IN ('Singer', 'Vocals') THEN 'vocals'
+    ELSE lower(trim(role))
+  END,
   sort_order
 FROM recording_credits;
 

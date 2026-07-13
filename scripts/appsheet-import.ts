@@ -178,6 +178,19 @@ function requiredText(value: unknown, field: string): string {
   return text;
 }
 
+function songCreditRole(value: unknown): "lyrics" | "music" {
+  const role = requiredText(value, "SongCredits.Role");
+  if (role === "Writer" || role === "Lyricist" || role === "Lyrics") return "lyrics";
+  if (role === "Composer" || role === "Music") return "music";
+  throw new Error(`Unsupported Song credit role: ${role}`);
+}
+
+function recordingCreditRole(value: unknown): string {
+  const role = requiredText(value, "RecordingCredits.Role");
+  if (role === "Singer" || role === "Vocals") return "vocals";
+  return normalizedName(role);
+}
+
 function isoText(value: unknown): string | null {
   if (value instanceof Date) {
     return value.toISOString();
@@ -632,9 +645,7 @@ export async function importAppSheet(options: ImportOptions): Promise<{
       id: requiredText(row.CreditID, "SongCredits.CreditID"),
       songId: requiredText(row.SongID, "SongCredits.SongID"),
       personId: requiredText(row.PersonID, "SongCredits.PersonID"),
-      role: requiredText(row.Role, "SongCredits.Role") === "Writer"
-        ? "Lyricist"
-        : requiredText(row.Role, "SongCredits.Role"),
+      role: songCreditRole(row.Role),
       sortOrder,
     })),
     lyricTexts,
@@ -645,9 +656,7 @@ export async function importAppSheet(options: ImportOptions): Promise<{
       id: requiredText(row.RecCreditID, "RecordingCredits.RecCreditID"),
       recordingId: requiredText(row.RecID, "RecordingCredits.RecID"),
       personId: requiredText(row.PersonID, "RecordingCredits.PersonID"),
-      role: requiredText(row.Role, "RecordingCredits.Role") === "Singer"
-        ? "Vocals"
-        : requiredText(row.Role, "RecordingCredits.Role"),
+      role: recordingCreditRole(row.Role),
       sortOrder,
     })),
   };

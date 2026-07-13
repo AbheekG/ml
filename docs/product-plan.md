@@ -183,8 +183,8 @@ A Recording is an independent child record because one Song can have multiple co
 ### Lookups and credits
 
 - People are canonical records.
-- Song credits link a person to a song with a role such as Lyricist or Composer.
-- Recording credits link a person to a recording with a role such as Vocals; this table is supported even though it is currently empty, and instrument/production roles can be added when actually needed.
+- Song credits link a person to a song with contribution labels such as Lyrics or Music, backed by stable `lyrics`/`music` codes.
+- Recording credits link a person to a recording with a contribution label such as Vocals, backed by a stable `vocals` code; this table is supported even though it is currently empty, and instrument/production roles can be added when actually needed.
 - Tags, languages, and notebooks are canonical lookup records.
 - Join tables replace comma-separated reference lists in the runtime database.
 
@@ -305,7 +305,7 @@ Turn real queries into automated ranking tests. Port and correct the useful norm
 
 ## Product defaults to validate through use
 
-- Person filtering starts with “any role” and optionally narrows to Lyricist, Composer, Vocals, or future roles.
+- Person filtering starts with “any role” and optionally narrows to Lyrics, Music, Vocals, or future contribution roles.
 - Status is preserved in the database but hidden from ordinary views until meaningful states are defined; imported `draft` values are not discarded.
 - Catalog rows initially show Latin title, native title, language, and compact lyric/scan/recording indicators. Tag display is restrained to avoid clutter.
 - These choices are deliberately easy to change after the first real-device prototype. Feedback from actual browsing, editing, sharing, and playback outranks speculative completeness.

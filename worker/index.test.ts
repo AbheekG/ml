@@ -159,7 +159,7 @@ describe("Worker API", () => {
                 recordingId: "recording-1",
                 personId: "person-1",
                 fullName: "A person",
-                role: "Vocals",
+                role: "vocals",
               }] };
             }
             return { results: [] };

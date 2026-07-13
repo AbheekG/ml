@@ -193,7 +193,7 @@ function MetadataList({ song }: { song: SongDetail }) {
         {items.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
         {song.credits.map((credit) => (
           <div key={`${credit.personId}:${credit.role}`}>
-            <dt>{credit.role}</dt>
+            <dt>{contributionLabel(credit.role)}</dt>
             <dd>{credit.fullName}</dd>
           </div>
         ))}
@@ -201,6 +201,17 @@ function MetadataList({ song }: { song: SongDetail }) {
       {song.notes && <p className="detail-notes">{song.notes}</p>}
     </section>
   );
+}
+
+const CONTRIBUTION_LABELS: Readonly<Record<string, string>> = {
+  lyrics: "Lyrics",
+  music: "Music",
+  vocals: "Vocals",
+};
+
+function contributionLabel(role: string): string {
+  return CONTRIBUTION_LABELS[role]
+    ?? role.replaceAll("_", " ").replace(/\b\p{L}/gu, (letter) => letter.toLocaleUpperCase());
 }
 
 function SongDetailPage({ isOnline }: { isOnline: boolean }) {

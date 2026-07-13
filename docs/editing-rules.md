@@ -42,9 +42,9 @@ Rules should be enforced at every relevant layer:
 ### People and credits
 
 - People are shared controlled lookup records used by both Song credits and Recording contributors.
-- Song credits are optional. A credit requires a Person and a Role; initial Roles are `Lyricist` and `Composer` (`Lyricist` replaces the legacy label `Writer`). The same Person may hold both Roles on one Song, but the same Song/Person/Role combination cannot be duplicated.
+- Song credits are optional. A credit requires a Person and a contribution Role; initial display labels are `Lyrics` and `Music`. Store these as stable internal codes `lyrics` and `music`; `lyrics` replaces the legacy `Writer` label. The same Person may hold both Roles on one Song, but the same Song/Person/Role combination cannot be duplicated.
 - Recording contributors are optional and may remain unused. Retain the flexible Person/Role relationship for future singers and instrumental performers, but omit an empty contributor section from reading views.
-- When the first Recording contributor is added, default the Role to `Vocals`. Add controlled instrument/production Roles such as Guitar, Drums, or Piano only when actual use requires them rather than pre-populating an unused taxonomy.
+- When the first Recording contributor is added, default the display Role to `Vocals`, stored as the stable internal code `vocals`. Add controlled contribution codes and display labels for instruments/production such as Guitar, Drums, or Piano only when actual use requires them rather than pre-populating an unused taxonomy.
 - Credit records do not have editor-facing Notes. Song Notes remain available; Scan Notes are not exposed, and legacy Recording Notes are losslessly folded into Recording descriptions.
 
 ### Scans
