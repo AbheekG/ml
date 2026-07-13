@@ -17,8 +17,10 @@ import {
   restoreLyric,
   restoreRecording,
   restoreScan,
+  restoreSong,
   trashRecording,
   trashScan,
+  trashSong,
   trashLyric,
   updateScan,
   updateLyric,
@@ -34,6 +36,7 @@ import {
   type TrashedLyric,
   type TrashedRecording,
   type TrashedScan,
+  type TrashedSong,
 } from "./catalog";
 import { scanDisplayName } from "./scan-viewer";
 
@@ -847,6 +850,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
 }
 
 function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
+  const [songs, setSongs] = useState<TrashedSong[]>([]);
   const [lyrics, setLyrics] = useState<TrashedLyric[]>([]);
   const [scans, setScans] = useState<TrashedScan[]>([]);
   const [recordings, setRecordings] = useState<TrashedRecording[]>([]);
@@ -864,6 +868,7 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
       try {
         const result = await loadTrash();
         if (!cancelled) {
+          setSongs(result.songs);
           setLyrics(result.lyrics);
           setScans(result.scans);
           setRecordings(result.recordings);
@@ -924,6 +929,25 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
     }
   }
 
+  async function restoreTrashedSong(song: TrashedSong): Promise<void> {
+    const restoreKey = `song:${song.id}`;
+    if (!isOnline || canEdit !== true || restoringId !== null) return;
+    setRestoringId(restoreKey);
+    setError(null);
+    try {
+      await restoreSong(song.id, song.revision);
+      await refreshOfflineLibrary().catch(() => undefined);
+      setSongs((current) => current.filter((item) => item.id !== song.id));
+      setLyrics((current) => current.map((item) => item.songId === song.id ? { ...item, songIsTrashed: false } : item));
+      setScans((current) => current.map((item) => item.songId === song.id ? { ...item, songIsTrashed: false } : item));
+      setRecordings((current) => current.map((item) => item.songId === song.id ? { ...item, songIsTrashed: false } : item));
+    } catch (restoreError) {
+      setError(restoreError instanceof Error ? restoreError.message : "The Song could not be restored.");
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
   if (!isOnline) {
     return <main className="page-shell" id="main-content"><section className="empty-state"><h1>Trash is available online</h1><p>Reconnect to review or restore removed items. Your saved library remains available to read.</p></section></main>;
   }
@@ -942,10 +966,38 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
       {error && <p className="catalog-message error-message" role="alert">{error}</p>}
       {isLoading ? (
         <section className="empty-state"><p>Loading Trash…</p></section>
-      ) : lyrics.length === 0 && scans.length === 0 && recordings.length === 0 ? (
-        <section className="empty-state"><div className="empty-mark" aria-hidden="true">✓</div><h2>Trash is empty</h2><p>Removed typed lyrics, Scans, and Recordings will appear here.</p></section>
+      ) : songs.length === 0 && lyrics.length === 0 && scans.length === 0 && recordings.length === 0 ? (
+        <section className="empty-state"><div className="empty-mark" aria-hidden="true">✓</div><h2>Trash is empty</h2><p>Removed Songs, typed lyrics, Scans, and Recordings will appear here.</p></section>
       ) : (
         <div className="trash-sections">
+          {songs.length > 0 && (
+            <section className="trash-section" aria-labelledby="trashed-songs-title">
+              <h2 id="trashed-songs-title">Songs <span>{songs.length}</span></h2>
+              <ol className="trash-list" aria-label="Trashed Songs">
+                {songs.map((song) => {
+                  const restoreKey = `song:${song.id}`;
+                  const childSummary = [
+                    song.lyricCount > 0 ? `${song.lyricCount} typed lyrics` : "",
+                    song.scanCount > 0 ? `${song.scanCount} Scans` : "",
+                    song.recordingCount > 0 ? `${song.recordingCount} Recordings` : "",
+                  ].filter(Boolean).join(" · ");
+                  return (
+                    <li className="detail-card trash-item" key={song.id}>
+                      <div className="trash-item-heading">
+                        <div>
+                          <span>Song</span>
+                          <strong>{song.titleLatin}</strong>
+                          {song.titleNative && <small>{song.titleNative}</small>}
+                          <small>{childSummary ? `${childSummary} · ` : ""}moved {new Date(song.trashedAt).toLocaleString()}</small>
+                        </div>
+                        <button className="primary-action" type="button" disabled={restoringId !== null} onClick={() => { void restoreTrashedSong(song); }}>{restoringId === restoreKey ? "Restoring…" : "Restore"}</button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          )}
           {recordings.length > 0 && (
             <section className="trash-section" aria-labelledby="trashed-recordings-title">
               <h2 id="trashed-recordings-title">Recordings <span>{recordings.length}</span></h2>
@@ -1076,8 +1128,10 @@ function SongEditorPage({
   const [form, setForm] = useState<SongFormState>(EMPTY_SONG_FORM);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
+  const [childCounts, setChildCounts] = useState({ lyricTexts: 0, scans: 0, recordings: 0 });
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTrashing, setIsTrashing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1106,6 +1160,11 @@ function SongEditorPage({
             notes: song.notes ?? "",
             revision: song.revision,
           });
+          setChildCounts({
+            lyricTexts: song.lyricTexts.length,
+            scans: song.scans.length,
+            recordings: song.recordings.length,
+          });
         }
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The editor could not be loaded.");
@@ -1119,7 +1178,7 @@ function SongEditorPage({
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!isOnline || canEdit !== true || isSaving) return;
+    if (!isOnline || canEdit !== true || isSaving || isTrashing) return;
     setIsSaving(true);
     setError(null);
     setFieldErrors({});
@@ -1151,6 +1210,26 @@ function SongEditorPage({
       }
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function moveSongToTrash(): Promise<void> {
+    if (mode !== "edit" || !isOnline || canEdit !== true || form.revision === null || isSaving || isTrashing) return;
+    if (childCounts.lyricTexts + childCounts.scans + childCounts.recordings > 0) return;
+    const confirmed = window.confirm(
+      "Move this Song to Trash? Its metadata and relationships will be retained and can be restored later.",
+    );
+    if (!confirmed) return;
+    setIsTrashing(true);
+    setError(null);
+    try {
+      await trashSong(songId, form.revision);
+      await refreshOfflineLibrary().catch(() => undefined);
+      navigate("/songs", { replace: true });
+    } catch (trashError) {
+      setError(trashError instanceof Error ? trashError.message : "The Song could not be moved to Trash.");
+    } finally {
+      setIsTrashing(false);
     }
   }
 
@@ -1246,9 +1325,20 @@ function SongEditorPage({
 
         <div className="form-actions">
           <Link className="secondary-action action-link" to={mode === "edit" ? `/songs/${encodeURIComponent(songId)}` : "/songs"}>Cancel</Link>
-          <button className="primary-action" type="submit" disabled={isSaving || form.languageIds.length === 0 || form.titleLatin.trim().length === 0}>{isSaving ? "Saving…" : mode === "create" ? "Add song" : "Save changes"}</button>
+          <button className="primary-action" type="submit" disabled={isSaving || isTrashing || form.languageIds.length === 0 || form.titleLatin.trim().length === 0}>{isSaving ? "Saving…" : mode === "create" ? "Add song" : "Save changes"}</button>
         </div>
       </form>
+      {mode === "edit" && (
+        <section className="danger-zone" aria-labelledby="remove-song-title">
+          <div>
+            <h2 id="remove-song-title">Remove this Song</h2>
+            {childCounts.lyricTexts + childCounts.scans + childCounts.recordings > 0
+              ? <p>Move its active content to Trash first: {[childCounts.lyricTexts ? `${childCounts.lyricTexts} typed lyrics` : "", childCounts.scans ? `${childCounts.scans} Scans` : "", childCounts.recordings ? `${childCounts.recordings} Recordings` : ""].filter(Boolean).join(" · ")}.</p>
+              : <p>This moves the Song to recoverable Trash. Nothing is permanently deleted.</p>}
+          </div>
+          <button className="danger-action" type="button" disabled={isSaving || isTrashing || childCounts.lyricTexts + childCounts.scans + childCounts.recordings > 0} onClick={() => { void moveSongToTrash(); }}>{isTrashing ? "Moving…" : "Move to Trash"}</button>
+        </section>
+      )}
     </main>
   );
 }

@@ -205,6 +205,53 @@ describe("initial database schema", () => {
     `)).toThrow(/song_has_active_content/);
   });
 
+  it("can trash and restore a Song without changing metadata, relationships, or child Trash state", () => {
+    const output = runSql(`
+      INSERT INTO languages (id, display_name, normalized_name)
+      VALUES ('en', 'English', 'english');
+      INSERT INTO tags (id, display_name, normalized_name)
+      VALUES ('tag-1', 'Test tag', 'test tag');
+      INSERT INTO people (id, full_name, normalized_name, created_at, updated_at)
+      VALUES ('person-1', 'Contributor', 'contributor', '${timestamp}', '${timestamp}');
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, title_native, status, notes,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'song-1', 'Test Song', 'test song', 'Native', 'checked', 'Song note',
+        '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      INSERT INTO song_languages (song_id, language_id) VALUES ('song-1', 'en');
+      INSERT INTO song_tags (song_id, tag_id) VALUES ('song-1', 'tag-1');
+      INSERT INTO song_aliases (id, song_id, alias, normalized_alias)
+      VALUES ('alias-1', 'song-1', 'Old title', 'old title');
+      INSERT INTO song_credits (id, song_id, person_id, role)
+      VALUES ('credit-1', 'song-1', 'person-1', 'lyrics');
+      INSERT INTO lyric_texts (
+        id, song_id, content, created_at, created_by, updated_at, updated_by
+      ) VALUES ('lyrics-1', 'song-1', 'text', '${timestamp}', 'test', '${timestamp}', 'test');
+      UPDATE lyric_texts
+      SET trashed_at = '${timestamp}', trashed_by = 'test', revision = revision + 1
+      WHERE id = 'lyrics-1';
+      UPDATE songs
+      SET trashed_at = '${timestamp}', trashed_by = 'test', revision = revision + 1
+      WHERE id = 'song-1';
+      UPDATE songs
+      SET trashed_at = NULL, trashed_by = NULL, revision = revision + 1
+      WHERE id = 'song-1';
+      SELECT
+        songs.title_latin || '|' || songs.title_native || '|' || songs.status || '|' ||
+        songs.notes || '|' || songs.revision || '|' ||
+        (SELECT COUNT(*) FROM song_languages WHERE song_id = songs.id) || '|' ||
+        (SELECT COUNT(*) FROM song_tags WHERE song_id = songs.id) || '|' ||
+        (SELECT COUNT(*) FROM song_aliases WHERE song_id = songs.id) || '|' ||
+        (SELECT COUNT(*) FROM song_credits WHERE song_id = songs.id) || '|' ||
+        (SELECT CASE WHEN trashed_at IS NULL THEN 0 ELSE 1 END FROM lyric_texts WHERE song_id = songs.id)
+      FROM songs WHERE id = 'song-1';
+    `);
+
+    expect(output).toBe("Test Song|Native|checked|Song note|3|1|1|1|1|1\n");
+  });
+
   it("can trash and restore typed lyrics without changing their content", () => {
     const output = runSql(`
       INSERT INTO songs (

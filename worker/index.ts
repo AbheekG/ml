@@ -20,6 +20,7 @@ import {
 } from "./recording-writes";
 import {
   parseSongCreate,
+  parseSongRevision,
   parseSongUpdate,
   type SongWriteInput,
   type SongUpdateInput,
@@ -138,6 +139,17 @@ type RecordingStateRow = {
   playbackMediaState: "active" | "trashed" | null;
 };
 
+type SongStateRow = {
+  revision: number;
+  trashedAt: string | null;
+};
+
+type SongDependencies = {
+  lyricTexts: number;
+  scans: number;
+  recordings: number;
+};
+
 type LookupTable = "languages" | "tags" | "notebooks" | "people";
 
 async function lookupIdsExist(database: D1Database, table: LookupTable, ids: string[]): Promise<boolean> {
@@ -211,6 +223,28 @@ async function loadLyricState(
     JOIN songs ON songs.id = lyric_texts.song_id
     WHERE lyric_texts.id = ? AND lyric_texts.song_id = ?
   `).bind(lyricId, songId).first<LyricStateRow>();
+}
+
+async function loadSongState(database: D1Database, songId: string): Promise<SongStateRow | null> {
+  return database.prepare(`
+    SELECT revision, trashed_at AS trashedAt
+    FROM songs
+    WHERE id = ?
+  `).bind(songId).first<SongStateRow>();
+}
+
+async function loadSongDependencies(database: D1Database, songId: string): Promise<SongDependencies> {
+  const result = await database.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM lyric_texts WHERE song_id = ? AND trashed_at IS NULL) AS lyricTexts,
+      (SELECT COUNT(*) FROM scans WHERE song_id = ? AND trashed_at IS NULL) AS scans,
+      (SELECT COUNT(*) FROM recordings WHERE song_id = ? AND trashed_at IS NULL) AS recordings
+  `).bind(songId, songId, songId).first<SongDependencies>();
+  return result ?? { lyricTexts: 0, scans: 0, recordings: 0 };
+}
+
+function hasSongDependencies(dependencies: SongDependencies): boolean {
+  return dependencies.lyricTexts > 0 || dependencies.scans > 0 || dependencies.recordings > 0;
 }
 
 async function loadScanState(
@@ -619,6 +653,103 @@ app.put("/api/songs/:songId", requireRole("editor"), async (context) => {
     return context.json({
       song: { id: songId, revision: song.revision + 1, titleLatin: song.titleLatin },
     });
+  } catch (error) {
+    const response = songWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
+app.post("/api/songs/:songId/trash", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseSongRevision(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_song", fields: parsed.fields }, 400);
+  }
+  const songId = context.req.param("songId");
+  const current = await loadSongState(context.env.DB, songId);
+  if (!current) return context.json({ error: "song_not_found" }, 404);
+  if (current.trashedAt !== null) {
+    return context.json({ error: "song_already_trashed", currentRevision: current.revision }, 409);
+  }
+  if (current.revision !== parsed.data.revision) {
+    return context.json({ error: "song_trash_conflict", currentRevision: current.revision }, 409);
+  }
+  const dependencies = await loadSongDependencies(context.env.DB, songId);
+  if (hasSongDependencies(dependencies)) {
+    return context.json({ error: "song_has_active_content", dependencies }, 409);
+  }
+
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+  try {
+    const result = await context.env.DB.prepare(`
+      UPDATE songs
+      SET trashed_at = ?,
+          trashed_by = ?,
+          revision = revision + 1,
+          updated_at = ?,
+          updated_by = ?
+      WHERE id = ? AND revision = ? AND trashed_at IS NULL
+    `).bind(timestamp, actor, timestamp, actor, songId, parsed.data.revision).run();
+    if (result.meta.changes === 0) {
+      const state = await loadSongState(context.env.DB, songId);
+      if (!state) return context.json({ error: "song_not_found" }, 404);
+      if (state.trashedAt !== null) {
+        return context.json({ error: "song_already_trashed", currentRevision: state.revision }, 409);
+      }
+      return context.json({ error: "song_trash_conflict", currentRevision: state.revision }, 409);
+    }
+    return context.json({ song: { id: songId, revision: parsed.data.revision + 1 } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("song_has_active_content")) {
+      return context.json({
+        error: "song_has_active_content",
+        dependencies: await loadSongDependencies(context.env.DB, songId),
+      }, 409);
+    }
+    return context.json({ error: "song_write_failed" }, 500);
+  }
+});
+
+app.post("/api/trash/songs/:songId/restore", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseSongRevision(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_song", fields: parsed.fields }, 400);
+  }
+  const songId = context.req.param("songId");
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+  try {
+    const result = await context.env.DB.prepare(`
+      UPDATE songs
+      SET trashed_at = NULL,
+          trashed_by = NULL,
+          revision = revision + 1,
+          updated_at = ?,
+          updated_by = ?
+      WHERE id = ? AND revision = ? AND trashed_at IS NOT NULL
+    `).bind(timestamp, actor, songId, parsed.data.revision).run();
+    if (result.meta.changes === 0) {
+      const state = await loadSongState(context.env.DB, songId);
+      if (!state) return context.json({ error: "song_not_found" }, 404);
+      if (state.trashedAt === null) {
+        return context.json({ error: "song_not_trashed", currentRevision: state.revision }, 409);
+      }
+      return context.json({ error: "song_trash_conflict", currentRevision: state.revision }, 409);
+    }
+    return context.json({ song: { id: songId, revision: parsed.data.revision + 1 } });
   } catch (error) {
     const response = songWriteError(error);
     return context.json({ error: response.error }, response.status);
@@ -1200,7 +1331,30 @@ app.post("/api/songs/:songId/recordings/:recordingId/trash", requireRole("editor
 });
 
 app.get("/api/trash", requireRole("editor"), async (context) => {
-  const [lyrics, scans, recordings] = await Promise.all([
+  const [songs, lyrics, scans, recordings] = await Promise.all([
+    context.env.DB.prepare(`
+      SELECT
+        songs.id,
+        songs.title_latin AS titleLatin,
+        songs.title_native AS titleNative,
+        songs.revision,
+        songs.trashed_at AS trashedAt,
+        (SELECT COUNT(*) FROM lyric_texts WHERE song_id = songs.id) AS lyricCount,
+        (SELECT COUNT(*) FROM scans WHERE song_id = songs.id) AS scanCount,
+        (SELECT COUNT(*) FROM recordings WHERE song_id = songs.id) AS recordingCount
+      FROM songs
+      WHERE songs.trashed_at IS NOT NULL
+      ORDER BY songs.trashed_at DESC, songs.id
+    `).all<{
+      id: string;
+      titleLatin: string;
+      titleNative: string | null;
+      revision: number;
+      trashedAt: string;
+      lyricCount: number;
+      scanCount: number;
+      recordingCount: number;
+    }>(),
     context.env.DB.prepare(`
       SELECT
         lyric_texts.id,
@@ -1282,6 +1436,7 @@ app.get("/api/trash", requireRole("editor"), async (context) => {
     }>(),
   ]);
   return context.json({
+    songs: songs.results,
     lyrics: lyrics.results.map((lyric) => ({
       ...lyric,
       songIsTrashed: lyric.songIsTrashed === 1,

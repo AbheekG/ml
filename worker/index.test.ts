@@ -263,6 +263,129 @@ describe("Worker API", () => {
     });
   });
 
+  it("reports active child dependencies before moving a Song to Trash", async () => {
+    const database = {
+      prepare: (query: string) => ({
+        bind: () => ({
+          first: async () => query.includes("SELECT revision, trashed_at")
+            ? { revision: 2, trashedAt: null }
+            : { lyricTexts: 1, scans: 2, recordings: 3 },
+        }),
+      }),
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/trash",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: 2 }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "song_has_active_content",
+      dependencies: { lyricTexts: 1, scans: 2, recordings: 3 },
+    });
+  });
+
+  it("moves an active-child-free Song to Trash without deleting it", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string };
+    let updateQuery = "";
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          bind() {
+            return {
+              first: async () => query.includes("SELECT revision, trashed_at")
+                ? { revision: 2, trashedAt: null }
+                : { lyricTexts: 0, scans: 0, recordings: 0 },
+              run: async () => {
+                updateQuery = query;
+                return { success: true, results: [], meta: { changes: 1 } };
+              },
+            };
+          },
+        } as unknown as FakeStatement;
+        return statement;
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/trash",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: 2 }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(updateQuery).toContain("UPDATE songs");
+    expect(updateQuery).not.toContain("DELETE FROM songs");
+    await expect(response.json()).resolves.toEqual({ song: { id: "song-1", revision: 3 } });
+  });
+
+  it("restores a trashed Song without changing its child records", async () => {
+    let updateQuery = "";
+    const database = {
+      prepare: (query: string) => ({
+        bind: () => ({
+          run: async () => {
+            updateQuery = query;
+            return { success: true, results: [], meta: { changes: 1 } };
+          },
+        }),
+      }),
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/trash/songs/song-1/restore",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: 3 }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(updateQuery).toContain("UPDATE songs");
+    expect(updateQuery).not.toContain("lyric_texts");
+    expect(updateQuery).not.toContain("scans");
+    expect(updateQuery).not.toContain("recordings");
+    await expect(response.json()).resolves.toEqual({ song: { id: "song-1", revision: 4 } });
+  });
+
+  it("rejects restoring a Song when its normalized title is active again", async () => {
+    const database = {
+      prepare: () => ({
+        bind: () => ({
+          run: async () => {
+            throw new Error("UNIQUE constraint failed: songs.normalized_title_latin");
+          },
+        }),
+      }),
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/trash/songs/song-1/restore",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: 3 }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "duplicate_song_title" });
+  });
+
   it("creates typed lyrics without rewriting their content", async () => {
     type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
     let batch: FakeStatement[] = [];
@@ -418,10 +541,19 @@ describe("Worker API", () => {
     await expect(response.json()).resolves.toMatchObject({ lyric: { revision: 3 } });
   });
 
-  it("lists trashed typed lyrics, Scans, and Recordings only for editors", async () => {
+  it("lists trashed Songs and child content only for editors", async () => {
     const database = {
       prepare: (query: string) => ({
-        all: async () => ({ results: query.includes("FROM lyric_texts") ? [{
+        all: async () => ({ results: query.includes("WHERE songs.trashed_at IS NOT NULL") ? [{
+          id: "song-1",
+          titleLatin: "A song",
+          titleNative: null,
+          revision: 5,
+          trashedAt: "2026-07-13T00:00:00.000Z",
+          lyricCount: 1,
+          scanCount: 1,
+          recordingCount: 1,
+        }] : query.includes("FROM lyric_texts") ? [{
           id: "lyrics-1",
           songId: "song-1",
           songTitle: "A song",
@@ -429,7 +561,7 @@ describe("Worker API", () => {
           origin: "user",
           revision: 3,
           trashedAt: "2026-07-13T00:00:00.000Z",
-          songIsTrashed: 0,
+          songIsTrashed: 1,
         }] : query.includes("FROM scans") ? [{
           id: "scan-1",
           songId: "song-1",
@@ -439,7 +571,7 @@ describe("Worker API", () => {
           pageLabel: "3",
           revision: 2,
           trashedAt: "2026-07-13T00:00:00.000Z",
-          songIsTrashed: 0,
+          songIsTrashed: 1,
         }] : [{
           id: "recording-1",
           songId: "song-1",
@@ -449,7 +581,7 @@ describe("Worker API", () => {
           filename: "take.mp3",
           revision: 4,
           trashedAt: "2026-07-13T00:00:00.000Z",
-          songIsTrashed: 0,
+          songIsTrashed: 1,
         }] }),
       }),
     } as unknown as D1Database;
@@ -461,9 +593,10 @@ describe("Worker API", () => {
     );
     expect(editorResponse.status).toBe(200);
     await expect(editorResponse.json()).resolves.toMatchObject({
-      lyrics: [{ id: "lyrics-1", songIsTrashed: false }],
-      scans: [{ id: "scan-1", songIsTrashed: false }],
-      recordings: [{ id: "recording-1", songIsTrashed: false }],
+      songs: [{ id: "song-1", lyricCount: 1 }],
+      lyrics: [{ id: "lyrics-1", songIsTrashed: true }],
+      scans: [{ id: "scan-1", songIsTrashed: true }],
+      recordings: [{ id: "recording-1", songIsTrashed: true }],
     });
 
     const viewerResponse = await app.request(

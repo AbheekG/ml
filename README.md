@@ -49,6 +49,7 @@ The private staging application is operational:
 - the API normalizes title case, validates controlled references, records actor/timestamps, and updates all Song relationships atomically;
 - revisions and per-request mutation identifiers reject stale concurrent edits without allowing their related Language/Tag/Alias changes to leak through;
 - editors/admins can create, edit, move to Trash, and restore typed-lyric blocks;
+- editors/admins can move an active-child-free Song to recoverable Trash and restore it; Songs with active typed lyrics, Scans, or Recordings are blocked with dependency guidance;
 - editors/admins can edit Scan Notebook/Page metadata and move existing Scans and their private media to recoverable Trash or restore them;
 - editors/admins can edit existing Recording descriptions, dates, and Vocals credits, and move Recordings and unshared private media to recoverable Trash or restore them;
 - Scan/Recording upload and replace, broader Recording contribution roles, and controlled lookup management remain later incremental slices.

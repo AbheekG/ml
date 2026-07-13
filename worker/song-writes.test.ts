@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   normalizedTextKey,
   parseSongCreate,
+  parseSongRevision,
   parseSongUpdate,
   titleCaseText,
 } from "./song-writes";
@@ -80,5 +81,7 @@ describe("Song write validation", () => {
       data: { revision: 3 },
     });
     expect(parseSongUpdate({ ...validSong, revision: 0 }).success).toBe(false);
+    expect(parseSongRevision({ revision: 3 })).toEqual({ success: true, data: { revision: 3 } });
+    expect(parseSongRevision({ revision: 0 }).success).toBe(false);
   });
 });

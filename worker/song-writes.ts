@@ -50,6 +50,10 @@ const updateSongSchema = z.object({
   revision: z.number().int().positive(),
 }).strict().superRefine(validateLists);
 
+const songRevisionSchema = z.object({
+  revision: z.number().int().positive(),
+}).strict();
+
 export type SongWriteInput = {
   titleLatin: string;
   normalizedTitleLatin: string;
@@ -129,4 +133,10 @@ export function parseSongUpdate(value: unknown): SongParseResult<SongUpdateInput
     success: true,
     data: { ...normalizedSong(result.data), revision: result.data.revision },
   };
+}
+
+export function parseSongRevision(value: unknown): SongParseResult<{ revision: number }> {
+  const result = songRevisionSchema.safeParse(value);
+  if (!result.success) return { success: false, fields: fieldsFromError(result.error) };
+  return { success: true, data: result.data };
 }

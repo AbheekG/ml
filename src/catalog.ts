@@ -198,6 +198,17 @@ export type TrashedLyric = {
   songIsTrashed: boolean;
 };
 
+export type TrashedSong = {
+  id: string;
+  titleLatin: string;
+  titleNative: string | null;
+  revision: number;
+  trashedAt: string;
+  lyricCount: number;
+  scanCount: number;
+  recordingCount: number;
+};
+
 export type TrashedScan = {
   id: string;
   songId: string;
@@ -249,6 +260,10 @@ function apiErrorMessage(code: string): string {
     invalid_reference: "A selected Language, Tag, or contributor no longer exists. Reload the form.",
     insufficient_role: "Your account cannot edit songs.",
     song_not_found: "This song is no longer available.",
+    song_has_active_content: "Move this Song’s active typed lyrics, Scans, and Recordings to Trash first.",
+    song_trash_conflict: "This Song changed after you opened it. Reload and try again.",
+    song_already_trashed: "This Song is already in Trash.",
+    song_not_trashed: "This Song has already been restored.",
     duplicate_lyric_text: "This song already has an identical typed-lyrics block.",
     lyric_edit_conflict: "These typed lyrics changed after you opened them. Reload and try again.",
     lyric_not_found: "These typed lyrics are no longer available.",
@@ -323,6 +338,30 @@ export async function updateSong(
   return response.song;
 }
 
+export async function trashSong(songId: string, revision: number): Promise<{ id: string; revision: number }> {
+  const response = await apiJson<{ song: { id: string; revision: number } }>(
+    `/api/songs/${encodeURIComponent(songId)}/trash`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision }),
+    },
+  );
+  return response.song;
+}
+
+export async function restoreSong(songId: string, revision: number): Promise<{ id: string; revision: number }> {
+  const response = await apiJson<{ song: { id: string; revision: number } }>(
+    `/api/trash/songs/${encodeURIComponent(songId)}/restore`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision }),
+    },
+  );
+  return response.song;
+}
+
 export async function createLyric(
   songId: string,
   content: string,
@@ -372,11 +411,13 @@ export async function trashLyric(
 }
 
 export async function loadTrash(): Promise<{
+  songs: TrashedSong[];
   lyrics: TrashedLyric[];
   scans: TrashedScan[];
   recordings: TrashedRecording[];
 }> {
   return apiJson<{
+    songs: TrashedSong[];
     lyrics: TrashedLyric[];
     scans: TrashedScan[];
     recordings: TrashedRecording[];
