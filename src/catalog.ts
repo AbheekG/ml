@@ -17,6 +17,14 @@ type Credit = {
   role: string;
 };
 
+export type SongScan = {
+  id: string;
+  mediaId: string;
+  notebookName: string | null;
+  pageLabel: string | null;
+  filename: string;
+};
+
 export type SongDetail = {
   id: string;
   titleLatin: string;
@@ -36,13 +44,7 @@ export type SongDetail = {
     origin: "user" | "legacy_import";
     revision: number;
   }>;
-  scans: Array<{
-    id: string;
-    mediaId: string;
-    notebookName: string | null;
-    pageLabel: string | null;
-    filename: string;
-  }>;
+  scans: SongScan[];
   recordings: Array<{
     id: string;
     originalMediaId: string;

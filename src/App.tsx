@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { ScanViewer } from "./ScanViewer";
 import {
   ApiError,
   createLyric,
@@ -22,6 +23,7 @@ import {
   type SongWritePayload,
   type TrashedLyric,
 } from "./catalog";
+import { scanDisplayName } from "./scan-viewer";
 
 function useOnlineStatus(): boolean {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -233,6 +235,11 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
   const [song, setSong] = useState<SongDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [viewerScanId, setViewerScanId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOnline) setViewerScanId(null);
+  }, [isOnline]);
 
   useEffect(() => {
     let cancelled = false;
@@ -335,8 +342,8 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
               <ul className="media-list">
                 {song.scans.map((scan) => (
                   <li key={scan.id}>
-                    <div><strong>{[scan.notebookName, scan.pageLabel].filter(Boolean).join(" · ") || "Scanned page"}</strong><span>{scan.filename}</span></div>
-                    <a className="media-action" href={`/api/media/${encodeURIComponent(scan.mediaId)}`} target="_blank" rel="noreferrer">View</a>
+                    <div><strong>{scanDisplayName(scan)}</strong><span>{scan.filename}</span></div>
+                    <button className="media-action" type="button" disabled={!isOnline} title={isOnline ? "View scan" : "Scans require an internet connection"} onClick={() => setViewerScanId(scan.id)}>View</button>
                   </li>
                 ))}
               </ul>
@@ -345,6 +352,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
         </div>
         <aside><MetadataList song={song} /></aside>
       </div>
+      {viewerScanId && <ScanViewer scans={song.scans} initialScanId={viewerScanId} onClose={() => setViewerScanId(null)} />}
     </main>
   );
 }

@@ -800,6 +800,205 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.scan-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  padding: max(0.75rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right)) max(0.75rem, env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left));
+  place-items: center;
+  background: rgb(19 17 14 / 92%);
+}
+
+.scan-viewer-panel {
+  position: relative;
+  display: grid;
+  width: min(100%, 90rem);
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 0.9rem;
+  background: #1c1916;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 45%);
+}
+
+.scan-viewer-header,
+.scan-viewer-toolbar,
+.scan-viewer-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0.8rem;
+  color: #fffaf1;
+  background: #26221e;
+}
+
+.scan-viewer-header {
+  border-bottom: 1px solid rgb(255 255 255 / 12%);
+}
+
+.scan-viewer-header > div {
+  min-width: 0;
+}
+
+.scan-viewer-header h2 {
+  margin: 0 0 0.15rem;
+  overflow: hidden;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-viewer-header span {
+  display: block;
+  overflow: hidden;
+  color: #c7beb3;
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-viewer button,
+.scan-viewer a {
+  min-height: 2.35rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 0.55rem;
+  color: #fffaf1;
+  background: #39332d;
+  font-size: 0.76rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.scan-viewer a {
+  display: inline-flex;
+  align-items: center;
+}
+
+.scan-viewer button:hover,
+.scan-viewer a:hover {
+  background: #4a423a;
+}
+
+.scan-viewer button:focus-visible,
+.scan-viewer a:focus-visible {
+  outline: 3px solid #f0b77f;
+  outline-offset: 2px;
+}
+
+.scan-viewer .scan-close-action {
+  width: 2.45rem;
+  padding: 0;
+  font-size: 1.5rem;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.scan-viewer-toolbar {
+  flex-wrap: wrap;
+  padding-block: 0.5rem;
+  border-bottom: 1px solid rgb(255 255 255 / 9%);
+  background: #211e1a;
+}
+
+.scan-viewer-toolbar > div {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.scan-viewer-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(45deg, #24211e 25%, transparent 25%) 0 0 / 1rem 1rem,
+    linear-gradient(45deg, transparent 75%, #24211e 75%) 0 0 / 1rem 1rem,
+    #1b1917;
+  overscroll-behavior: contain;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.scan-viewer-stage img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  max-width: none;
+  max-height: none;
+  transform-origin: 0 0;
+  will-change: transform;
+  -webkit-user-drag: none;
+}
+
+.scan-load-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  gap: 1rem;
+  padding: 1.5rem;
+  place-content: center;
+  justify-items: center;
+  color: #fffaf1;
+  text-align: center;
+}
+
+.scan-load-error a {
+  justify-self: center;
+}
+
+.scan-viewer-navigation {
+  justify-content: center;
+  border-top: 1px solid rgb(255 255 255 / 12%);
+}
+
+.scan-viewer:fullscreen {
+  padding: max(0.4rem, env(safe-area-inset-top)) max(0.4rem, env(safe-area-inset-right)) max(0.4rem, env(safe-area-inset-bottom)) max(0.4rem, env(safe-area-inset-left));
+}
+
+.scan-viewer:fullscreen .scan-viewer-panel {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+.scan-viewer-image-only {
+  padding: 0;
+}
+
+.scan-viewer-image-only .scan-viewer-panel {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.scan-viewer .scan-image-only-close {
+  position: absolute;
+  top: max(0.75rem, env(safe-area-inset-top));
+  right: max(0.75rem, env(safe-area-inset-right));
+  z-index: 2;
+  width: 2.8rem;
+  height: 2.8rem;
+  padding: 0;
+  border-color: rgb(255 255 255 / 45%);
+  border-radius: 50%;
+  background: rgb(22 19 17 / 72%);
+  box-shadow: 0 3px 16px rgb(0 0 0 / 38%);
+  font-size: 1.65rem;
+  font-weight: 400;
+  line-height: 1;
+  backdrop-filter: blur(10px);
+}
+
 .bottom-nav {
   position: fixed;
   right: 0;
@@ -902,6 +1101,29 @@ button:disabled {
 
   .catalog-tools {
     grid-template-columns: 1fr;
+  }
+
+  .scan-viewer {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  .scan-viewer-panel {
+    border: 0;
+    border-radius: 0;
+  }
+
+  .scan-viewer-header,
+  .scan-viewer-toolbar,
+  .scan-viewer-navigation {
+    padding-inline: 0.6rem;
+  }
+
+  .scan-viewer-toolbar {
+    gap: 0.45rem;
+  }
+
+  .scan-viewer-toolbar > div:last-child {
+    margin-left: auto;
   }
 
   .song-row {
