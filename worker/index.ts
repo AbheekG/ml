@@ -4,6 +4,7 @@ import { verifyWithJwks } from "hono/jwt";
 import { loadOfflineLibrary } from "./offline-library";
 import {
   parseLyricCreate,
+  parseLyricRevision,
   parseLyricUpdate,
   type LyricUpdateInput,
 } from "./lyric-writes";
@@ -106,6 +107,12 @@ type MediaRow = {
   mimeType: string | null;
 };
 
+type LyricStateRow = {
+  revision: number;
+  trashedAt: string | null;
+  songTrashedAt: string | null;
+};
+
 type LookupTable = "languages" | "tags";
 
 async function lookupIdsExist(database: D1Database, table: LookupTable, ids: string[]): Promise<boolean> {
@@ -140,6 +147,22 @@ function lyricWriteError(error: unknown): { error: string; status: 400 | 409 | 5
     return { error: "song_not_found", status: 400 };
   }
   return { error: "lyric_write_failed", status: 500 };
+}
+
+async function loadLyricState(
+  database: D1Database,
+  songId: string,
+  lyricId: string,
+): Promise<LyricStateRow | null> {
+  return database.prepare(`
+    SELECT
+      lyric_texts.revision,
+      lyric_texts.trashed_at AS trashedAt,
+      songs.trashed_at AS songTrashedAt
+    FROM lyric_texts
+    JOIN songs ON songs.id = lyric_texts.song_id
+    WHERE lyric_texts.id = ? AND lyric_texts.song_id = ?
+  `).bind(lyricId, songId).first<LyricStateRow>();
 }
 
 function languageStatementsForUpdate(
@@ -575,6 +598,180 @@ app.put("/api/songs/:songId/lyrics/:lyricId", requireRole("editor"), async (cont
       return context.json({ error: "lyric_edit_conflict", currentRevision: current.revision }, 409);
     }
     return context.json({ lyric: { id: lyricId, revision: lyric.revision + 1 } });
+  } catch (error) {
+    const response = lyricWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
+app.post("/api/songs/:songId/lyrics/:lyricId/trash", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseLyricRevision(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_lyric", fields: parsed.fields }, 400);
+  }
+  const songId = context.req.param("songId");
+  const lyricId = context.req.param("lyricId");
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        UPDATE lyric_texts
+        SET trashed_at = ?,
+            trashed_by = ?,
+            revision = revision + 1,
+            updated_at = ?,
+            updated_by = ?
+        WHERE id = ?
+          AND song_id = ?
+          AND revision = ?
+          AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM songs
+            WHERE songs.id = lyric_texts.song_id AND songs.trashed_at IS NULL
+          )
+      `).bind(timestamp, actor, timestamp, actor, lyricId, songId, parsed.data.revision),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM lyric_texts
+            WHERE id = ?
+              AND song_id = songs.id
+              AND revision = ?
+              AND trashed_at = ?
+              AND trashed_by = ?
+          )
+      `).bind(timestamp, actor, songId, lyricId, parsed.data.revision + 1, timestamp, actor),
+    ]);
+    if (results[0].meta.changes === 0) {
+      const current = await loadLyricState(context.env.DB, songId, lyricId);
+      if (!current || current.songTrashedAt !== null) {
+        return context.json({ error: "lyric_not_found" }, 404);
+      }
+      if (current.trashedAt !== null) {
+        return context.json({ error: "lyric_already_trashed", currentRevision: current.revision }, 409);
+      }
+      return context.json({ error: "lyric_edit_conflict", currentRevision: current.revision }, 409);
+    }
+    return context.json({ lyric: { id: lyricId, revision: parsed.data.revision + 1 } });
+  } catch (error) {
+    const response = lyricWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
+app.get("/api/trash", requireRole("editor"), async (context) => {
+  const lyrics = await context.env.DB.prepare(`
+    SELECT
+      lyric_texts.id,
+      lyric_texts.song_id AS songId,
+      songs.title_latin AS songTitle,
+      lyric_texts.content,
+      lyric_texts.origin,
+      lyric_texts.revision,
+      lyric_texts.trashed_at AS trashedAt,
+      CASE WHEN songs.trashed_at IS NULL THEN 0 ELSE 1 END AS songIsTrashed
+    FROM lyric_texts
+    JOIN songs ON songs.id = lyric_texts.song_id
+    WHERE lyric_texts.trashed_at IS NOT NULL
+    ORDER BY lyric_texts.trashed_at DESC, lyric_texts.id
+  `).all<{
+    id: string;
+    songId: string;
+    songTitle: string;
+    content: string;
+    origin: "user" | "legacy_import";
+    revision: number;
+    trashedAt: string;
+    songIsTrashed: number;
+  }>();
+  return context.json({
+    lyrics: lyrics.results.map((lyric) => ({
+      ...lyric,
+      songIsTrashed: lyric.songIsTrashed === 1,
+    })),
+  });
+});
+
+app.post("/api/trash/lyrics/:lyricId/restore", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseLyricRevision(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_lyric", fields: parsed.fields }, 400);
+  }
+  const lyricId = context.req.param("lyricId");
+  const current = await context.env.DB.prepare(`
+    SELECT lyric_texts.song_id AS songId
+    FROM lyric_texts
+    JOIN songs ON songs.id = lyric_texts.song_id
+    WHERE lyric_texts.id = ?
+  `).bind(lyricId).first<{ songId: string }>();
+  if (!current) return context.json({ error: "lyric_not_found" }, 404);
+
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        UPDATE lyric_texts
+        SET trashed_at = NULL,
+            trashed_by = NULL,
+            revision = revision + 1,
+            updated_at = ?,
+            updated_by = ?
+        WHERE id = ?
+          AND revision = ?
+          AND trashed_at IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM songs
+            WHERE songs.id = lyric_texts.song_id AND songs.trashed_at IS NULL
+          )
+      `).bind(timestamp, actor, lyricId, parsed.data.revision),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM lyric_texts
+            WHERE id = ?
+              AND song_id = songs.id
+              AND revision = ?
+              AND trashed_at IS NULL
+              AND updated_at = ?
+              AND updated_by = ?
+          )
+      `).bind(
+        timestamp, actor, current.songId, lyricId,
+        parsed.data.revision + 1, timestamp, actor,
+      ),
+    ]);
+    if (results[0].meta.changes === 0) {
+      const state = await loadLyricState(context.env.DB, current.songId, lyricId);
+      if (!state || state.songTrashedAt !== null) {
+        return context.json({ error: "lyric_parent_trashed" }, 409);
+      }
+      if (state.trashedAt === null) {
+        return context.json({ error: "lyric_not_trashed", currentRevision: state.revision }, 409);
+      }
+      return context.json({ error: "lyric_edit_conflict", currentRevision: state.revision }, 409);
+    }
+    return context.json({
+      lyric: { id: lyricId, songId: current.songId, revision: parsed.data.revision + 1 },
+    });
   } catch (error) {
     const response = lyricWriteError(error);
     return context.json({ error: response.error }, response.status);

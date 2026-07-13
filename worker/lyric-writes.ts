@@ -13,6 +13,10 @@ const updateLyricSchema = z.object({
   revision: z.number().int().positive(),
 }).strict();
 
+const lyricRevisionSchema = z.object({
+  revision: z.number().int().positive(),
+}).strict();
+
 export type LyricWriteInput = {
   content: string;
 };
@@ -42,6 +46,12 @@ export function parseLyricCreate(value: unknown): LyricParseResult<LyricWriteInp
 
 export function parseLyricUpdate(value: unknown): LyricParseResult<LyricUpdateInput> {
   const result = updateLyricSchema.safeParse(value);
+  if (!result.success) return { success: false, fields: fieldsFromError(result.error) };
+  return { success: true, data: result.data };
+}
+
+export function parseLyricRevision(value: unknown): LyricParseResult<{ revision: number }> {
+  const result = lyricRevisionSchema.safeParse(value);
   if (!result.success) return { success: false, fields: fieldsFromError(result.error) };
   return { success: true, data: result.data };
 }

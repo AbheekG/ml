@@ -171,4 +171,46 @@ describe("initial database schema", () => {
       UPDATE songs SET trashed_at = '${timestamp}', trashed_by = 'test' WHERE id = 'song-1';
     `)).toThrow(/song_has_active_content/);
   });
+
+  it("can trash and restore typed lyrics without changing their content", () => {
+    const output = runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO lyric_texts (
+        id, song_id, content, created_at, created_by, updated_at, updated_by
+      ) VALUES ('lyrics-1', 'song-1', 'line one' || char(10) || char(10) || 'line two', '${timestamp}', 'test', '${timestamp}', 'test');
+      UPDATE lyric_texts
+      SET trashed_at = '${timestamp}', trashed_by = 'test', revision = revision + 1
+      WHERE id = 'lyrics-1';
+      UPDATE lyric_texts
+      SET trashed_at = NULL, trashed_by = NULL, revision = revision + 1
+      WHERE id = 'lyrics-1';
+      SELECT content || '|' || revision FROM lyric_texts WHERE id = 'lyrics-1';
+    `);
+
+    expect(output).toBe("line one\n\nline two|3\n");
+  });
+
+  it("rejects restoring typed lyrics when identical active content now exists", () => {
+    expect(() => runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO lyric_texts (
+        id, song_id, content, created_at, created_by, updated_at, updated_by
+      ) VALUES ('lyrics-1', 'song-1', 'same text', '${timestamp}', 'test', '${timestamp}', 'test');
+      UPDATE lyric_texts
+      SET trashed_at = '${timestamp}', trashed_by = 'test'
+      WHERE id = 'lyrics-1';
+      INSERT INTO lyric_texts (
+        id, song_id, content, created_at, created_by, updated_at, updated_by
+      ) VALUES ('lyrics-2', 'song-1', 'same text', '${timestamp}', 'test', '${timestamp}', 'test');
+      UPDATE lyric_texts
+      SET trashed_at = NULL, trashed_by = NULL
+      WHERE id = 'lyrics-1';
+    `)).toThrow(/UNIQUE constraint failed/);
+  });
 });

@@ -180,6 +180,17 @@ export type SongWritePayload = {
   notes: string | null;
 };
 
+export type TrashedLyric = {
+  id: string;
+  songId: string;
+  songTitle: string;
+  content: string;
+  origin: "user" | "legacy_import";
+  revision: number;
+  trashedAt: string;
+  songIsTrashed: boolean;
+};
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -202,6 +213,9 @@ function apiErrorMessage(code: string): string {
     duplicate_lyric_text: "This song already has an identical typed-lyrics block.",
     lyric_edit_conflict: "These typed lyrics changed after you opened them. Reload and try again.",
     lyric_not_found: "These typed lyrics are no longer available.",
+    lyric_already_trashed: "These typed lyrics are already in Trash.",
+    lyric_not_trashed: "These typed lyrics have already been restored.",
+    lyric_parent_trashed: "Restore the parent Song before restoring these typed lyrics.",
   };
   return messages[code] ?? "The change could not be saved.";
 }
@@ -284,5 +298,39 @@ export async function updateLyric(
       body: JSON.stringify({ content, revision }),
     },
   );
+  return response.lyric;
+}
+
+export async function trashLyric(
+  songId: string,
+  lyricId: string,
+  revision: number,
+): Promise<{ id: string; revision: number }> {
+  const response = await apiJson<{ lyric: { id: string; revision: number } }>(
+    `/api/songs/${encodeURIComponent(songId)}/lyrics/${encodeURIComponent(lyricId)}/trash`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision }),
+    },
+  );
+  return response.lyric;
+}
+
+export async function loadTrash(): Promise<{ lyrics: TrashedLyric[] }> {
+  return apiJson<{ lyrics: TrashedLyric[] }>("/api/trash");
+}
+
+export async function restoreLyric(
+  lyricId: string,
+  revision: number,
+): Promise<{ id: string; songId: string; revision: number }> {
+  const response = await apiJson<{
+    lyric: { id: string; songId: string; revision: number };
+  }>(`/api/trash/lyrics/${encodeURIComponent(lyricId)}/restore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ revision }),
+  });
   return response.lyric;
 }

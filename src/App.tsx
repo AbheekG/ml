@@ -4,12 +4,15 @@ import {
   ApiError,
   createLyric,
   createSong,
+  loadTrash,
   loadSession,
   loadSongEditorOptions,
   readCachedCatalog,
   readCachedSong,
   refreshOfflineLibrary,
   refreshSong,
+  restoreLyric,
+  trashLyric,
   updateLyric,
   updateSong,
   type AppSession,
@@ -17,6 +20,7 @@ import {
   type SongEditorOptions,
   type SongDetail,
   type SongWritePayload,
+  type TrashedLyric,
 } from "./catalog";
 
 function useOnlineStatus(): boolean {
@@ -364,6 +368,7 @@ function LyricEditorPage({
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTrashing, setIsTrashing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -422,6 +427,33 @@ function LyricEditorPage({
     }
   }
 
+  async function moveToTrash(): Promise<void> {
+    if (
+      mode !== "edit"
+      || revision === null
+      || !isOnline
+      || canEdit !== true
+      || isSaving
+      || isTrashing
+    ) return;
+    const confirmed = window.confirm(
+      "Move this typed-lyrics block to Trash? It will disappear from the Song but can be restored later.",
+    );
+    if (!confirmed) return;
+
+    setIsTrashing(true);
+    setError(null);
+    try {
+      await trashLyric(songId, lyricId, revision);
+      await refreshOfflineLibrary().catch(() => undefined);
+      navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
+    } catch (trashError) {
+      setError(trashError instanceof Error ? trashError.message : "The typed lyrics could not be moved to Trash.");
+    } finally {
+      setIsTrashing(false);
+    }
+  }
+
   const songUrl = `/songs/${encodeURIComponent(songId)}`;
   if (!isOnline) {
     return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Cancel</Link><section className="empty-state"><h1>Editing is offline</h1><p>Reconnect to create or change typed lyrics. Saved lyrics remain available to read.</p></section></main>;
@@ -459,9 +491,109 @@ function LyricEditorPage({
         </section>
         <div className="form-actions">
           <Link className="secondary-action action-link" to={songUrl}>Cancel</Link>
-          <button className="primary-action" type="submit" disabled={isSaving || content.trim().length === 0}>{isSaving ? "Saving…" : mode === "create" ? "Add lyrics" : "Save changes"}</button>
+          <button className="primary-action" type="submit" disabled={isSaving || isTrashing || content.trim().length === 0}>{isSaving ? "Saving…" : mode === "create" ? "Add lyrics" : "Save changes"}</button>
         </div>
       </form>
+      {mode === "edit" && (
+        <section className="danger-zone" aria-labelledby="remove-lyrics-title">
+          <div>
+            <h2 id="remove-lyrics-title">Remove these typed lyrics</h2>
+            <p>This moves the block to Trash. It is not permanently deleted and can be restored.</p>
+          </div>
+          <button className="danger-action" type="button" disabled={isSaving || isTrashing} onClick={() => { void moveToTrash(); }}>{isTrashing ? "Moving…" : "Move to Trash"}</button>
+        </section>
+      )}
+    </main>
+  );
+}
+
+function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
+  const [lyrics, setLyrics] = useState<TrashedLyric[]>([]);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load(): Promise<void> {
+      if (!isOnline || canEdit !== true) {
+        setIsLoading(false);
+        return;
+      }
+      try {
+        const result = await loadTrash();
+        if (!cancelled) {
+          setLyrics(result.lyrics);
+          setError(null);
+        }
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Trash could not be loaded.");
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, [canEdit, isOnline]);
+
+  async function restore(lyric: TrashedLyric): Promise<void> {
+    if (!isOnline || canEdit !== true || restoringId !== null || lyric.songIsTrashed) return;
+    setRestoringId(lyric.id);
+    setError(null);
+    try {
+      await restoreLyric(lyric.id, lyric.revision);
+      await refreshOfflineLibrary().catch(() => undefined);
+      setLyrics((current) => current.filter((item) => item.id !== lyric.id));
+    } catch (restoreError) {
+      setError(restoreError instanceof Error ? restoreError.message : "The typed lyrics could not be restored.");
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
+  if (!isOnline) {
+    return <main className="page-shell" id="main-content"><section className="empty-state"><h1>Trash is available online</h1><p>Reconnect to review or restore removed items. Your saved library remains available to read.</p></section></main>;
+  }
+  if (canEdit === null) return <main className="page-shell" id="main-content"><p>Checking editor access…</p></main>;
+  if (!canEdit) return <main className="page-shell" id="main-content"><section className="empty-state"><h1>Editor access required</h1></section></main>;
+
+  return (
+    <main className="page-shell trash-page" id="main-content">
+      <header className="catalog-heading">
+        <div>
+          <p className="eyebrow">Recovery</p>
+          <h1>Trash</h1>
+          <p className="lede">Removed items stay here indefinitely unless a future permanent-cleanup policy is approved.</p>
+        </div>
+      </header>
+      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      {isLoading ? (
+        <section className="empty-state"><p>Loading Trash…</p></section>
+      ) : lyrics.length === 0 ? (
+        <section className="empty-state"><div className="empty-mark" aria-hidden="true">✓</div><h2>Trash is empty</h2><p>Removed typed lyrics will appear here.</p></section>
+      ) : (
+        <ol className="trash-list" aria-label="Trashed typed lyrics">
+          {lyrics.map((lyric) => (
+            <li className="detail-card trash-item" key={lyric.id}>
+              <div className="trash-item-heading">
+                <div>
+                  <span>Typed lyrics</span>
+                  {lyric.songIsTrashed
+                    ? <strong>{lyric.songTitle}</strong>
+                    : <Link to={`/songs/${encodeURIComponent(lyric.songId)}`}>{lyric.songTitle}</Link>}
+                  <small>Moved {new Date(lyric.trashedAt).toLocaleString()}</small>
+                </div>
+                <button className="primary-action" type="button" disabled={restoringId !== null || lyric.songIsTrashed} onClick={() => { void restore(lyric); }}>{restoringId === lyric.id ? "Restoring…" : "Restore"}</button>
+              </div>
+              {lyric.songIsTrashed && <p className="media-note">Restore the parent Song before restoring this block.</p>}
+              <details className="trash-preview">
+                <summary>View content</summary>
+                <pre>{lyric.content}</pre>
+              </details>
+            </li>
+          ))}
+        </ol>
+      )}
     </main>
   );
 }
@@ -736,12 +868,14 @@ export function App() {
         <Route path="/songs/:songId/lyrics/new" element={<LyricEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/lyrics/:lyricId/edit" element={<LyricEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId" element={<SongDetailPage isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/trash" element={<TrashPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/account" element={<AccountPage session={session} />} />
         <Route path="*" element={<Navigate to="/songs" replace />} />
       </Routes>
 
       <nav className="bottom-nav" aria-label="Primary navigation">
         <Link to="/songs">Songs</Link>
+        {canEdit === true && <Link to="/trash">Trash</Link>}
         <Link to="/account">Account</Link>
       </nav>
     </div>

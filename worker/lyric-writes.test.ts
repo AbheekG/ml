@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseLyricCreate, parseLyricUpdate } from "./lyric-writes";
+import { parseLyricCreate, parseLyricRevision, parseLyricUpdate } from "./lyric-writes";
 
 describe("typed lyric validation", () => {
   it("preserves Unicode, spaces, and line endings exactly", () => {
@@ -22,6 +22,16 @@ describe("typed lyric validation", () => {
     expect(parseLyricUpdate({ content: "Text", revision: 0 })).toMatchObject({
       success: false,
       fields: { revision: expect.any(Array) },
+    });
+  });
+
+  it("accepts only a positive revision for Trash-state changes", () => {
+    expect(parseLyricRevision({ revision: 3 })).toEqual({
+      success: true,
+      data: { revision: 3 },
+    });
+    expect(parseLyricRevision({ revision: 3, content: "unexpected" })).toMatchObject({
+      success: false,
     });
   });
 });

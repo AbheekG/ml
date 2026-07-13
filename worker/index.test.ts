@@ -313,6 +313,147 @@ describe("Worker API", () => {
     await expect(response.json()).resolves.toEqual({ error: "duplicate_lyric_text" });
   });
 
+  it("moves typed lyrics to Trash without deleting the row", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    let batch: FakeStatement[] = [];
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => {
+        batch = statements;
+        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/lyrics/lyrics-1/trash",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: 2 }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(batch[0].query).toContain("SET trashed_at = ?");
+    expect(batch[0].query).not.toContain("DELETE FROM lyric_texts");
+    await expect(response.json()).resolves.toMatchObject({ lyric: { revision: 3 } });
+  });
+
+  it("lists trashed typed lyrics only for editors and normalizes parent state", async () => {
+    const database = {
+      prepare: () => ({
+        all: async () => ({ results: [{
+          id: "lyrics-1",
+          songId: "song-1",
+          songTitle: "A song",
+          content: "Text",
+          origin: "user",
+          revision: 3,
+          trashedAt: "2026-07-13T00:00:00.000Z",
+          songIsTrashed: 0,
+        }] }),
+      }),
+    } as unknown as D1Database;
+
+    const editorResponse = await app.request(
+      "http://local.test/api/trash",
+      undefined,
+      localBindings(database, "editor"),
+    );
+    expect(editorResponse.status).toBe(200);
+    await expect(editorResponse.json()).resolves.toMatchObject({
+      lyrics: [{ id: "lyrics-1", songIsTrashed: false }],
+    });
+
+    const viewerResponse = await app.request(
+      "http://local.test/api/trash",
+      undefined,
+      localBindings(undefined, "viewer"),
+    );
+    expect(viewerResponse.status).toBe(403);
+  });
+
+  it("restores trashed typed lyrics and records the parent Song update", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    let batch: FakeStatement[] = [];
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+          first: async () => query.includes("SELECT lyric_texts.song_id AS songId")
+            ? { songId: "song-1" }
+            : null,
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => {
+        batch = statements;
+        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/trash/lyrics/lyrics-1/restore",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: 3 }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(batch[0].query).toContain("SET trashed_at = NULL");
+    expect(batch[1].query).toContain("UPDATE songs");
+    await expect(response.json()).resolves.toEqual({
+      lyric: { id: "lyrics-1", songId: "song-1", revision: 4 },
+    });
+  });
+
+  it("blocks restoring duplicate active typed lyrics", async () => {
+    const database = {
+      prepare: (query: string) => ({
+        bind: () => ({
+          first: async () => query.includes("SELECT lyric_texts.song_id AS songId")
+            ? { songId: "song-1" }
+            : null,
+        }),
+      }),
+      batch: async () => {
+        throw new Error("UNIQUE constraint failed: lyric_texts.song_id, lyric_texts.content");
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/trash/lyrics/lyrics-1/restore",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: 3 }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "duplicate_lyric_text" });
+  });
+
   it("reports a healthy service", async () => {
     const response = await app.request("http://local.test/api/health", undefined, localBindings());
 
