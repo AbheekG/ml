@@ -6,6 +6,7 @@ import {
   emptyCatalogFilters,
   filterAndSortCatalog,
   matchesCatalogFilters,
+  matchesCatalogQuery,
   sortCatalogSongs,
 } from "./catalog-view";
 import type { SongDetail } from "./catalog";
@@ -21,6 +22,7 @@ function song(overrides: Partial<CatalogSong> & Pick<CatalogSong, "id" | "titleL
     tags: [],
     credits: [],
     notebooks: [],
+    searchText: `${overrides.titleLatin} ${overrides.titleNative ?? ""}`.toLocaleLowerCase(),
     lyricCount: 0,
     scanCount: 0,
     recordingCount: 0,
@@ -44,6 +46,7 @@ const songs = [
       { personId: "person-b", fullName: "Person B", role: "vocals" },
     ],
     notebooks: [{ id: "book-blue", displayName: "Blue notebook" }],
+    searchText: "alpha song আলফা bengali quiet person a lyrics person b vocals blue notebook",
     lyricCount: 1,
     scanCount: 1,
     recordingCount: 1,
@@ -58,6 +61,7 @@ const songs = [
     languages: [{ id: "en", displayName: "English" }],
     tags: [{ id: "tag-loud", displayName: "Loud" }],
     credits: [{ personId: "person-a", fullName: "Person A", role: "music" }],
+    searchText: "beta song বেটা english loud person a music",
   }),
 ];
 
@@ -66,17 +70,17 @@ describe("catalog filters", () => {
     const indexed = createCatalogSongIndex({
       id: "indexed",
       titleLatin: "Indexed Song",
-      titleNative: null,
+      titleNative: "Native Search Token",
       status: "checked",
       notes: null,
       revision: 1,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-02T00:00:00.000Z",
-      aliases: [],
+      aliases: ["Secondary Heading"],
       languages: [{ id: "bn", displayName: "Bengali" }],
       tags: [{ id: "tag-1", displayName: "Quiet" }],
       credits: [{ personId: "person-a", fullName: "Person A", role: "lyrics" }],
-      lyricTexts: [{ id: "lyrics-1", content: "Text", origin: "user", revision: 1 }],
+      lyricTexts: [{ id: "lyrics-1", content: "Lyric Search Token", origin: "user", revision: 1 }],
       scans: [{
         id: "scan-1",
         mediaId: "media-1",
@@ -90,7 +94,7 @@ describe("catalog filters", () => {
         id: "recording-1",
         originalMediaId: "media-2",
         playbackMediaId: null,
-        description: "Take",
+        description: "Early Recording Description",
         recordedOn: null,
         revision: 1,
         processingState: "ready",
@@ -108,9 +112,34 @@ describe("catalog filters", () => {
       recordingCount: 1,
     }));
     expect(indexed.credits.map((credit) => credit.role)).toEqual(["lyrics", "vocals"]);
+    for (const query of [
+      "indexed song",
+      "native search token",
+      "secondary heading",
+      "lyric search token",
+      "bengali",
+      "quiet",
+      "person b",
+      "vocals",
+      "notebook one",
+      "early recording description",
+    ]) {
+      expect(matchesCatalogQuery(indexed, query), query).toBe(true);
+    }
   });
 
-  it("composes title query with lookup, status, and media-presence filters", () => {
+  it("normalizes query case and whitespace", () => {
+    const searchable = song({
+      id: "searchable",
+      titleLatin: "Searchable",
+      searchText: "searchable secondary heading",
+    });
+
+    expect(matchesCatalogQuery(searchable, "  SECONDARY\n\tHEADING  ")).toBe(true);
+    expect(matchesCatalogQuery(searchable, "missing phrase")).toBe(false);
+  });
+
+  it("composes a metadata query with lookup, status, and media-presence filters", () => {
     const filters = {
       ...emptyCatalogFilters(),
       languageIds: ["bn"],
@@ -123,8 +152,8 @@ describe("catalog filters", () => {
       hasRecordings: true,
     };
 
-    expect(filterAndSortCatalog(songs, "alpha", filters, "latin-asc").map((item) => item.id)).toEqual(["alpha"]);
-    expect(filterAndSortCatalog(songs, "beta", filters, "latin-asc")).toEqual([]);
+    expect(filterAndSortCatalog(songs, "vocals", filters, "latin-asc").map((item) => item.id)).toEqual(["alpha"]);
+    expect(filterAndSortCatalog(songs, "music", filters, "latin-asc")).toEqual([]);
   });
 
   it("matches any selected value within one category", () => {

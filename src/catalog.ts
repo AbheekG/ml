@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from "dexie";
-import { createCatalogSongIndex } from "./catalog-view";
+import { buildCatalogSearchText, createCatalogSongIndex } from "./catalog-view";
 
 export type CatalogSong = {
   id: string;
@@ -13,6 +13,7 @@ export type CatalogSong = {
   tags: Array<{ id: string; displayName: string }>;
   credits: Credit[];
   notebooks: Array<{ id: string; displayName: string }>;
+  searchText: string;
   lyricCount: number;
   scanCount: number;
   recordingCount: number;
@@ -122,7 +123,8 @@ function hasExpandedCatalogFields(song: CatalogSong): boolean {
     && Array.isArray(stored.languages)
     && Array.isArray(stored.tags)
     && Array.isArray(stored.credits)
-    && Array.isArray(stored.notebooks);
+    && Array.isArray(stored.notebooks)
+    && typeof stored.searchText === "string";
 }
 
 function normalizeStoredCatalogSong(song: CatalogSong): CatalogSong {
@@ -135,6 +137,7 @@ function normalizeStoredCatalogSong(song: CatalogSong): CatalogSong {
     tags: stored.tags ?? [],
     credits: stored.credits ?? [],
     notebooks: stored.notebooks ?? [],
+    searchText: stored.searchText ?? buildCatalogSearchText([song.titleLatin, song.titleNative]),
   };
 }
 

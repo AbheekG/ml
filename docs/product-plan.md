@@ -59,6 +59,8 @@ At the current and expected scale, the complete locally cached catalog can be fi
 
 The first release includes immediate local substring search over Latin title, native title, aliases, and typed lyrics. Advanced typo-tolerant phonetic/transliteration ranking is a later phase based on the woodchime and AppSheet experiments plus owner-provided expected results.
 
+The initial multi-field substring implementation also indexes relevant Language, Tag, Person/role, Notebook, and Recording-description text and treats every indexed field equally. This is an accepted baseline, but typed lyrics contain much more text than the other fields and can therefore produce too many low-value matches. The later ranking/design phase must test stronger priority for title and alias matches, lower weight for metadata and lyric-only matches, and whether an explicit scope control such as All, Titles, or Lyrics improves real use. Choose among those approaches using owner-provided queries rather than adding a speculative control now.
+
 Search and filters operate together on the same catalog. A separate search-results page is unnecessary unless later usability testing shows a benefit.
 
 ### Filters

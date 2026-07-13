@@ -34,7 +34,7 @@ The private staging application is operational:
 
 - the normalized D1 schema and guarded relationships are implemented;
 - the AppSheet importer validates and loads all 454 songs plus related lyrics and media metadata into local D1;
-- the responsive catalog reads real local data, searches Latin/native titles, and composes offline Language/Tag/Person-role/Notebook/status/media filters with six local sort choices;
+- the responsive catalog reads real local data, searches titles, aliases, typed lyrics, and relevant metadata, and composes offline Language/Tag/Person-role/Notebook/status/media filters with six local sort choices;
 - song detail displays metadata, typed lyrics, scan records, and recording records;
 - the complete catalog, metadata, and typed lyrics are atomically cached in IndexedDB, while the production app shell and hashed assets are precached by a service worker;
 - private scans open in an in-app zoom/pan viewer and recordings stream with seeking;

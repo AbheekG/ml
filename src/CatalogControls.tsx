@@ -215,7 +215,7 @@ export function CatalogControls({
           <span aria-hidden="true">⌕</span>
           <input
             type="search"
-            placeholder="Search song titles"
+            placeholder="Search titles, lyrics, and metadata"
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             disabled={disabled}

@@ -4,13 +4,12 @@ Status: approved direction; execute iteratively and validate each phase on real 
 
 ## Current execution order
 
-The core read/edit/recovery flows, safe new-Scan upload, and local catalog filters/sorting now work in staging. The owner accepted the catalog controls online and offline after real-device refinement. Continue the discovery experience before returning to broader media processing:
+The core read/edit/recovery flows, safe new-Scan upload, local catalog filters/sorting, and multi-field offline substring search now work in staging. The owner accepted the search baseline while noting that equal-priority matching can let large typed-lyric blocks produce too many results. Continue the discovery experience before returning to broader media processing:
 
-1. multi-field offline search across Latin/native titles, aliases, typed lyrics, and relevant metadata;
-2. typo-tolerant phonetic/transliteration ranking, starting from the legacy woodchime/AppSheet experiments and owner-provided acceptance examples;
-3. new Recording upload plus the audio validation/conversion pipeline;
-4. safe Scan/Recording replacement and imported-media fingerprint/derivative work;
-5. compact contributor inputs, sharing, and remaining feedback-driven polish.
+1. typo-tolerant phonetic/transliteration ranking, starting from the legacy woodchime/AppSheet experiments and owner-provided acceptance examples; evaluate title/alias priority, lower-weight metadata/lyric matches, and an optional field-scope control as part of this work;
+2. new Recording upload plus the audio validation/conversion pipeline;
+3. safe Scan/Recording replacement and imported-media fingerprint/derivative work;
+4. compact contributor inputs, sharing, and remaining feedback-driven polish.
 
 This is a delivery order rather than a schema dependency: search and filters can be implemented before the remaining media work.
 

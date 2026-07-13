@@ -40,6 +40,14 @@ export type CatalogFilterOptions = {
   statuses: CatalogFilterOption[];
 };
 
+export function normalizeCatalogSearchText(value: string): string {
+  return value.normalize("NFKC").toLocaleLowerCase().replace(/\s+/gu, " ").trim();
+}
+
+export function buildCatalogSearchText(values: Array<string | null | undefined>): string {
+  return normalizeCatalogSearchText(values.filter((value): value is string => Boolean(value)).join(" "));
+}
+
 export function emptyCatalogFilters(): CatalogFilters {
   return {
     languageIds: [],
@@ -69,6 +77,9 @@ export function createCatalogSongIndex(song: SongDetail): CatalogSong {
     }
   }
 
+  const indexedCredits = [...credits.values()];
+  const indexedNotebooks = [...notebooks.values()];
+
   return {
     id: song.id,
     titleLatin: song.titleLatin,
@@ -79,8 +90,19 @@ export function createCatalogSongIndex(song: SongDetail): CatalogSong {
     languageIds: song.languages.map((language) => language.id),
     languages: song.languages,
     tags: song.tags,
-    credits: [...credits.values()],
-    notebooks: [...notebooks.values()],
+    credits: indexedCredits,
+    notebooks: indexedNotebooks,
+    searchText: buildCatalogSearchText([
+      song.titleLatin,
+      song.titleNative,
+      ...song.aliases,
+      ...song.lyricTexts.map((lyricText) => lyricText.content),
+      ...song.languages.map((language) => language.displayName),
+      ...song.tags.map((tag) => tag.displayName),
+      ...indexedCredits.flatMap((credit) => [credit.fullName, credit.role]),
+      ...indexedNotebooks.map((notebook) => notebook.displayName),
+      ...song.recordings.map((recording) => recording.description),
+    ]),
     lyricCount: song.lyricTexts.length,
     scanCount: song.scans.length,
     recordingCount: song.recordings.length,
@@ -116,9 +138,9 @@ export function matchesCatalogFilters(song: CatalogSong, filters: CatalogFilters
 }
 
 export function matchesCatalogQuery(song: CatalogSong, query: string): boolean {
-  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const normalizedQuery = normalizeCatalogSearchText(query);
   if (!normalizedQuery) return true;
-  return `${song.titleLatin} ${song.titleNative ?? ""}`.toLocaleLowerCase().includes(normalizedQuery);
+  return song.searchText.includes(normalizedQuery);
 }
 
 function compareLatinTitles(left: CatalogSong, right: CatalogSong, direction: 1 | -1): number {
