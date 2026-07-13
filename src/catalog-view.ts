@@ -1,4 +1,9 @@
 import type { CatalogSong, Credit, SongDetail } from "./catalog";
+import {
+  buildCatalogSearchFields,
+  normalizeCatalogSearchText,
+  scoreCatalogSearch,
+} from "./catalog-search";
 
 export const CATALOG_SORTS = [
   "latin-asc",
@@ -40,14 +45,6 @@ export type CatalogFilterOptions = {
   statuses: CatalogFilterOption[];
 };
 
-export function normalizeCatalogSearchText(value: string): string {
-  return value.normalize("NFKC").toLocaleLowerCase().replace(/\s+/gu, " ").trim();
-}
-
-export function buildCatalogSearchText(values: Array<string | null | undefined>): string {
-  return normalizeCatalogSearchText(values.filter((value): value is string => Boolean(value)).join(" "));
-}
-
 export function emptyCatalogFilters(): CatalogFilters {
   return {
     languageIds: [],
@@ -79,6 +76,18 @@ export function createCatalogSongIndex(song: SongDetail): CatalogSong {
 
   const indexedCredits = [...credits.values()];
   const indexedNotebooks = [...notebooks.values()];
+  const searchFields = buildCatalogSearchFields({
+    titles: [song.titleLatin, song.titleNative],
+    aliases: song.aliases,
+    lyrics: song.lyricTexts.map((lyricText) => lyricText.content),
+    metadata: [
+      ...song.languages.map((language) => language.displayName),
+      ...song.tags.map((tag) => tag.displayName),
+      ...indexedCredits.flatMap((credit) => [credit.fullName, credit.role]),
+      ...indexedNotebooks.map((notebook) => notebook.displayName),
+      ...song.recordings.map((recording) => recording.description),
+    ],
+  });
 
   return {
     id: song.id,
@@ -92,17 +101,7 @@ export function createCatalogSongIndex(song: SongDetail): CatalogSong {
     tags: song.tags,
     credits: indexedCredits,
     notebooks: indexedNotebooks,
-    searchText: buildCatalogSearchText([
-      song.titleLatin,
-      song.titleNative,
-      ...song.aliases,
-      ...song.lyricTexts.map((lyricText) => lyricText.content),
-      ...song.languages.map((language) => language.displayName),
-      ...song.tags.map((tag) => tag.displayName),
-      ...indexedCredits.flatMap((credit) => [credit.fullName, credit.role]),
-      ...indexedNotebooks.map((notebook) => notebook.displayName),
-      ...song.recordings.map((recording) => recording.description),
-    ]),
+    searchFields,
     lyricCount: song.lyricTexts.length,
     scanCount: song.scans.length,
     recordingCount: song.recordings.length,
@@ -138,9 +137,7 @@ export function matchesCatalogFilters(song: CatalogSong, filters: CatalogFilters
 }
 
 export function matchesCatalogQuery(song: CatalogSong, query: string): boolean {
-  const normalizedQuery = normalizeCatalogSearchText(query);
-  if (!normalizedQuery) return true;
-  return song.searchText.includes(normalizedQuery);
+  return scoreCatalogSearch(song.searchFields, query) !== null;
 }
 
 function compareLatinTitles(left: CatalogSong, right: CatalogSong, direction: 1 | -1): number {
@@ -175,10 +172,20 @@ export function filterAndSortCatalog(
   filters: CatalogFilters,
   sort: CatalogSort,
 ): CatalogSong[] {
-  return sortCatalogSongs(
-    songs.filter((song) => matchesCatalogQuery(song, query) && matchesCatalogFilters(song, filters)),
-    sort,
-  );
+  const filtered = songs.filter((song) => matchesCatalogFilters(song, filters));
+  const normalizedQuery = normalizeCatalogSearchText(query);
+  if (!normalizedQuery) return sortCatalogSongs(filtered, sort);
+
+  const sortedBySelectedOption = sortCatalogSongs(filtered, sort);
+  const selectedSortOrder = new Map(sortedBySelectedOption.map((song, index) => [song.id, index]));
+  return filtered
+    .map((song) => ({ song, score: scoreCatalogSearch(song.searchFields, normalizedQuery) }))
+    .filter((result): result is { song: CatalogSong; score: number } => result.score !== null)
+    .sort((left, right) => (
+      right.score - left.score
+      || (selectedSortOrder.get(left.song.id) ?? 0) - (selectedSortOrder.get(right.song.id) ?? 0)
+    ))
+    .map((result) => result.song);
 }
 
 function sortedOptions(values: CatalogFilterOption[]): CatalogFilterOption[] {

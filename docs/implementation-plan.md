@@ -4,14 +4,14 @@ Status: approved direction; execute iteratively and validate each phase on real 
 
 ## Current execution order
 
-The core read/edit/recovery flows, safe new-Scan upload, local catalog filters/sorting, and multi-field offline substring search now work in staging. The owner accepted the search baseline while noting that equal-priority matching can let large typed-lyric blocks produce too many results. Continue the discovery experience before returning to broader media processing:
+The core read/edit/recovery flows, safe new-Scan upload, local catalog filters/sorting, and field-aware offline search now work in staging. The owner accepted relevance-ranked phonetic/transliteration search with stronger title/alias priority, literal-only lower-ranked metadata/lyrics, bounded typos, and local joined/split-word alignment. A field-scope control was not needed for this slice and remains evidence-driven future work. Continue with broader media processing:
 
-1. typo-tolerant phonetic/transliteration ranking, starting from the legacy woodchime/AppSheet experiments and owner-provided acceptance examples; evaluate title/alias priority, lower-weight metadata/lyric matches, and an optional field-scope control as part of this work;
-2. new Recording upload plus the audio validation/conversion pipeline;
-3. safe Scan/Recording replacement and imported-media fingerprint/derivative work;
-4. compact contributor inputs, sharing, and remaining feedback-driven polish.
+1. new Recording upload plus the audio validation/conversion pipeline;
+2. safe Scan/Recording replacement and imported-media fingerprint/derivative work;
+3. compact contributor inputs, sharing, and remaining feedback-driven polish;
+4. further search tuning or a field-scope control only when concrete real-use examples justify it.
 
-This is a delivery order rather than a schema dependency: search and filters can be implemented before the remaining media work.
+This is a delivery order rather than a schema dependency. The accepted search and filter work remains independently testable while media workflows are added.
 
 ## Technical shape
 
@@ -103,7 +103,7 @@ Deliverable: safe online maintenance by the primary editor.
 
 ## Phase 5 — later improvements
 
-- advanced phonetic/transliteration ranking from tested real queries;
+- further phonetic/transliteration tuning, language-specific alternatives, or a field-scope control only if tested real queries expose remaining gaps;
 - replace long Person checkbox grids with compact repeatable credit rows: an Add contributor action, searchable Person combobox, controlled Role dropdown, and per-row remove control;
 - one-tap system sharing for an individual scan or recording by sharing authenticated file bytes rather than exposing a public media URL, with capability-aware fallback behavior;
 - copy for an individual typed-lyric block, plus system text sharing where supported;

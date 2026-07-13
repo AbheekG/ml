@@ -14,7 +14,7 @@ The application is being rebuilt from two private legacy attempts. The AppSheet 
 - no cascading Song deletion;
 - installable PWA without App Store distribution;
 - Cloudflare Worker + D1 + private R2 + Access deployment, validated in staging before production;
-- advanced phonetic/transliteration search after the core catalog works.
+- immediate local/offline field-aware search with phonetic/transliteration and bounded typo-tolerant title/alias ranking.
 
 See [the product plan](docs/product-plan.md) and [the implementation plan](docs/implementation-plan.md).
 
@@ -34,7 +34,8 @@ The private staging application is operational:
 
 - the normalized D1 schema and guarded relationships are implemented;
 - the AppSheet importer validates and loads all 454 songs plus related lyrics and media metadata into local D1;
-- the responsive catalog reads real local data, searches titles, aliases, typed lyrics, and relevant metadata, and composes offline Language/Tag/Person-role/Notebook/status/media filters with six local sort choices;
+- the responsive catalog reads real local data and composes field-aware relevance search with offline Language/Tag/Person-role/Notebook/status/media filters and six local sort choices;
+- exact and phonetic title/alias matches outrank literal metadata and lyric-only matches; bounded Indic-roman normalization, typos, later title words, and locally joined/split words work entirely from the offline cache;
 - song detail displays metadata, typed lyrics, scan records, and recording records;
 - the complete catalog, metadata, and typed lyrics are atomically cached in IndexedDB, while the production app shell and hashed assets are precached by a service worker;
 - private scans open in an in-app zoom/pan viewer and recordings stream with seeking;

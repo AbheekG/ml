@@ -10,6 +10,7 @@ import {
   sortCatalogSongs,
 } from "./catalog-view";
 import type { SongDetail } from "./catalog";
+import { buildCatalogSearchFields } from "./catalog-search";
 
 function song(overrides: Partial<CatalogSong> & Pick<CatalogSong, "id" | "titleLatin">): CatalogSong {
   return {
@@ -22,7 +23,7 @@ function song(overrides: Partial<CatalogSong> & Pick<CatalogSong, "id" | "titleL
     tags: [],
     credits: [],
     notebooks: [],
-    searchText: `${overrides.titleLatin} ${overrides.titleNative ?? ""}`.toLocaleLowerCase(),
+    searchFields: buildCatalogSearchFields({ titles: [overrides.titleLatin, overrides.titleNative] }),
     lyricCount: 0,
     scanCount: 0,
     recordingCount: 0,
@@ -46,7 +47,10 @@ const songs = [
       { personId: "person-b", fullName: "Person B", role: "vocals" },
     ],
     notebooks: [{ id: "book-blue", displayName: "Blue notebook" }],
-    searchText: "alpha song আলফা bengali quiet person a lyrics person b vocals blue notebook",
+    searchFields: buildCatalogSearchFields({
+      titles: ["Alpha Song", "আলফা"],
+      metadata: ["Bengali", "Quiet", "Person A", "Lyrics", "Person B", "Vocals", "Blue notebook"],
+    }),
     lyricCount: 1,
     scanCount: 1,
     recordingCount: 1,
@@ -61,7 +65,10 @@ const songs = [
     languages: [{ id: "en", displayName: "English" }],
     tags: [{ id: "tag-loud", displayName: "Loud" }],
     credits: [{ personId: "person-a", fullName: "Person A", role: "music" }],
-    searchText: "beta song বেটা english loud person a music",
+    searchFields: buildCatalogSearchFields({
+      titles: ["Beta Song", "বেটা"],
+      metadata: ["English", "Loud", "Person A", "Music"],
+    }),
   }),
 ];
 
@@ -132,11 +139,51 @@ describe("catalog filters", () => {
     const searchable = song({
       id: "searchable",
       titleLatin: "Searchable",
-      searchText: "searchable secondary heading",
+      searchFields: buildCatalogSearchFields({ aliases: ["Secondary Heading"] }),
     });
 
     expect(matchesCatalogQuery(searchable, "  SECONDARY\n\tHEADING  ")).toBe(true);
     expect(matchesCatalogQuery(searchable, "missing phrase")).toBe(false);
+  });
+
+  it("ranks a phonetic title match above a literal lyric-only match", () => {
+    const lyricOnly = song({
+      id: "lyric-only",
+      titleLatin: "Alpha Result",
+      searchFields: buildCatalogSearchFields({ titles: ["Alpha Result"], lyrics: ["gan"] }),
+    });
+    const phoneticTitle = song({
+      id: "phonetic-title",
+      titleLatin: "Gaan Example",
+      searchFields: buildCatalogSearchFields({ titles: ["Gaan Example"] }),
+    });
+
+    expect(filterAndSortCatalog(
+      [lyricOnly, phoneticTitle],
+      "gan",
+      emptyCatalogFilters(),
+      "latin-asc",
+    ).map((item) => item.id)).toEqual(["phonetic-title", "lyric-only"]);
+  });
+
+  it("uses the selected catalog sort to break equal relevance ties", () => {
+    const alpha = song({
+      id: "alpha-match",
+      titleLatin: "Alpha Match",
+      searchFields: buildCatalogSearchFields({ titles: ["Alpha Match"] }),
+    });
+    const beta = song({
+      id: "beta-match",
+      titleLatin: "Beta Match",
+      searchFields: buildCatalogSearchFields({ titles: ["Beta Match"] }),
+    });
+
+    expect(filterAndSortCatalog(
+      [alpha, beta],
+      "match",
+      emptyCatalogFilters(),
+      "latin-desc",
+    ).map((item) => item.id)).toEqual(["beta-match", "alpha-match"]);
   });
 
   it("composes a metadata query with lookup, status, and media-presence filters", () => {

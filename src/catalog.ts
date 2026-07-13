@@ -1,5 +1,9 @@
 import Dexie, { type EntityTable } from "dexie";
-import { buildCatalogSearchText, createCatalogSongIndex } from "./catalog-view";
+import { createCatalogSongIndex } from "./catalog-view";
+import {
+  buildCatalogSearchFields,
+  type CatalogSearchFields,
+} from "./catalog-search";
 
 export type CatalogSong = {
   id: string;
@@ -13,7 +17,7 @@ export type CatalogSong = {
   tags: Array<{ id: string; displayName: string }>;
   credits: Credit[];
   notebooks: Array<{ id: string; displayName: string }>;
-  searchText: string;
+  searchFields: CatalogSearchFields;
   lyricCount: number;
   scanCount: number;
   recordingCount: number;
@@ -124,20 +128,36 @@ function hasExpandedCatalogFields(song: CatalogSong): boolean {
     && Array.isArray(stored.tags)
     && Array.isArray(stored.credits)
     && Array.isArray(stored.notebooks)
-    && typeof stored.searchText === "string";
+    && Array.isArray(stored.searchFields?.titles)
+    && Array.isArray(stored.searchFields?.aliases)
+    && Array.isArray(stored.searchFields?.metadata)
+    && Array.isArray(stored.searchFields?.lyrics);
 }
 
 function normalizeStoredCatalogSong(song: CatalogSong): CatalogSong {
   const stored = song as Partial<CatalogSong>;
+  const languages = stored.languages ?? song.languageIds.map((id) => ({ id, displayName: id }));
+  const tags = stored.tags ?? [];
+  const credits = stored.credits ?? [];
+  const notebooks = stored.notebooks ?? [];
+  const searchFields = stored.searchFields ?? buildCatalogSearchFields({
+    titles: [song.titleLatin, song.titleNative],
+    metadata: [
+      ...languages.map((language) => language.displayName),
+      ...tags.map((tag) => tag.displayName),
+      ...credits.flatMap((credit) => [credit.fullName, credit.role]),
+      ...notebooks.map((notebook) => notebook.displayName),
+    ],
+  });
   return {
     ...song,
     status: stored.status ?? null,
     createdAt: stored.createdAt ?? song.updatedAt,
-    languages: stored.languages ?? song.languageIds.map((id) => ({ id, displayName: id })),
-    tags: stored.tags ?? [],
-    credits: stored.credits ?? [],
-    notebooks: stored.notebooks ?? [],
-    searchText: stored.searchText ?? buildCatalogSearchText([song.titleLatin, song.titleNative]),
+    languages,
+    tags,
+    credits,
+    notebooks,
+    searchFields,
   };
 }
 

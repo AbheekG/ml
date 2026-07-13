@@ -222,7 +222,7 @@ export function CatalogControls({
           />
         </label>
         <label className="catalog-sort-field">
-          <span>Sort</span>
+          <span>{query.trim() ? "Then sort" : "Sort"}</span>
           <select
             value={sort}
             disabled={disabled}
