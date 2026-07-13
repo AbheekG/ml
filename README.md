@@ -45,12 +45,13 @@ The private staging application is operational:
 - authenticated identities must map to an active `app_users` record, with reusable viewer/editor/admin authorization guards;
 - the authenticated session exposes the current viewer/editor/admin role without exposing the identity;
 - editors/admins can create and update Song titles, status, Languages, Tags, Aliases, and Notes only while online;
+- editors/admins can independently assign existing People to Song-level Lyrics and Music credits;
 - the API normalizes title case, validates controlled references, records actor/timestamps, and updates all Song relationships atomically;
 - revisions and per-request mutation identifiers reject stale concurrent edits without allowing their related Language/Tag/Alias changes to leak through;
 - editors/admins can create, edit, move to Trash, and restore typed-lyric blocks;
 - editors/admins can edit Scan Notebook/Page metadata and move existing Scans and their private media to recoverable Trash or restore them;
 - editors/admins can edit existing Recording descriptions, dates, and Vocals credits, and move Recordings and unshared private media to recoverable Trash or restore them;
-- Scan/Recording upload and replace, broader Recording contribution roles, Song-credit editing, and lookup management remain later incremental slices.
+- Scan/Recording upload and replace, broader Recording contribution roles, and controlled lookup management remain later incremental slices.
 
 The private staging catalog is loaded into an APAC-primary D1 database for the application's users in India. All 1,325 workbook-linked media files are stored in private APAC R2 and delivered only through the authenticated API. Two unassigned legacy recordings and two unlinked scans remain local for later identification.
 

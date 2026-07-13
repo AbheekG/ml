@@ -318,6 +318,34 @@ function replaceJoinStatements(
   return statements;
 }
 
+function creditStatementsForUpdate(
+  database: D1Database,
+  songId: string,
+  mutationId: string,
+  song: SongWriteInput,
+): D1PreparedStatement[] {
+  const statements: D1PreparedStatement[] = [database.prepare(`
+    DELETE FROM song_credits
+    WHERE song_id = ?
+      AND EXISTS (
+        SELECT 1 FROM songs WHERE id = ? AND last_mutation_id = ?
+      )
+  `).bind(songId, songId, mutationId)];
+  for (const [sortOrder, credit] of song.credits.entries()) {
+    statements.push(database.prepare(`
+      INSERT INTO song_credits (id, song_id, person_id, role, sort_order)
+      SELECT ?, ?, ?, ?, ?
+      WHERE EXISTS (
+        SELECT 1 FROM songs WHERE id = ? AND last_mutation_id = ?
+      )
+    `).bind(
+      crypto.randomUUID(), songId, credit.personId, credit.role, sortOrder,
+      songId, mutationId,
+    ));
+  }
+  return statements;
+}
+
 export function parseByteRange(value: string, size: number): { offset: number; length: number } | null {
   const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
   if (!match || (!match[1] && !match[2]) || size < 1) return null;
@@ -424,7 +452,7 @@ app.get("/api/session", (context) => {
 });
 
 app.get("/api/song-editor/options", requireRole("editor"), async (context) => {
-  const [languages, tags] = await Promise.all([
+  const [languages, tags, people] = await Promise.all([
     context.env.DB.prepare(`
       SELECT id, display_name AS displayName
       FROM languages
@@ -435,10 +463,16 @@ app.get("/api/song-editor/options", requireRole("editor"), async (context) => {
       FROM tags
       ORDER BY sort_order, display_name COLLATE NOCASE
     `).all<{ id: string; displayName: string }>(),
+    context.env.DB.prepare(`
+      SELECT id, full_name AS fullName
+      FROM people
+      ORDER BY full_name COLLATE NOCASE, id
+    `).all<{ id: string; fullName: string }>(),
   ]);
   return context.json({
     languages: languages.results,
     tags: tags.results,
+    people: people.results,
     statuses: ["draft", "checked"],
   });
 });
@@ -473,11 +507,12 @@ app.post("/api/songs", requireRole("editor"), async (context) => {
     return context.json({ error: "invalid_song", fields: parsed.fields }, 400);
   }
   const song = parsed.data;
-  const [languagesExist, tagsExist] = await Promise.all([
+  const [languagesExist, tagsExist, peopleExist] = await Promise.all([
     lookupIdsExist(context.env.DB, "languages", song.languageIds),
     lookupIdsExist(context.env.DB, "tags", song.tagIds),
+    lookupIdsExist(context.env.DB, "people", [...new Set(song.credits.map((credit) => credit.personId))]),
   ]);
-  if (!languagesExist || !tagsExist) {
+  if (!languagesExist || !tagsExist || !peopleExist) {
     return context.json({ error: "invalid_reference" }, 400);
   }
 
@@ -510,6 +545,12 @@ app.post("/api/songs", requireRole("editor"), async (context) => {
       VALUES (?, ?, ?, ?, ?)
     `).bind(crypto.randomUUID(), songId, alias.value, alias.normalizedValue, sortOrder));
   }
+  for (const [sortOrder, credit] of song.credits.entries()) {
+    statements.push(context.env.DB.prepare(`
+      INSERT INTO song_credits (id, song_id, person_id, role, sort_order)
+      VALUES (?, ?, ?, ?, ?)
+    `).bind(crypto.randomUUID(), songId, credit.personId, credit.role, sortOrder));
+  }
 
   try {
     await context.env.DB.batch(statements);
@@ -532,11 +573,12 @@ app.put("/api/songs/:songId", requireRole("editor"), async (context) => {
     return context.json({ error: "invalid_song", fields: parsed.fields }, 400);
   }
   const song: SongUpdateInput = parsed.data;
-  const [languagesExist, tagsExist] = await Promise.all([
+  const [languagesExist, tagsExist, peopleExist] = await Promise.all([
     lookupIdsExist(context.env.DB, "languages", song.languageIds),
     lookupIdsExist(context.env.DB, "tags", song.tagIds),
+    lookupIdsExist(context.env.DB, "people", [...new Set(song.credits.map((credit) => credit.personId))]),
   ]);
-  if (!languagesExist || !tagsExist) {
+  if (!languagesExist || !tagsExist || !peopleExist) {
     return context.json({ error: "invalid_reference" }, 400);
   }
 
@@ -563,6 +605,7 @@ app.put("/api/songs/:songId", requireRole("editor"), async (context) => {
   statements.push(...languageStatementsForUpdate(context.env.DB, songId, mutationId, song.languageIds));
   statements.push(...replaceJoinStatements(context.env.DB, "song_tags", songId, mutationId, song));
   statements.push(...replaceJoinStatements(context.env.DB, "song_aliases", songId, mutationId, song));
+  statements.push(...creditStatementsForUpdate(context.env.DB, songId, mutationId, song));
 
   try {
     const results = await context.env.DB.batch(statements);

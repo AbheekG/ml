@@ -159,6 +159,39 @@ describe("initial database schema", () => {
     `)).toThrow(/song_requires_language/);
   });
 
+  it("allows one Person to hold both Song roles but rejects a duplicate role", () => {
+    const output = runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO people (
+        id, full_name, normalized_name, created_at, updated_at
+      ) VALUES ('person-1', 'Contributor', 'contributor', '${timestamp}', '${timestamp}');
+      INSERT INTO song_credits (id, song_id, person_id, role, sort_order) VALUES
+        ('credit-1', 'song-1', 'person-1', 'lyrics', 0),
+        ('credit-2', 'song-1', 'person-1', 'music', 1);
+      SELECT group_concat(role, '|') FROM (
+        SELECT role FROM song_credits ORDER BY sort_order
+      );
+    `);
+    expect(output).toBe("lyrics|music\n");
+
+    expect(() => runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO people (
+        id, full_name, normalized_name, created_at, updated_at
+      ) VALUES ('person-1', 'Contributor', 'contributor', '${timestamp}', '${timestamp}');
+      INSERT INTO song_credits (id, song_id, person_id, role)
+      VALUES ('credit-1', 'song-1', 'person-1', 'lyrics');
+      INSERT INTO song_credits (id, song_id, person_id, role)
+      VALUES ('credit-2', 'song-1', 'person-1', 'lyrics');
+    `)).toThrow(/UNIQUE constraint failed/);
+  });
+
   it("blocks trashing a Song while active child content exists", () => {
     expect(() => runSql(`
       INSERT INTO songs (

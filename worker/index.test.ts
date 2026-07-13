@@ -114,7 +114,11 @@ describe("Worker API", () => {
             statement.values = values;
             return statement;
           },
-          all: async () => ({ results: query.includes("FROM languages") ? [{ id: "en" }] : [] }),
+          all: async () => ({
+            results: query.includes("FROM languages")
+              ? [{ id: "en" }]
+              : query.includes("FROM people") ? [{ id: "person-1" }] : [],
+          }),
         } as unknown as FakeStatement;
         return statement;
       },
@@ -136,6 +140,7 @@ describe("Worker API", () => {
           languageIds: ["en"],
           tagIds: [],
           aliases: [" old NAME "],
+          credits: [{ personId: "person-1", role: "lyrics" }],
           notes: null,
         }),
       },
@@ -147,6 +152,7 @@ describe("Worker API", () => {
     expect(batch[0].values.slice(1, 3)).toEqual(["A New Song", "a new song"]);
     expect(batch.some((statement) => statement.query.includes("INSERT INTO song_languages"))).toBe(true);
     expect(batch.some((statement) => statement.query.includes("INSERT INTO song_aliases"))).toBe(true);
+    expect(batch.some((statement) => statement.query.includes("INSERT INTO song_credits"))).toBe(true);
   });
 
   it("reports an optimistic edit conflict when the revision update loses", async () => {
@@ -193,6 +199,68 @@ describe("Worker API", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: "edit_conflict", currentRevision: 7 });
+  });
+
+  it("replaces Song Lyrics and Music credits inside the guarded edit batch", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    let batch: FakeStatement[] = [];
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+          all: async () => ({
+            results: query.includes("FROM languages")
+              ? [{ id: "en" }]
+              : query.includes("FROM people") ? [{ id: "person-1" }] : [],
+          }),
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => {
+        batch = statements;
+        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          titleLatin: "A song",
+          titleNative: null,
+          status: "checked",
+          languageIds: ["en"],
+          tagIds: [],
+          aliases: [],
+          credits: [
+            { personId: "person-1", role: "lyrics" },
+            { personId: "person-1", role: "music" },
+          ],
+          notes: null,
+          revision: 1,
+        }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(batch.some((statement) => statement.query.includes("DELETE FROM song_credits"))).toBe(true);
+    const creditInserts = batch.filter((statement) => statement.query.includes("INSERT INTO song_credits"));
+    expect(creditInserts).toHaveLength(2);
+    expect(creditInserts.map((statement) => statement.values.slice(2, 4))).toEqual([
+      ["person-1", "lyrics"],
+      ["person-1", "music"],
+    ]);
+    await expect(response.json()).resolves.toEqual({
+      song: { id: "song-1", revision: 2, titleLatin: "A Song" },
+    });
   });
 
   it("creates typed lyrics without rewriting their content", async () => {

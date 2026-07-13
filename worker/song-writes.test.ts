@@ -13,6 +13,7 @@ const validSong = {
   languageIds: ["en"],
   tagIds: ["tag-1"],
   aliases: [" first alias "],
+  credits: [{ personId: "person-1", role: "lyrics" }],
   notes: "  a note  ",
 };
 
@@ -32,8 +33,31 @@ describe("Song write validation", () => {
         languageIds: ["en"],
         tagIds: ["tag-1"],
         aliases: [{ value: "First Alias", normalizedValue: "first alias" }],
+        credits: [{ personId: "person-1", role: "lyrics" }],
         notes: "a note",
       },
+    });
+  });
+
+  it("allows one Person in both Song roles but rejects a duplicate Person/role pair", () => {
+    expect(parseSongCreate({
+      ...validSong,
+      credits: [
+        { personId: "person-1", role: "lyrics" },
+        { personId: "person-1", role: "music" },
+      ],
+    })).toMatchObject({ success: true });
+
+    const duplicateCredits = parseSongCreate({
+      ...validSong,
+      credits: [
+        { personId: "person-1", role: "lyrics" },
+        { personId: "person-1", role: "lyrics" },
+      ],
+    });
+    expect(duplicateCredits).toMatchObject({
+      success: false,
+      fields: { credits: ["Duplicate Song credits are not allowed"] },
     });
   });
 

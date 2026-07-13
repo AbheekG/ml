@@ -93,6 +93,7 @@ Deliverable: safe online maintenance by the primary editor.
 ## Phase 5 — later improvements
 
 - advanced phonetic/transliteration ranking from tested real queries;
+- replace long Person checkbox grids with compact repeatable credit rows: an Add contributor action, searchable Person combobox, controlled Role dropdown, and per-row remove control;
 - one-tap system sharing for an individual scan or recording by sharing authenticated file bytes rather than exposing a public media URL, with capability-aware fallback behavior;
 - copy for an individual typed-lyric block, plus system text sharing where supported;
 - favorites, playlists, set lists, or recently viewed only if actual use calls for them;

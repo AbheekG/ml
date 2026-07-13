@@ -141,6 +141,7 @@ Mixed legacy formats remain preserved. Import or post-upload processing creates 
 - Offline mode visibly disables add, edit, Trash, restore, and upload controls.
 - Use explicit Save/Cancel actions and warn before discarding unsaved changes.
 - Song metadata is edited in one form.
+- Contributor inputs should evolve from full checkbox lists to compact repeatable rows when the People list or form grows. Each row searches/selects one controlled Person, chooses a controlled Role, and has an individual remove control; duplicate Person/Role pairs remain blocked while one Person may hold different Roles.
 - Lyric texts, scans, and recordings are added from inside a song detail, so the parent is implicit and cannot be omitted or changed accidentally.
 - Lookup administration for tags, people, languages, and notebooks can be added after the primary song workflow works.
 - Use indefinite Trash/restore in normal UI. Permanent deletion is absent from ordinary workflows and may be added later only as an exceptional administrator cleanup operation after backups and relationship checks.

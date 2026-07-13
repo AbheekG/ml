@@ -11,11 +11,20 @@ const songShape = {
   languageIds: z.array(nonBlankText(100)).min(1).max(20),
   tagIds: z.array(nonBlankText(100)).max(100).default([]),
   aliases: z.array(nonBlankText(200)).max(50).default([]),
+  credits: z.array(z.object({
+    personId: nonBlankText(100),
+    role: z.enum(["lyrics", "music"]),
+  }).strict()).max(200).default([]),
   notes: z.string().max(50_000).nullable().optional(),
 } as const;
 
 function validateLists(
-  value: { languageIds: string[]; tagIds: string[]; aliases: string[] },
+  value: {
+    languageIds: string[];
+    tagIds: string[];
+    aliases: string[];
+    credits: Array<{ personId: string; role: "lyrics" | "music" }>;
+  },
   context: z.RefinementCtx,
 ): void {
   if (new Set(value.languageIds).size !== value.languageIds.length) {
@@ -28,6 +37,10 @@ function validateLists(
   const normalizedAliases = value.aliases.map(normalizedTextKey);
   if (new Set(normalizedAliases).size !== normalizedAliases.length) {
     context.addIssue({ code: "custom", path: ["aliases"], message: "Duplicate Aliases are not allowed" });
+  }
+  const creditKeys = value.credits.map((credit) => `${credit.personId}:${credit.role}`);
+  if (new Set(creditKeys).size !== creditKeys.length) {
+    context.addIssue({ code: "custom", path: ["credits"], message: "Duplicate Song credits are not allowed" });
   }
 }
 
@@ -45,6 +58,7 @@ export type SongWriteInput = {
   languageIds: string[];
   tagIds: string[];
   aliases: Array<{ value: string; normalizedValue: string }>;
+  credits: Array<{ personId: string; role: "lyrics" | "music" }>;
   notes: string | null;
 };
 
@@ -88,6 +102,7 @@ function normalizedSong(value: z.infer<typeof createSongSchema>): SongWriteInput
       const normalizedAlias = titleCaseText(alias);
       return { value: normalizedAlias, normalizedValue: normalizedTextKey(normalizedAlias) };
     }),
+    credits: value.credits,
     notes: optionalTrimmed(value.notes),
   };
 }

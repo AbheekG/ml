@@ -172,6 +172,7 @@ export type AppSession = {
 export type SongEditorOptions = {
   languages: Array<{ id: string; displayName: string }>;
   tags: Array<{ id: string; displayName: string }>;
+  people: Array<{ id: string; fullName: string }>;
   statuses: Array<"draft" | "checked">;
 };
 
@@ -182,6 +183,7 @@ export type SongWritePayload = {
   languageIds: string[];
   tagIds: string[];
   aliases: string[];
+  credits: Array<{ personId: string; role: "lyrics" | "music" }>;
   notes: string | null;
 };
 
@@ -244,7 +246,7 @@ function apiErrorMessage(code: string): string {
     duplicate_song_title: "Another active song already has this title.",
     duplicate_song_alias: "This song has duplicate aliases.",
     edit_conflict: "This song changed after you opened it. Reload it and try again.",
-    invalid_reference: "A selected Language or Tag no longer exists. Reload the form.",
+    invalid_reference: "A selected Language, Tag, or contributor no longer exists. Reload the form.",
     insufficient_role: "Your account cannot edit songs.",
     song_not_found: "This song is no longer available.",
     duplicate_lyric_text: "This song already has an identical typed-lyrics block.",

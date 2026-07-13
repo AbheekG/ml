@@ -1028,6 +1028,8 @@ type SongFormState = {
   status: "draft" | "checked";
   languageIds: string[];
   tagIds: string[];
+  lyricsPersonIds: string[];
+  musicPersonIds: string[];
   aliasesText: string;
   notes: string;
   revision: number | null;
@@ -1039,6 +1041,8 @@ const EMPTY_SONG_FORM: SongFormState = {
   status: "draft",
   languageIds: [],
   tagIds: [],
+  lyricsPersonIds: [],
+  musicPersonIds: [],
   aliasesText: "",
   notes: "",
   revision: null,
@@ -1096,6 +1100,8 @@ function SongEditorPage({
             status: song.status === "checked" ? "checked" : "draft",
             languageIds: song.languages.map((language) => language.id),
             tagIds: song.tags.map((tag) => tag.id),
+            lyricsPersonIds: song.credits.filter((credit) => credit.role === "lyrics").map((credit) => credit.personId),
+            musicPersonIds: song.credits.filter((credit) => credit.role === "music").map((credit) => credit.personId),
             aliasesText: song.aliases.join("\n"),
             notes: song.notes ?? "",
             revision: song.revision,
@@ -1124,6 +1130,10 @@ function SongEditorPage({
       languageIds: form.languageIds,
       tagIds: form.tagIds,
       aliases: form.aliasesText.split(/\r?\n/u).map((alias) => alias.trim()).filter(Boolean),
+      credits: [
+        ...form.lyricsPersonIds.map((personId) => ({ personId, role: "lyrics" as const })),
+        ...form.musicPersonIds.map((personId) => ({ personId, role: "music" as const })),
+      ],
       notes: form.notes || null,
     };
     try {
@@ -1203,6 +1213,22 @@ function SongEditorPage({
               <label key={tag.id}><input type="checkbox" checked={form.tagIds.includes(tag.id)} onChange={(event) => setForm({ ...form, tagIds: selected(form.tagIds, tag.id, event.target.checked) })} /><span>{tag.displayName}</span></label>
             ))}
           </div>
+        </fieldset>
+
+        <fieldset className="form-card choice-group credit-choice-group">
+          <legend>Song contributors</legend>
+          <p>Optional. A Person may be credited for Lyrics, Music, or both.</p>
+          <div className="credit-grid">
+            <div className="credit-grid-header" aria-hidden="true"><span>Person</span><span>Lyrics</span><span>Music</span></div>
+            {options?.people.map((person) => (
+              <div className="credit-grid-row" key={person.id}>
+                <span>{person.fullName}</span>
+                <label><input type="checkbox" aria-label={`${person.fullName}: Lyrics`} checked={form.lyricsPersonIds.includes(person.id)} onChange={(event) => setForm({ ...form, lyricsPersonIds: selected(form.lyricsPersonIds, person.id, event.target.checked) })} /></label>
+                <label><input type="checkbox" aria-label={`${person.fullName}: Music`} checked={form.musicPersonIds.includes(person.id)} onChange={(event) => setForm({ ...form, musicPersonIds: selected(form.musicPersonIds, person.id, event.target.checked) })} /></label>
+              </div>
+            ))}
+          </div>
+          {fieldErrors.credits?.map((message) => <em key={message}>{message}</em>)}
         </fieldset>
 
         <section className="form-card">
