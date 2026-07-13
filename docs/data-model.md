@@ -19,7 +19,7 @@ Scan ── optional Notebook
 
 ## Core records
 
-- `songs` stores titles, notes, status, revision, audit fields, and Trash state.
+- `songs` stores titles, notes, status, revision, audit fields, Trash state, and a latest-mutation identifier used to make optimistic multi-table edits safe.
 - `lyric_texts` stores required content, stable automatic order, audit/Trash fields, and a hidden `user`/`legacy_import` origin. Existing combined workbook text remains intact; editors do not classify language, script, representation, or label.
 - `scans` references exactly one private media object and exposes optional Notebook/Page metadata. Imported Source, Version, Date, ScanText, and Notes remain preserved in hidden `legacy_*` columns but are not part of the initial editor model.
 - `recordings` stores one required, normalized-unique per-Song description, optional recorded date and contributors, processing state, an original media object, and an optional playback object. Imported Version and the four populated Notes are combined losslessly for display and also remain in hidden `legacy_*` columns.

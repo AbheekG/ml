@@ -4,6 +4,7 @@ type SongRow = {
   titleNative: string | null;
   status: string | null;
   notes: string | null;
+  revision: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -41,6 +42,7 @@ export async function loadOfflineLibrary(database: D1Database) {
         title_native AS titleNative,
         status,
         notes,
+        revision,
         created_at AS createdAt,
         updated_at AS updatedAt
       FROM songs

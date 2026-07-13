@@ -72,6 +72,129 @@ describe("Worker API", () => {
     });
   });
 
+  it("prevents viewers from reaching Song write validation or the database", async () => {
+    const response = await app.request(
+      "http://local.test/api/songs",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      },
+      localBindings(undefined, "viewer"),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "insufficient_role", requiredRole: "editor" });
+  });
+
+  it("rejects an invalid Song before issuing database writes", async () => {
+    const response = await app.request(
+      "http://local.test/api/songs",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ titleLatin: "", status: "draft", languageIds: [] }),
+      },
+      localBindings(),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: "invalid_song" });
+  });
+
+  it("creates a normalized Song and all relationships in one batch", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    let batch: FakeStatement[] = [];
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+          all: async () => ({ results: query.includes("FROM languages") ? [{ id: "en" }] : [] }),
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => {
+        batch = statements;
+        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          titleLatin: "  a   new SONG ",
+          titleNative: null,
+          status: "draft",
+          languageIds: ["en"],
+          tagIds: [],
+          aliases: [" old NAME "],
+          notes: null,
+        }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(201);
+    expect(batch[0].query).toContain("INSERT INTO songs");
+    expect(batch[0].values.slice(1, 3)).toEqual(["A New Song", "a new song"]);
+    expect(batch.some((statement) => statement.query.includes("INSERT INTO song_languages"))).toBe(true);
+    expect(batch.some((statement) => statement.query.includes("INSERT INTO song_aliases"))).toBe(true);
+  });
+
+  it("reports an optimistic edit conflict when the revision update loses", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+          all: async () => ({ results: query.includes("FROM languages") ? [{ id: "en" }] : [] }),
+          first: async () => query.includes("SELECT revision") ? { revision: 7 } : null,
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => statements.map(() => ({
+        success: true,
+        results: [],
+        meta: { changes: 0 },
+      })),
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          titleLatin: "A song",
+          titleNative: null,
+          status: "checked",
+          languageIds: ["en"],
+          tagIds: [],
+          aliases: [],
+          notes: null,
+          revision: 1,
+        }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "edit_conflict", currentRevision: 7 });
+  });
+
   it("reports a healthy service", async () => {
     const response = await app.request("http://local.test/api/health", undefined, localBindings());
 

@@ -2,6 +2,12 @@ import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { verifyWithJwks } from "hono/jwt";
 import { loadOfflineLibrary } from "./offline-library";
+import {
+  parseSongCreate,
+  parseSongUpdate,
+  type SongWriteInput,
+  type SongUpdateInput,
+} from "./song-writes";
 
 export type AppRole = "viewer" | "editor" | "admin";
 export type AppUser = {
@@ -76,6 +82,7 @@ type SongRow = {
   titleNative: string | null;
   status: string | null;
   notes: string | null;
+  revision: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -93,6 +100,98 @@ type MediaRow = {
   filename: string;
   mimeType: string | null;
 };
+
+type LookupTable = "languages" | "tags";
+
+async function lookupIdsExist(database: D1Database, table: LookupTable, ids: string[]): Promise<boolean> {
+  if (ids.length === 0) return true;
+  const placeholders = ids.map(() => "?").join(", ");
+  const result = await database.prepare(
+    `SELECT id FROM ${table} WHERE id IN (${placeholders})`,
+  ).bind(...ids).all<{ id: string }>();
+  return result.results.length === ids.length;
+}
+
+function songWriteError(error: unknown): { error: string; status: 400 | 409 | 500 } {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("songs.normalized_title_latin") || message.includes("songs_active_normalized_title_idx")) {
+    return { error: "duplicate_song_title", status: 409 };
+  }
+  if (message.includes("song_aliases") && message.includes("UNIQUE")) {
+    return { error: "duplicate_song_alias", status: 409 };
+  }
+  if (message.includes("FOREIGN KEY")) {
+    return { error: "invalid_reference", status: 400 };
+  }
+  return { error: "song_write_failed", status: 500 };
+}
+
+function languageStatementsForUpdate(
+  database: D1Database,
+  songId: string,
+  mutationId: string,
+  languageIds: string[],
+): D1PreparedStatement[] {
+  const statements = languageIds.map((languageId, sortOrder) => database.prepare(`
+    INSERT OR IGNORE INTO song_languages (song_id, language_id, sort_order)
+    SELECT ?, ?, ?
+    WHERE EXISTS (
+      SELECT 1 FROM songs WHERE id = ? AND last_mutation_id = ?
+    )
+  `).bind(songId, languageId, sortOrder, songId, mutationId));
+  const placeholders = languageIds.map(() => "?").join(", ");
+  statements.push(database.prepare(`
+    DELETE FROM song_languages
+    WHERE song_id = ?
+      AND language_id NOT IN (${placeholders})
+      AND EXISTS (
+        SELECT 1 FROM songs WHERE id = ? AND last_mutation_id = ?
+      )
+  `).bind(songId, ...languageIds, songId, mutationId));
+  return statements;
+}
+
+function replaceJoinStatements(
+  database: D1Database,
+  table: "song_tags" | "song_aliases",
+  songId: string,
+  mutationId: string,
+  song: SongWriteInput,
+): D1PreparedStatement[] {
+  const statements: D1PreparedStatement[] = [database.prepare(`
+    DELETE FROM ${table}
+    WHERE song_id = ?
+      AND EXISTS (
+        SELECT 1 FROM songs WHERE id = ? AND last_mutation_id = ?
+      )
+  `).bind(songId, songId, mutationId)];
+
+  if (table === "song_tags") {
+    for (const [sortOrder, tagId] of song.tagIds.entries()) {
+      statements.push(database.prepare(`
+        INSERT INTO song_tags (song_id, tag_id, sort_order)
+        SELECT ?, ?, ?
+        WHERE EXISTS (
+          SELECT 1 FROM songs WHERE id = ? AND last_mutation_id = ?
+        )
+      `).bind(songId, tagId, sortOrder, songId, mutationId));
+    }
+  } else {
+    for (const [sortOrder, alias] of song.aliases.entries()) {
+      statements.push(database.prepare(`
+        INSERT INTO song_aliases (id, song_id, alias, normalized_alias, sort_order)
+        SELECT ?, ?, ?, ?, ?
+        WHERE EXISTS (
+          SELECT 1 FROM songs WHERE id = ? AND last_mutation_id = ?
+        )
+      `).bind(
+        crypto.randomUUID(), songId, alias.value, alias.normalizedValue, sortOrder,
+        songId, mutationId,
+      ));
+    }
+  }
+  return statements;
+}
 
 export function parseByteRange(value: string, size: number): { offset: number; length: number } | null {
   const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
@@ -199,6 +298,147 @@ app.get("/api/session", (context) => {
   });
 });
 
+app.get("/api/song-editor/options", requireRole("editor"), async (context) => {
+  const [languages, tags] = await Promise.all([
+    context.env.DB.prepare(`
+      SELECT id, display_name AS displayName
+      FROM languages
+      ORDER BY sort_order, display_name COLLATE NOCASE
+    `).all<{ id: string; displayName: string }>(),
+    context.env.DB.prepare(`
+      SELECT id, display_name AS displayName
+      FROM tags
+      ORDER BY sort_order, display_name COLLATE NOCASE
+    `).all<{ id: string; displayName: string }>(),
+  ]);
+  return context.json({
+    languages: languages.results,
+    tags: tags.results,
+    statuses: ["draft", "checked"],
+  });
+});
+
+app.post("/api/songs", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseSongCreate(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_song", fields: parsed.fields }, 400);
+  }
+  const song = parsed.data;
+  const [languagesExist, tagsExist] = await Promise.all([
+    lookupIdsExist(context.env.DB, "languages", song.languageIds),
+    lookupIdsExist(context.env.DB, "tags", song.tagIds),
+  ]);
+  if (!languagesExist || !tagsExist) {
+    return context.json({ error: "invalid_reference" }, 400);
+  }
+
+  const songId = crypto.randomUUID();
+  const mutationId = crypto.randomUUID();
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+  const statements: D1PreparedStatement[] = [context.env.DB.prepare(`
+    INSERT INTO songs (
+      id, title_latin, normalized_title_latin, title_native, status, notes,
+      revision, created_at, created_by, updated_at, updated_by, last_mutation_id
+    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+  `).bind(
+    songId, song.titleLatin, song.normalizedTitleLatin, song.titleNative, song.status, song.notes,
+    timestamp, actor, timestamp, actor, mutationId,
+  )];
+  for (const [sortOrder, languageId] of song.languageIds.entries()) {
+    statements.push(context.env.DB.prepare(`
+      INSERT INTO song_languages (song_id, language_id, sort_order) VALUES (?, ?, ?)
+    `).bind(songId, languageId, sortOrder));
+  }
+  for (const [sortOrder, tagId] of song.tagIds.entries()) {
+    statements.push(context.env.DB.prepare(`
+      INSERT INTO song_tags (song_id, tag_id, sort_order) VALUES (?, ?, ?)
+    `).bind(songId, tagId, sortOrder));
+  }
+  for (const [sortOrder, alias] of song.aliases.entries()) {
+    statements.push(context.env.DB.prepare(`
+      INSERT INTO song_aliases (id, song_id, alias, normalized_alias, sort_order)
+      VALUES (?, ?, ?, ?, ?)
+    `).bind(crypto.randomUUID(), songId, alias.value, alias.normalizedValue, sortOrder));
+  }
+
+  try {
+    await context.env.DB.batch(statements);
+    return context.json({ song: { id: songId, revision: 1, titleLatin: song.titleLatin } }, 201);
+  } catch (error) {
+    const response = songWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
+app.put("/api/songs/:songId", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseSongUpdate(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_song", fields: parsed.fields }, 400);
+  }
+  const song: SongUpdateInput = parsed.data;
+  const [languagesExist, tagsExist] = await Promise.all([
+    lookupIdsExist(context.env.DB, "languages", song.languageIds),
+    lookupIdsExist(context.env.DB, "tags", song.tagIds),
+  ]);
+  if (!languagesExist || !tagsExist) {
+    return context.json({ error: "invalid_reference" }, 400);
+  }
+
+  const songId = context.req.param("songId");
+  const mutationId = crypto.randomUUID();
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+  const statements: D1PreparedStatement[] = [context.env.DB.prepare(`
+    UPDATE songs
+    SET title_latin = ?,
+        normalized_title_latin = ?,
+        title_native = ?,
+        status = ?,
+        notes = ?,
+        revision = revision + 1,
+        updated_at = ?,
+        updated_by = ?,
+        last_mutation_id = ?
+    WHERE id = ? AND revision = ? AND trashed_at IS NULL
+  `).bind(
+    song.titleLatin, song.normalizedTitleLatin, song.titleNative, song.status, song.notes,
+    timestamp, actor, mutationId, songId, song.revision,
+  )];
+  statements.push(...languageStatementsForUpdate(context.env.DB, songId, mutationId, song.languageIds));
+  statements.push(...replaceJoinStatements(context.env.DB, "song_tags", songId, mutationId, song));
+  statements.push(...replaceJoinStatements(context.env.DB, "song_aliases", songId, mutationId, song));
+
+  try {
+    const results = await context.env.DB.batch(statements);
+    if (results[0].meta.changes === 0) {
+      const current = await context.env.DB.prepare(`
+        SELECT revision FROM songs WHERE id = ? AND trashed_at IS NULL
+      `).bind(songId).first<{ revision: number }>();
+      if (!current) return context.json({ error: "song_not_found" }, 404);
+      return context.json({ error: "edit_conflict", currentRevision: current.revision }, 409);
+    }
+    return context.json({
+      song: { id: songId, revision: song.revision + 1, titleLatin: song.titleLatin },
+    });
+  } catch (error) {
+    const response = songWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
 app.get("/api/catalog", async (context) => {
   const result = await context.env.DB.prepare(`
     SELECT
@@ -241,6 +481,7 @@ app.get("/api/songs/:songId", async (context) => {
       title_native AS titleNative,
       status,
       notes,
+      revision,
       created_at AS createdAt,
       updated_at AS updatedAt
     FROM songs

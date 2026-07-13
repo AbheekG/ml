@@ -23,6 +23,7 @@ export type SongDetail = {
   titleNative: string | null;
   status: string | null;
   notes: string | null;
+  revision: number;
   createdAt: string;
   updatedAt: string;
   aliases: string[];
@@ -155,4 +156,97 @@ export async function refreshSong(songId: string): Promise<SongDetail> {
   const payload = await response.json() as { song: SongDetail };
   await database.songDetails.put(payload.song);
   return payload.song;
+}
+
+export type AppSession = {
+  displayName: string | null;
+  role: "viewer" | "editor" | "admin";
+};
+
+export type SongEditorOptions = {
+  languages: Array<{ id: string; displayName: string }>;
+  tags: Array<{ id: string; displayName: string }>;
+  statuses: Array<"draft" | "checked">;
+};
+
+export type SongWritePayload = {
+  titleLatin: string;
+  titleNative: string | null;
+  status: "draft" | "checked";
+  languageIds: string[];
+  tagIds: string[];
+  aliases: string[];
+  notes: string | null;
+};
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string,
+    readonly fields?: Record<string, string[]>,
+  ) {
+    super(message);
+  }
+}
+
+function apiErrorMessage(code: string): string {
+  const messages: Record<string, string> = {
+    duplicate_song_title: "Another active song already has this title.",
+    duplicate_song_alias: "This song has duplicate aliases.",
+    edit_conflict: "This song changed after you opened it. Reload it and try again.",
+    invalid_reference: "A selected Language or Tag no longer exists. Reload the form.",
+    insufficient_role: "Your account cannot edit songs.",
+    song_not_found: "This song is no longer available.",
+  };
+  return messages[code] ?? "The song could not be saved.";
+}
+
+async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    ...init,
+    headers: { Accept: "application/json", ...init?.headers },
+  });
+  const payload = await response.json().catch(() => ({})) as {
+    error?: string;
+    fields?: Record<string, string[]>;
+  } & T;
+  if (!response.ok) {
+    const code = payload.error ?? "request_failed";
+    throw new ApiError(apiErrorMessage(code), response.status, code, payload.fields);
+  }
+  return payload;
+}
+
+export async function loadSession(): Promise<AppSession> {
+  const payload = await apiJson<{ user: AppSession }>("/api/session");
+  return payload.user;
+}
+
+export async function loadSongEditorOptions(): Promise<SongEditorOptions> {
+  return apiJson<SongEditorOptions>("/api/song-editor/options");
+}
+
+export async function createSong(payload: SongWritePayload): Promise<{ id: string; revision: number }> {
+  const response = await apiJson<{ song: { id: string; revision: number } }>("/api/songs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return response.song;
+}
+
+export async function updateSong(
+  songId: string,
+  payload: SongWritePayload & { revision: number },
+): Promise<{ id: string; revision: number }> {
+  const response = await apiJson<{ song: { id: string; revision: number } }>(
+    `/api/songs/${encodeURIComponent(songId)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  return response.song;
 }

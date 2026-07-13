@@ -1,12 +1,20 @@
-import { useEffect, useState } from "react";
-import { Link, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import {
+  ApiError,
+  createSong,
+  loadSession,
+  loadSongEditorOptions,
   readCachedCatalog,
   readCachedSong,
   refreshOfflineLibrary,
   refreshSong,
+  updateSong,
+  type AppSession,
   type CatalogSong,
+  type SongEditorOptions,
   type SongDetail,
+  type SongWritePayload,
 } from "./catalog";
 
 function useOnlineStatus(): boolean {
@@ -67,7 +75,7 @@ function useOnlineStatus(): boolean {
   return isOnline;
 }
 
-function SongsPage({ isOnline }: { isOnline: boolean }) {
+function SongsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
   const [songs, setSongs] = useState<CatalogSong[]>([]);
   const [query, setQuery] = useState("");
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
@@ -119,9 +127,9 @@ function SongsPage({ isOnline }: { isOnline: boolean }) {
             {songs.length > 0 ? `${visibleSongs.length} of ${songs.length} songs` : "Browse titles, typed lyrics, scans, and recordings."}
           </p>
         </div>
-        <button className="primary-action" type="button" disabled title="Editing arrives after the catalog import">
-          Add song
-        </button>
+        {isOnline && canEdit === true
+          ? <Link className="primary-action action-link" to="/songs/new">Add song</Link>
+          : <button className="primary-action" type="button" disabled title={isOnline ? "Editor access is required" : "Go online to add a song"}>Add song</button>}
       </section>
 
       <section className="catalog-tools" aria-label="Catalog tools">
@@ -214,7 +222,7 @@ function contributionLabel(role: string): string {
     ?? role.replaceAll("_", " ").replace(/\b\p{L}/gu, (letter) => letter.toLocaleUpperCase());
 }
 
-function SongDetailPage({ isOnline }: { isOnline: boolean }) {
+function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
   const { songId = "" } = useParams();
   const [song, setSong] = useState<SongDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -266,7 +274,10 @@ function SongDetailPage({ isOnline }: { isOnline: boolean }) {
     <main className="page-shell detail-page" id="main-content">
       <Link className="back-link" to="/songs">← All songs</Link>
       <header className="detail-heading">
-        <p className="eyebrow">Song</p>
+        <div className="heading-actions">
+          <p className="eyebrow">Song</p>
+          {isOnline && canEdit === true && <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(song.id)}/edit`}>Edit song</Link>}
+        </div>
         <h1>{song.titleLatin}</h1>
         {song.titleNative && <p className="native-title" lang="und">{song.titleNative}</p>}
         {error && <p className="catalog-message error-message" role="alert">Showing saved copy · {error}</p>}
@@ -325,19 +336,224 @@ function SongDetailPage({ isOnline }: { isOnline: boolean }) {
   );
 }
 
-function AccountPage() {
+type SongFormState = {
+  titleLatin: string;
+  titleNative: string;
+  status: "draft" | "checked";
+  languageIds: string[];
+  tagIds: string[];
+  aliasesText: string;
+  notes: string;
+  revision: number | null;
+};
+
+const EMPTY_SONG_FORM: SongFormState = {
+  titleLatin: "",
+  titleNative: "",
+  status: "draft",
+  languageIds: [],
+  tagIds: [],
+  aliasesText: "",
+  notes: "",
+  revision: null,
+};
+
+function titleCaseInput(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/gu, " ")
+    .toLocaleLowerCase("en")
+    .replace(/(^|[^\p{L}\p{M}])(\p{L})/gu, (_match, prefix: string, letter: string) => (
+      `${prefix}${letter.toLocaleUpperCase("en")}`
+    ));
+}
+
+function selected(values: string[], value: string, checked: boolean): string[] {
+  if (checked) return values.includes(value) ? values : [...values, value];
+  return values.filter((item) => item !== value);
+}
+
+function SongEditorPage({
+  mode,
+  isOnline,
+  canEdit,
+}: {
+  mode: "create" | "edit";
+  isOnline: boolean;
+  canEdit: boolean | null;
+}) {
+  const { songId = "" } = useParams();
+  const navigate = useNavigate();
+  const [options, setOptions] = useState<SongEditorOptions | null>(null);
+  const [form, setForm] = useState<SongFormState>(EMPTY_SONG_FORM);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load(): Promise<void> {
+      if (!isOnline || canEdit !== true) {
+        setIsLoading(false);
+        return;
+      }
+      try {
+        const [editorOptions, song] = await Promise.all([
+          loadSongEditorOptions(),
+          mode === "edit" ? refreshSong(songId) : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+        setOptions(editorOptions);
+        if (song) {
+          setForm({
+            titleLatin: song.titleLatin,
+            titleNative: song.titleNative ?? "",
+            status: song.status === "checked" ? "checked" : "draft",
+            languageIds: song.languages.map((language) => language.id),
+            tagIds: song.tags.map((tag) => tag.id),
+            aliasesText: song.aliases.join("\n"),
+            notes: song.notes ?? "",
+            revision: song.revision,
+          });
+        }
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The editor could not be loaded.");
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, [canEdit, isOnline, mode, songId]);
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!isOnline || canEdit !== true || isSaving) return;
+    setIsSaving(true);
+    setError(null);
+    setFieldErrors({});
+    const payload: SongWritePayload = {
+      titleLatin: form.titleLatin,
+      titleNative: form.titleNative || null,
+      status: form.status,
+      languageIds: form.languageIds,
+      tagIds: form.tagIds,
+      aliases: form.aliasesText.split(/\r?\n/u).map((alias) => alias.trim()).filter(Boolean),
+      notes: form.notes || null,
+    };
+    try {
+      const saved = mode === "create"
+        ? await createSong(payload)
+        : await updateSong(songId, { ...payload, revision: form.revision ?? 0 });
+      await refreshOfflineLibrary().catch(() => undefined);
+      navigate(`/songs/${encodeURIComponent(saved.id)}`, { replace: true });
+    } catch (saveError) {
+      if (saveError instanceof ApiError) {
+        setError(saveError.message);
+        setFieldErrors(saveError.fields ?? {});
+      } else {
+        setError(saveError instanceof Error ? saveError.message : "The song could not be saved.");
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  if (!isOnline) {
+    return <main className="page-shell" id="main-content"><Link className="back-link" to={mode === "edit" ? `/songs/${encodeURIComponent(songId)}` : "/songs"}>← Cancel</Link><section className="empty-state"><h1>Editing is offline</h1><p>Reconnect to create or change a song. Your saved library remains available to read.</p></section></main>;
+  }
+  if (canEdit === null) {
+    return <main className="page-shell" id="main-content"><p>Checking editor access…</p></main>;
+  }
+  if (!canEdit) {
+    return <main className="page-shell" id="main-content"><Link className="back-link" to="/songs">← All songs</Link><section className="empty-state"><h1>Editor access required</h1></section></main>;
+  }
+  if (isLoading) return <main className="page-shell" id="main-content"><p>Loading editor…</p></main>;
+
+  return (
+    <main className="page-shell editor-page" id="main-content">
+      <Link className="back-link" to={mode === "edit" ? `/songs/${encodeURIComponent(songId)}` : "/songs"}>← Cancel</Link>
+      <header className="editor-heading">
+        <p className="eyebrow">Online editing</p>
+        <h1>{mode === "create" ? "Add song" : "Edit song"}</h1>
+        <p className="lede">Required fields are marked. Changes are saved immediately to the private library.</p>
+      </header>
+      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <form className="song-form" onSubmit={(event) => { void submit(event); }}>
+        <section className="form-card">
+          <label className="form-field">
+            <span>Latin or transliterated title <strong aria-hidden="true">*</strong></span>
+            <input required maxLength={200} value={form.titleLatin} onChange={(event) => setForm({ ...form, titleLatin: event.target.value })} onBlur={() => setForm((current) => ({ ...current, titleLatin: titleCaseInput(current.titleLatin) }))} />
+            <small>Capitalization and repeated spaces are corrected automatically.</small>
+            {fieldErrors.titleLatin?.map((message) => <em key={message}>{message}</em>)}
+          </label>
+          <label className="form-field">
+            <span>Native-script title</span>
+            <input maxLength={200} value={form.titleNative} onChange={(event) => setForm({ ...form, titleNative: event.target.value })} />
+          </label>
+          <label className="form-field compact-field">
+            <span>Status <strong aria-hidden="true">*</strong></span>
+            <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as "draft" | "checked" })}>
+              <option value="draft">Draft</option>
+              <option value="checked">Checked</option>
+            </select>
+          </label>
+        </section>
+
+        <fieldset className="form-card choice-group">
+          <legend>Languages <strong aria-hidden="true">*</strong></legend>
+          <p>Select at least one.</p>
+          <div className="choice-grid">
+            {options?.languages.map((language) => (
+              <label key={language.id}><input type="checkbox" checked={form.languageIds.includes(language.id)} onChange={(event) => setForm({ ...form, languageIds: selected(form.languageIds, language.id, event.target.checked) })} /><span>{language.displayName}</span></label>
+            ))}
+          </div>
+          {fieldErrors.languageIds?.map((message) => <em key={message}>{message}</em>)}
+        </fieldset>
+
+        <fieldset className="form-card choice-group">
+          <legend>Tags</legend>
+          <div className="choice-grid">
+            {options?.tags.map((tag) => (
+              <label key={tag.id}><input type="checkbox" checked={form.tagIds.includes(tag.id)} onChange={(event) => setForm({ ...form, tagIds: selected(form.tagIds, tag.id, event.target.checked) })} /><span>{tag.displayName}</span></label>
+            ))}
+          </div>
+        </fieldset>
+
+        <section className="form-card">
+          <label className="form-field">
+            <span>Aliases</span>
+            <textarea rows={4} value={form.aliasesText} onChange={(event) => setForm({ ...form, aliasesText: event.target.value })} placeholder="One alternative title per line" />
+            <small>Each alias is normalized to title case and kept unique within this song.</small>
+            {fieldErrors.aliases?.map((message) => <em key={message}>{message}</em>)}
+          </label>
+          <label className="form-field">
+            <span>Song notes</span>
+            <textarea rows={7} maxLength={50_000} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
+          </label>
+        </section>
+
+        <div className="form-actions">
+          <Link className="secondary-action action-link" to={mode === "edit" ? `/songs/${encodeURIComponent(songId)}` : "/songs"}>Cancel</Link>
+          <button className="primary-action" type="submit" disabled={isSaving || form.languageIds.length === 0 || form.titleLatin.trim().length === 0}>{isSaving ? "Saving…" : mode === "create" ? "Add song" : "Save changes"}</button>
+        </div>
+      </form>
+    </main>
+  );
+}
+
+function AccountPage({ session }: { session: AppSession | null }) {
   return (
     <main className="page-shell account-page" id="main-content">
       <p className="eyebrow">Application</p>
       <h1>Account and sync</h1>
       <dl className="settings-list">
         <div>
-          <dt>Environment</dt>
-          <dd>Local development</dd>
+          <dt>Signed in as</dt>
+          <dd>{session?.displayName ?? "Authenticated user"}</dd>
         </div>
         <div>
-          <dt>Catalog</dt>
-          <dd>Waiting for first import</dd>
+          <dt>Role</dt>
+          <dd>{session?.role ?? "Unavailable"}</dd>
         </div>
       </dl>
     </main>
@@ -346,6 +562,28 @@ function AccountPage() {
 
 export function App() {
   const isOnline = useOnlineStatus();
+  const [session, setSession] = useState<AppSession | null>(null);
+  const [sessionResolved, setSessionResolved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isOnline) return () => { cancelled = true; };
+    setSessionResolved(false);
+    loadSession().then((user) => {
+      if (!cancelled) {
+        setSession(user);
+        setSessionResolved(true);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setSession(null);
+        setSessionResolved(true);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [isOnline]);
+
+  const canEdit = !sessionResolved ? null : session?.role === "editor" || session?.role === "admin";
 
   return (
     <div className="app-frame">
@@ -362,9 +600,11 @@ export function App() {
       </header>
 
       <Routes>
-        <Route path="/songs" element={<SongsPage isOnline={isOnline} />} />
-        <Route path="/songs/:songId" element={<SongDetailPage isOnline={isOnline} />} />
-        <Route path="/account" element={<AccountPage />} />
+        <Route path="/songs" element={<SongsPage isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs/new" element={<SongEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs/:songId/edit" element={<SongEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs/:songId" element={<SongDetailPage isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/account" element={<AccountPage session={session} />} />
         <Route path="*" element={<Navigate to="/songs" replace />} />
       </Routes>
 

@@ -6,7 +6,8 @@ import { createSeedSql } from "./load-local-db";
 
 const initialMigration = readFileSync(resolve("migrations/0001_initial.sql"), "utf8");
 const editingMigration = readFileSync(resolve("migrations/0002_editing_foundation.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}`;
+const songWritesMigration = readFileSync(resolve("migrations/0003_song_writes.sql"), "utf8");
+const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}`;
 const timestamp = "2026-07-12T00:00:00.000Z";
 
 function runSql(sql: string): string {
@@ -20,7 +21,7 @@ function runSql(sql: string): string {
 function migrateLegacy(beforeMigration: string, afterMigration: string): string {
   return execFileSync("sqlite3", [":memory:"], {
     encoding: "utf8",
-    input: `${initialMigration}\n${beforeMigration}\n${editingMigration}\n${afterMigration}`,
+    input: `${initialMigration}\n${beforeMigration}\n${editingMigration}\n${songWritesMigration}\n${afterMigration}`,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }

@@ -29,6 +29,8 @@ body {
 
 button,
 input,
+select,
+textarea,
 pre {
   font: inherit;
 }
@@ -36,6 +38,12 @@ pre {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible {
+  outline: 3px solid rgb(124 63 44 / 35%);
+  outline-offset: 3px;
+}
+
+select:focus-visible,
+textarea:focus-visible {
   outline: 3px solid rgb(124 63 44 / 35%);
   outline-offset: 3px;
 }
@@ -172,6 +180,13 @@ h1 {
   padding: 0.7rem 1.1rem;
   border-radius: 0.75rem;
   font-weight: 750;
+}
+
+.action-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
 
 .primary-action {
@@ -360,6 +375,13 @@ button:disabled {
   margin-bottom: 2.25rem;
 }
 
+.heading-actions {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 .detail-heading h1 {
   overflow-wrap: anywhere;
 }
@@ -533,6 +555,120 @@ button:disabled {
   text-align: right;
 }
 
+.editor-heading {
+  max-width: 48rem;
+  margin-bottom: 2rem;
+}
+
+.song-form {
+  display: grid;
+  max-width: 48rem;
+  gap: 1rem;
+}
+
+.form-card {
+  display: grid;
+  gap: 1.25rem;
+  margin: 0;
+  padding: clamp(1.1rem, 3vw, 1.6rem);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.form-field {
+  display: grid;
+  gap: 0.45rem;
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 750;
+}
+
+.form-field > span strong,
+.choice-group legend strong {
+  color: var(--accent);
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea {
+  width: 100%;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid #cfc2af;
+  border-radius: 0.65rem;
+  color: var(--ink);
+  background: white;
+  font-weight: 450;
+}
+
+.form-field textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.form-field small,
+.choice-group > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 450;
+  line-height: 1.45;
+}
+
+.form-field em,
+.choice-group em {
+  color: #7b241f;
+  font-size: 0.78rem;
+  font-style: normal;
+}
+
+.compact-field {
+  max-width: 16rem;
+}
+
+.choice-group {
+  min-width: 0;
+}
+
+.choice-group legend {
+  padding: 0 0.25rem;
+  font-weight: 800;
+}
+
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.65rem;
+}
+
+.choice-grid label {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.7rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: #fffaf1;
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.choice-grid input {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--accent);
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding-top: 0.5rem;
+}
+
 .bottom-nav {
   position: fixed;
   right: 0;
@@ -608,6 +744,16 @@ button:disabled {
   }
 
   .primary-action {
+    width: 100%;
+  }
+
+  .form-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .form-actions .primary-action,
+  .form-actions .secondary-action {
     width: 100%;
   }
 

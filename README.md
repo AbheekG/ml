@@ -39,12 +39,19 @@ The first local read-only vertical slice is operational:
 - the complete catalog, metadata, and typed lyrics are atomically cached in IndexedDB, while the production app shell and hashed assets are precached by a service worker;
 - type checks, importer/schema/API tests, production builds, and local end-to-end API smoke tests pass.
 
-The first online-editing foundation is also implemented locally but is not yet applied to staging:
+The first online-editing foundation is deployed to staging:
 
 - a reconciled forward migration enforces normalized active Song titles, statuses, controlled lookup keys, simplified typed lyrics, Recording descriptions, and Trash safety;
 - all imported row and media-reference counts remain unchanged, with legacy Scan/Recording metadata retained privately;
 - authenticated identities must map to an active `app_users` record, with reusable viewer/editor/admin authorization guards;
-- write endpoints and editing forms are the next incremental slice.
+- the authenticated session exposes the current viewer/editor/admin role without exposing the identity.
+
+The first Song-writing slice is implemented and validated locally, but is not yet applied to staging:
+
+- editors/admins can create and update Song titles, status, Languages, Tags, Aliases, and Notes only while online;
+- the API normalizes title case, validates controlled references, records actor/timestamps, and updates all Song relationships atomically;
+- revisions and per-request mutation identifiers reject stale concurrent edits without allowing their related Language/Tag/Alias changes to leak through;
+- typed-lyric, credit, Trash/restore, lookup-management, and media writes remain later incremental slices.
 
 The private staging catalog is loaded into an APAC-primary D1 database for the application's users in India. All 1,325 workbook-linked media files are stored in private APAC R2 and delivered only through the authenticated API. Two unassigned legacy recordings and two unlinked scans remain local for later identification.
 
@@ -72,7 +79,7 @@ npm test
 npm run build
 ```
 
-The Worker endpoints currently include `/api/health`, `/api/catalog`, and `/api/songs/:songId`. Generated dependencies, build output, Wrangler state, secrets, and local databases are ignored by Git.
+The Worker endpoints include health/session, catalog/offline-library, Song detail/editor options and writes, and authenticated private media delivery. Generated dependencies, build output, Wrangler state, secrets, and local databases are ignored by Git.
 
 ## Legacy import validation
 
