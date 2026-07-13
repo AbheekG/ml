@@ -42,6 +42,7 @@ describe("loadOfflineLibrary", () => {
             playbackMediaId: null,
             description: "First take",
             recordedOn: null,
+            revision: 4,
             processingState: "ready",
             filename: "recording.mp3",
             hasPlaybackMedia: 0,
@@ -71,6 +72,7 @@ describe("loadOfflineLibrary", () => {
       })],
       recordings: [expect.objectContaining({
         id: "recording-1",
+        revision: 4,
         hasPlaybackMedia: false,
         credits: [expect.objectContaining({ fullName: "A person" })],
       })],

@@ -5,6 +5,7 @@ import {
   ApiError,
   createLyric,
   createSong,
+  loadRecordingEditorOptions,
   loadTrash,
   loadScanEditorOptions,
   loadSession,
@@ -14,19 +15,24 @@ import {
   refreshOfflineLibrary,
   refreshSong,
   restoreLyric,
+  restoreRecording,
   restoreScan,
+  trashRecording,
   trashScan,
   trashLyric,
   updateScan,
   updateLyric,
+  updateRecording,
   updateSong,
   type AppSession,
   type CatalogSong,
+  type RecordingEditorOptions,
   type SongEditorOptions,
   type SongDetail,
   type SongWritePayload,
   type ScanEditorOptions,
   type TrashedLyric,
+  type TrashedRecording,
   type TrashedScan,
 } from "./catalog";
 import { scanDisplayName } from "./scan-viewer";
@@ -326,7 +332,8 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                   <li key={recording.id}>
                     <div className="recording-item">
                       <strong>{recording.description}</strong>
-                      <span>{recording.recordedOn || recording.filename}</span>
+                      <span>{[recording.recordedOn, recording.filename].filter(Boolean).join(" · ")}</span>
+                      {recording.credits.length > 0 && <span>{recording.credits.map((credit) => `${credit.role === "vocals" ? "Vocals" : credit.role}: ${credit.fullName}`).join(" · ")}</span>}
                       {recording.processingState === "ready"
                         ? <audio
                             controls
@@ -335,6 +342,11 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                           />
                         : <span>{recording.processingState === "processing" ? "Preparing audio…" : "Audio needs attention"}</span>}
                     </div>
+                    {isOnline && canEdit === true && (
+                      <div className="media-item-actions">
+                        <Link className="media-action" to={`/songs/${encodeURIComponent(song.id)}/recordings/${encodeURIComponent(recording.id)}/edit`}>Edit</Link>
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -677,9 +689,167 @@ function ScanEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
   );
 }
 
+function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
+  const { songId = "", recordingId = "" } = useParams();
+  const navigate = useNavigate();
+  const [options, setOptions] = useState<RecordingEditorOptions | null>(null);
+  const [songTitle, setSongTitle] = useState("");
+  const [filename, setFilename] = useState("");
+  const [description, setDescription] = useState("");
+  const [recordedOn, setRecordedOn] = useState("");
+  const [vocalistIds, setVocalistIds] = useState<string[]>([]);
+  const [revision, setRevision] = useState<number | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTrashing, setIsTrashing] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load(): Promise<void> {
+      if (!isOnline || canEdit !== true) {
+        setIsLoading(false);
+        return;
+      }
+      try {
+        const [editorOptions, song] = await Promise.all([
+          loadRecordingEditorOptions(),
+          refreshSong(songId),
+        ]);
+        if (cancelled) return;
+        const recording = song.recordings.find((item) => item.id === recordingId);
+        setOptions(editorOptions);
+        setSongTitle(song.titleLatin);
+        if (!recording) {
+          setError("This Recording is no longer available.");
+          return;
+        }
+        setFilename(recording.filename);
+        setDescription(recording.description);
+        setRecordedOn(recording.recordedOn ?? "");
+        setVocalistIds(recording.credits.filter((credit) => credit.role === "vocals").map((credit) => credit.personId));
+        setRevision(recording.revision);
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The Recording editor could not be loaded.");
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, [canEdit, isOnline, recordingId, songId]);
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!isOnline || canEdit !== true || revision === null || isSaving || isTrashing) return;
+    setIsSaving(true);
+    setError(null);
+    setFieldErrors({});
+    try {
+      await updateRecording(songId, recordingId, {
+        description,
+        recordedOn: recordedOn || null,
+        creditPersonIds: vocalistIds,
+        revision,
+      });
+      await refreshOfflineLibrary().catch(() => undefined);
+      navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
+    } catch (saveError) {
+      if (saveError instanceof ApiError) {
+        setError(saveError.message);
+        setFieldErrors(saveError.fields ?? {});
+      } else {
+        setError(saveError instanceof Error ? saveError.message : "The Recording could not be saved.");
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function moveToTrash(): Promise<void> {
+    if (!isOnline || canEdit !== true || revision === null || isSaving || isTrashing) return;
+    const confirmed = window.confirm(
+      "Move this Recording to Trash? Its original audio and any playback copy will be retained for recovery.",
+    );
+    if (!confirmed) return;
+    setIsTrashing(true);
+    setError(null);
+    try {
+      await trashRecording(songId, recordingId, revision);
+      await refreshOfflineLibrary().catch(() => undefined);
+      navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
+    } catch (trashError) {
+      setError(trashError instanceof Error ? trashError.message : "The Recording could not be moved to Trash.");
+    } finally {
+      setIsTrashing(false);
+    }
+  }
+
+  const songUrl = `/songs/${encodeURIComponent(songId)}`;
+  if (!isOnline) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Cancel</Link><section className="empty-state"><h1>Editing is offline</h1><p>Reconnect to change or remove a Recording. Saved Song information remains available to read.</p></section></main>;
+  if (canEdit === null) return <main className="page-shell" id="main-content"><p>Checking editor access…</p></main>;
+  if (!canEdit) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Editor access required</h1></section></main>;
+  if (isLoading) return <main className="page-shell" id="main-content"><p>Loading Recording…</p></main>;
+  if (revision === null) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Recording unavailable</h1><p>{error}</p></section></main>;
+
+  return (
+    <main className="page-shell editor-page" id="main-content">
+      <Link className="back-link" to={songUrl}>← Cancel</Link>
+      <header className="editor-heading">
+        <p className="eyebrow">{songTitle || "Song"}</p>
+        <h1>Edit Recording</h1>
+        <p className="lede">Describe this take, optionally record its date, and select any known vocalists.</p>
+      </header>
+      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <form className="song-form" onSubmit={(event) => { void submit(event); }}>
+        <section className="form-card">
+          <div className="form-file-summary">
+            <span>Private original file</span>
+            <strong>{filename}</strong>
+          </div>
+          <label className="form-field">
+            <span>Recording description <strong aria-hidden="true">*</strong></span>
+            <textarea required rows={5} maxLength={10_000} value={description} onChange={(event) => setDescription(event.target.value)} />
+            <small>Use this for details such as an old verse, alternate tune, incomplete take, or accompaniment. Capitalization is preserved.</small>
+            {fieldErrors.description?.map((message) => <em key={message}>{message}</em>)}
+          </label>
+          <label className="form-field compact-field">
+            <span>Recorded date</span>
+            <input type="date" max={new Date().toISOString().slice(0, 10)} value={recordedOn} onChange={(event) => setRecordedOn(event.target.value)} />
+            {fieldErrors.recordedOn?.map((message) => <em key={message}>{message}</em>)}
+          </label>
+        </section>
+        <fieldset className="form-card choice-group">
+          <legend>Vocals</legend>
+          <p>Optional. Select the people who sang in this Recording.</p>
+          <div className="choice-grid">
+            {options?.people.map((person) => (
+              <label key={person.id}><input type="checkbox" checked={vocalistIds.includes(person.id)} onChange={(event) => setVocalistIds(selected(vocalistIds, person.id, event.target.checked))} /><span>{person.fullName}</span></label>
+            ))}
+          </div>
+          {fieldErrors.creditPersonIds?.map((message) => <em key={message}>{message}</em>)}
+        </fieldset>
+        <div className="form-actions">
+          <Link className="secondary-action action-link" to={songUrl}>Cancel</Link>
+          <button className="primary-action" type="submit" disabled={isSaving || isTrashing || description.trim().length === 0}>{isSaving ? "Saving…" : "Save changes"}</button>
+        </div>
+      </form>
+      <section className="danger-zone" aria-labelledby="remove-recording-title">
+        <div>
+          <h2 id="remove-recording-title">Remove this Recording</h2>
+          <p>This moves the Recording and its unshared private audio files to recoverable Trash. Nothing is permanently deleted.</p>
+        </div>
+        <button className="danger-action" type="button" disabled={isSaving || isTrashing} onClick={() => { void moveToTrash(); }}>{isTrashing ? "Moving…" : "Move to Trash"}</button>
+      </section>
+    </main>
+  );
+}
+
 function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
   const [lyrics, setLyrics] = useState<TrashedLyric[]>([]);
   const [scans, setScans] = useState<TrashedScan[]>([]);
+  const [recordings, setRecordings] = useState<TrashedRecording[]>([]);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -696,6 +866,7 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
         if (!cancelled) {
           setLyrics(result.lyrics);
           setScans(result.scans);
+          setRecordings(result.recordings);
           setError(null);
         }
       } catch (loadError) {
@@ -738,6 +909,21 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
     }
   }
 
+  async function restoreTrashedRecording(recording: TrashedRecording): Promise<void> {
+    if (!isOnline || canEdit !== true || restoringId !== null || recording.songIsTrashed) return;
+    setRestoringId(recording.id);
+    setError(null);
+    try {
+      await restoreRecording(recording.id, recording.revision);
+      await refreshOfflineLibrary().catch(() => undefined);
+      setRecordings((current) => current.filter((item) => item.id !== recording.id));
+    } catch (restoreError) {
+      setError(restoreError instanceof Error ? restoreError.message : "The Recording could not be restored.");
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
   if (!isOnline) {
     return <main className="page-shell" id="main-content"><section className="empty-state"><h1>Trash is available online</h1><p>Reconnect to review or restore removed items. Your saved library remains available to read.</p></section></main>;
   }
@@ -756,10 +942,32 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
       {error && <p className="catalog-message error-message" role="alert">{error}</p>}
       {isLoading ? (
         <section className="empty-state"><p>Loading Trash…</p></section>
-      ) : lyrics.length === 0 && scans.length === 0 ? (
-        <section className="empty-state"><div className="empty-mark" aria-hidden="true">✓</div><h2>Trash is empty</h2><p>Removed typed lyrics and Scans will appear here.</p></section>
+      ) : lyrics.length === 0 && scans.length === 0 && recordings.length === 0 ? (
+        <section className="empty-state"><div className="empty-mark" aria-hidden="true">✓</div><h2>Trash is empty</h2><p>Removed typed lyrics, Scans, and Recordings will appear here.</p></section>
       ) : (
         <div className="trash-sections">
+          {recordings.length > 0 && (
+            <section className="trash-section" aria-labelledby="trashed-recordings-title">
+              <h2 id="trashed-recordings-title">Recordings <span>{recordings.length}</span></h2>
+              <ol className="trash-list" aria-label="Trashed Recordings">
+                {recordings.map((recording) => (
+                  <li className="detail-card trash-item" key={recording.id}>
+                    <div className="trash-item-heading">
+                      <div>
+                        <span>Recording · {recording.description}</span>
+                        {recording.songIsTrashed
+                          ? <strong>{recording.songTitle}</strong>
+                          : <Link to={`/songs/${encodeURIComponent(recording.songId)}`}>{recording.songTitle}</Link>}
+                        <small>{[recording.recordedOn, recording.filename].filter(Boolean).join(" · ")} · moved {new Date(recording.trashedAt).toLocaleString()}</small>
+                      </div>
+                      <button className="primary-action" type="button" disabled={restoringId !== null || recording.songIsTrashed} onClick={() => { void restoreTrashedRecording(recording); }}>{restoringId === recording.id ? "Restoring…" : "Restore"}</button>
+                    </div>
+                    {recording.songIsTrashed && <p className="media-note">Restore the parent Song before restoring this Recording.</p>}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
           {scans.length > 0 && (
             <section className="trash-section" aria-labelledby="trashed-scans-title">
               <h2 id="trashed-scans-title">Scans <span>{scans.length}</span></h2>
@@ -1084,6 +1292,7 @@ export function App() {
         <Route path="/songs/:songId/lyrics/new" element={<LyricEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/lyrics/:lyricId/edit" element={<LyricEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/scans/:scanId/edit" element={<ScanEditorPage isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs/:songId/recordings/:recordingId/edit" element={<RecordingEditorPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId" element={<SongDetailPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/trash" element={<TrashPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/account" element={<AccountPage session={session} />} />

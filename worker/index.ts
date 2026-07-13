@@ -14,6 +14,11 @@ import {
   type ScanUpdateInput,
 } from "./scan-writes";
 import {
+  parseRecordingRevision,
+  parseRecordingUpdate,
+  type RecordingUpdateInput,
+} from "./recording-writes";
+import {
   parseSongCreate,
   parseSongUpdate,
   type SongWriteInput,
@@ -125,7 +130,15 @@ type ScanStateRow = {
   mediaState: "active" | "trashed";
 };
 
-type LookupTable = "languages" | "tags" | "notebooks";
+type RecordingStateRow = {
+  revision: number;
+  trashedAt: string | null;
+  songTrashedAt: string | null;
+  originalMediaState: "active" | "trashed";
+  playbackMediaState: "active" | "trashed" | null;
+};
+
+type LookupTable = "languages" | "tags" | "notebooks" | "people";
 
 async function lookupIdsExist(database: D1Database, table: LookupTable, ids: string[]): Promise<boolean> {
   if (ids.length === 0) return true;
@@ -169,6 +182,21 @@ function scanWriteError(error: unknown): { error: string; status: 400 | 500 } {
   return { error: "scan_write_failed", status: 500 };
 }
 
+function recordingWriteError(error: unknown): { error: string; status: 400 | 409 | 500 } {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("recordings_active_description_idx")
+    || (message.includes("recordings.song_id") && message.includes("recordings.normalized_description"))) {
+    return { error: "duplicate_recording_description", status: 409 };
+  }
+  if (message.includes("FOREIGN KEY")) {
+    return { error: "invalid_recording_reference", status: 400 };
+  }
+  if (message.includes("invalid_recording_values") || message.includes("CHECK constraint")) {
+    return { error: "invalid_recording", status: 400 };
+  }
+  return { error: "recording_write_failed", status: 500 };
+}
+
 async function loadLyricState(
   database: D1Database,
   songId: string,
@@ -201,6 +229,26 @@ async function loadScanState(
     JOIN media_objects ON media_objects.id = scans.media_id
     WHERE scans.id = ? AND scans.song_id = ?
   `).bind(scanId, songId).first<ScanStateRow>();
+}
+
+async function loadRecordingState(
+  database: D1Database,
+  songId: string,
+  recordingId: string,
+): Promise<RecordingStateRow | null> {
+  return database.prepare(`
+    SELECT
+      recordings.revision,
+      recordings.trashed_at AS trashedAt,
+      songs.trashed_at AS songTrashedAt,
+      original_media.state AS originalMediaState,
+      playback_media.state AS playbackMediaState
+    FROM recordings
+    JOIN songs ON songs.id = recordings.song_id
+    JOIN media_objects AS original_media ON original_media.id = recordings.original_media_id
+    LEFT JOIN media_objects AS playback_media ON playback_media.id = recordings.playback_media_id
+    WHERE recordings.id = ? AND recordings.song_id = ?
+  `).bind(recordingId, songId).first<RecordingStateRow>();
 }
 
 function languageStatementsForUpdate(
@@ -402,6 +450,15 @@ app.get("/api/scan-editor/options", requireRole("editor"), async (context) => {
     ORDER BY sort_order, display_name COLLATE NOCASE
   `).all<{ id: string; displayName: string }>();
   return context.json({ notebooks: notebooks.results });
+});
+
+app.get("/api/recording-editor/options", requireRole("editor"), async (context) => {
+  const people = await context.env.DB.prepare(`
+    SELECT id, full_name AS fullName
+    FROM people
+    ORDER BY full_name COLLATE NOCASE, id
+  `).all<{ id: string; fullName: string }>();
+  return context.json({ people: people.results });
 });
 
 app.post("/api/songs", requireRole("editor"), async (context) => {
@@ -720,6 +777,123 @@ app.put("/api/songs/:songId/scans/:scanId", requireRole("editor"), async (contex
   }
 });
 
+app.put("/api/songs/:songId/recordings/:recordingId", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseRecordingUpdate(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_recording", fields: parsed.fields }, 400);
+  }
+  const recording: RecordingUpdateInput = parsed.data;
+  if (!await lookupIdsExist(context.env.DB, "people", recording.creditPersonIds)) {
+    return context.json({ error: "invalid_recording_reference" }, 400);
+  }
+
+  const songId = context.req.param("songId");
+  const recordingId = context.req.param("recordingId");
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+  const newRevision = recording.revision + 1;
+  const statements: D1PreparedStatement[] = [context.env.DB.prepare(`
+    UPDATE recordings
+    SET description = ?,
+        normalized_description = ?,
+        recorded_on = ?,
+        revision = revision + 1,
+        updated_at = ?,
+        updated_by = ?
+    WHERE id = ?
+      AND song_id = ?
+      AND revision = ?
+      AND trashed_at IS NULL
+      AND EXISTS (
+        SELECT 1 FROM songs
+        WHERE songs.id = recordings.song_id AND songs.trashed_at IS NULL
+      )
+      AND EXISTS (
+        SELECT 1 FROM media_objects
+        WHERE media_objects.id = recordings.original_media_id
+          AND media_objects.kind = 'original_audio'
+          AND media_objects.state = 'active'
+      )
+      AND (
+        recordings.playback_media_id IS NULL
+        OR EXISTS (
+          SELECT 1 FROM media_objects
+          WHERE media_objects.id = recordings.playback_media_id
+            AND media_objects.state = 'active'
+        )
+      )
+  `).bind(
+    recording.description, recording.normalizedDescription, recording.recordedOn,
+    timestamp, actor, recordingId, songId, recording.revision,
+  ), context.env.DB.prepare(`
+    DELETE FROM recording_credits
+    WHERE recording_id = ? AND role = 'vocals'
+      AND EXISTS (
+        SELECT 1 FROM recordings
+        WHERE recordings.id = recording_credits.recording_id
+          AND recordings.song_id = ?
+          AND recordings.revision = ?
+          AND recordings.updated_at = ?
+          AND recordings.updated_by = ?
+          AND recordings.trashed_at IS NULL
+      )
+  `).bind(recordingId, songId, newRevision, timestamp, actor)];
+  for (const [sortOrder, personId] of recording.creditPersonIds.entries()) {
+    statements.push(context.env.DB.prepare(`
+      INSERT INTO recording_credits (id, recording_id, person_id, role, sort_order)
+      SELECT ?, recordings.id, ?, 'vocals', ?
+      FROM recordings
+      WHERE recordings.id = ?
+        AND recordings.song_id = ?
+        AND recordings.revision = ?
+        AND recordings.updated_at = ?
+        AND recordings.updated_by = ?
+        AND recordings.trashed_at IS NULL
+    `).bind(
+      crypto.randomUUID(), personId, sortOrder,
+      recordingId, songId, newRevision, timestamp, actor,
+    ));
+  }
+  statements.push(context.env.DB.prepare(`
+    UPDATE songs
+    SET updated_at = ?, updated_by = ?
+    WHERE id = ? AND trashed_at IS NULL
+      AND EXISTS (
+        SELECT 1 FROM recordings
+        WHERE id = ?
+          AND song_id = songs.id
+          AND revision = ?
+          AND updated_at = ?
+          AND updated_by = ?
+          AND trashed_at IS NULL
+      )
+  `).bind(timestamp, actor, songId, recordingId, newRevision, timestamp, actor));
+
+  try {
+    const results = await context.env.DB.batch(statements);
+    if (results[0].meta.changes === 0) {
+      const current = await loadRecordingState(context.env.DB, songId, recordingId);
+      if (!current || current.trashedAt !== null || current.songTrashedAt !== null) {
+        return context.json({ error: "recording_not_found" }, 404);
+      }
+      if (current.originalMediaState !== "active" || current.playbackMediaState === "trashed") {
+        return context.json({ error: "recording_media_unavailable" }, 409);
+      }
+      return context.json({ error: "recording_edit_conflict", currentRevision: current.revision }, 409);
+    }
+    return context.json({ recording: { id: recordingId, revision: newRevision } });
+  } catch (error) {
+    const response = recordingWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
 app.post("/api/songs/:songId/lyrics/:lyricId/trash", requireRole("editor"), async (context) => {
   let body: unknown;
   try {
@@ -872,8 +1046,118 @@ app.post("/api/songs/:songId/scans/:scanId/trash", requireRole("editor"), async 
   }
 });
 
+app.post("/api/songs/:songId/recordings/:recordingId/trash", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseRecordingRevision(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_recording", fields: parsed.fields }, 400);
+  }
+  const songId = context.req.param("songId");
+  const recordingId = context.req.param("recordingId");
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+  const newRevision = parsed.data.revision + 1;
+
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        UPDATE recordings
+        SET trashed_at = ?,
+            trashed_by = ?,
+            revision = revision + 1,
+            updated_at = ?,
+            updated_by = ?
+        WHERE id = ?
+          AND song_id = ?
+          AND revision = ?
+          AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM songs
+            WHERE songs.id = recordings.song_id AND songs.trashed_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM media_objects
+            WHERE media_objects.id = recordings.original_media_id
+              AND media_objects.state = 'active'
+          )
+          AND (
+            recordings.playback_media_id IS NULL
+            OR EXISTS (
+              SELECT 1 FROM media_objects
+              WHERE media_objects.id = recordings.playback_media_id
+                AND media_objects.state = 'active'
+            )
+          )
+      `).bind(timestamp, actor, timestamp, actor, recordingId, songId, parsed.data.revision),
+      context.env.DB.prepare(`
+        UPDATE media_objects
+        SET state = 'trashed', trashed_at = ?, trashed_by = ?
+        WHERE state = 'active'
+          AND id IN (
+            SELECT original_media_id FROM recordings
+            WHERE id = ? AND song_id = ? AND revision = ?
+              AND trashed_at = ? AND trashed_by = ?
+            UNION
+            SELECT playback_media_id FROM recordings
+            WHERE id = ? AND song_id = ? AND revision = ?
+              AND trashed_at = ? AND trashed_by = ?
+              AND playback_media_id IS NOT NULL
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM recordings AS active_recordings
+            WHERE active_recordings.trashed_at IS NULL
+              AND (
+                active_recordings.original_media_id = media_objects.id
+                OR active_recordings.playback_media_id = media_objects.id
+              )
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM scans
+            WHERE scans.trashed_at IS NULL AND scans.media_id = media_objects.id
+          )
+      `).bind(
+        timestamp, actor,
+        recordingId, songId, newRevision, timestamp, actor,
+        recordingId, songId, newRevision, timestamp, actor,
+      ),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM recordings
+            WHERE id = ? AND song_id = songs.id AND revision = ?
+              AND trashed_at = ? AND trashed_by = ?
+          )
+      `).bind(timestamp, actor, songId, recordingId, newRevision, timestamp, actor),
+    ]);
+    if (results[0].meta.changes === 0) {
+      const current = await loadRecordingState(context.env.DB, songId, recordingId);
+      if (!current || current.songTrashedAt !== null) {
+        return context.json({ error: "recording_not_found" }, 404);
+      }
+      if (current.trashedAt !== null) {
+        return context.json({ error: "recording_already_trashed", currentRevision: current.revision }, 409);
+      }
+      if (current.originalMediaState !== "active" || current.playbackMediaState === "trashed") {
+        return context.json({ error: "recording_media_unavailable" }, 409);
+      }
+      return context.json({ error: "recording_edit_conflict", currentRevision: current.revision }, 409);
+    }
+    return context.json({ recording: { id: recordingId, revision: newRevision } });
+  } catch (error) {
+    const response = recordingWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
 app.get("/api/trash", requireRole("editor"), async (context) => {
-  const [lyrics, scans] = await Promise.all([
+  const [lyrics, scans, recordings] = await Promise.all([
     context.env.DB.prepare(`
       SELECT
         lyric_texts.id,
@@ -926,6 +1210,33 @@ app.get("/api/trash", requireRole("editor"), async (context) => {
       trashedAt: string;
       songIsTrashed: number;
     }>(),
+    context.env.DB.prepare(`
+      SELECT
+        recordings.id,
+        recordings.song_id AS songId,
+        songs.title_latin AS songTitle,
+        recordings.description,
+        recordings.recorded_on AS recordedOn,
+        original_media.original_filename AS filename,
+        recordings.revision,
+        recordings.trashed_at AS trashedAt,
+        CASE WHEN songs.trashed_at IS NULL THEN 0 ELSE 1 END AS songIsTrashed
+      FROM recordings
+      JOIN songs ON songs.id = recordings.song_id
+      JOIN media_objects AS original_media ON original_media.id = recordings.original_media_id
+      WHERE recordings.trashed_at IS NOT NULL
+      ORDER BY recordings.trashed_at DESC, recordings.id
+    `).all<{
+      id: string;
+      songId: string;
+      songTitle: string;
+      description: string;
+      recordedOn: string | null;
+      filename: string;
+      revision: number;
+      trashedAt: string;
+      songIsTrashed: number;
+    }>(),
   ]);
   return context.json({
     lyrics: lyrics.results.map((lyric) => ({
@@ -935,6 +1246,10 @@ app.get("/api/trash", requireRole("editor"), async (context) => {
     scans: scans.results.map((scan) => ({
       ...scan,
       songIsTrashed: scan.songIsTrashed === 1,
+    })),
+    recordings: recordings.results.map((recording) => ({
+      ...recording,
+      songIsTrashed: recording.songIsTrashed === 1,
     })),
   });
 });
@@ -1114,6 +1429,111 @@ app.post("/api/trash/scans/:scanId/restore", requireRole("editor"), async (conte
   }
 });
 
+app.post("/api/trash/recordings/:recordingId/restore", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseRecordingRevision(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_recording", fields: parsed.fields }, 400);
+  }
+  const recordingId = context.req.param("recordingId");
+  const current = await context.env.DB.prepare(`
+    SELECT recordings.song_id AS songId
+    FROM recordings
+    JOIN songs ON songs.id = recordings.song_id
+    WHERE recordings.id = ?
+  `).bind(recordingId).first<{ songId: string }>();
+  if (!current) return context.json({ error: "recording_not_found" }, 404);
+
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+  const newRevision = parsed.data.revision + 1;
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        UPDATE recordings
+        SET trashed_at = NULL,
+            trashed_by = NULL,
+            revision = revision + 1,
+            updated_at = ?,
+            updated_by = ?
+        WHERE id = ?
+          AND revision = ?
+          AND trashed_at IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM songs
+            WHERE songs.id = recordings.song_id AND songs.trashed_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM media_objects
+            WHERE media_objects.id = recordings.original_media_id
+              AND media_objects.state = 'trashed'
+          )
+          AND (
+            recordings.playback_media_id IS NULL
+            OR EXISTS (
+              SELECT 1 FROM media_objects
+              WHERE media_objects.id = recordings.playback_media_id
+                AND media_objects.state IN ('active', 'trashed')
+            )
+          )
+      `).bind(timestamp, actor, recordingId, parsed.data.revision),
+      context.env.DB.prepare(`
+        UPDATE media_objects
+        SET state = 'active', trashed_at = NULL, trashed_by = NULL
+        WHERE state = 'trashed'
+          AND id IN (
+            SELECT original_media_id FROM recordings
+            WHERE id = ? AND revision = ? AND trashed_at IS NULL
+              AND updated_at = ? AND updated_by = ?
+            UNION
+            SELECT playback_media_id FROM recordings
+            WHERE id = ? AND revision = ? AND trashed_at IS NULL
+              AND updated_at = ? AND updated_by = ?
+              AND playback_media_id IS NOT NULL
+          )
+      `).bind(
+        recordingId, newRevision, timestamp, actor,
+        recordingId, newRevision, timestamp, actor,
+      ),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM recordings
+            WHERE id = ? AND song_id = songs.id AND revision = ?
+              AND trashed_at IS NULL AND updated_at = ? AND updated_by = ?
+          )
+      `).bind(timestamp, actor, current.songId, recordingId, newRevision, timestamp, actor),
+    ]);
+    if (results[0].meta.changes === 0) {
+      const state = await loadRecordingState(context.env.DB, current.songId, recordingId);
+      if (!state) return context.json({ error: "recording_not_found" }, 404);
+      if (state.songTrashedAt !== null) {
+        return context.json({ error: "recording_parent_trashed" }, 409);
+      }
+      if (state.trashedAt === null) {
+        return context.json({ error: "recording_not_trashed", currentRevision: state.revision }, 409);
+      }
+      if (state.originalMediaState !== "trashed") {
+        return context.json({ error: "recording_media_unavailable" }, 409);
+      }
+      return context.json({ error: "recording_edit_conflict", currentRevision: state.revision }, 409);
+    }
+    return context.json({
+      recording: { id: recordingId, songId: current.songId, revision: newRevision },
+    });
+  } catch (error) {
+    const response = recordingWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
 app.get("/api/catalog", async (context) => {
   const result = await context.env.DB.prepare(`
     SELECT
@@ -1246,6 +1666,7 @@ app.get("/api/songs/:songId", async (context) => {
         recordings.playback_media_id AS playbackMediaId,
         recordings.description,
         recordings.recorded_on AS recordedOn,
+        recordings.revision,
         recordings.processing_state AS processingState,
         media_objects.original_filename AS filename,
         CASE WHEN recordings.playback_media_id IS NULL THEN 0 ELSE 1 END AS hasPlaybackMedia
@@ -1259,6 +1680,7 @@ app.get("/api/songs/:songId", async (context) => {
       playbackMediaId: string | null;
       description: string;
       recordedOn: string | null;
+      revision: number;
       processingState: "processing" | "ready" | "failed";
       filename: string;
       hasPlaybackMedia: number;

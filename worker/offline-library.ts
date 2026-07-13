@@ -131,6 +131,7 @@ export async function loadOfflineLibrary(database: D1Database) {
         recordings.playback_media_id AS playbackMediaId,
         recordings.description,
         recordings.recorded_on AS recordedOn,
+        recordings.revision,
         recordings.processing_state AS processingState,
         media_objects.original_filename AS filename,
         CASE WHEN recordings.playback_media_id IS NULL THEN 0 ELSE 1 END AS hasPlaybackMedia
@@ -144,6 +145,7 @@ export async function loadOfflineLibrary(database: D1Database) {
       playbackMediaId: string | null;
       description: string;
       recordedOn: string | null;
+      revision: number;
       processingState: "processing" | "ready" | "failed";
       filename: string;
       hasPlaybackMedia: number;

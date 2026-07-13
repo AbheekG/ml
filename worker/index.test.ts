@@ -350,29 +350,39 @@ describe("Worker API", () => {
     await expect(response.json()).resolves.toMatchObject({ lyric: { revision: 3 } });
   });
 
-  it("lists trashed typed lyrics and Scans only for editors", async () => {
+  it("lists trashed typed lyrics, Scans, and Recordings only for editors", async () => {
     const database = {
       prepare: (query: string) => ({
         all: async () => ({ results: query.includes("FROM lyric_texts") ? [{
-            id: "lyrics-1",
-            songId: "song-1",
-            songTitle: "A song",
-            content: "Text",
-            origin: "user",
-            revision: 3,
-            trashedAt: "2026-07-13T00:00:00.000Z",
-            songIsTrashed: 0,
-          }] : [{
-            id: "scan-1",
-            songId: "song-1",
-            songTitle: "A song",
-            filename: "page.jpg",
-            notebookName: "Book",
-            pageLabel: "3",
-            revision: 2,
-            trashedAt: "2026-07-13T00:00:00.000Z",
-            songIsTrashed: 0,
-          }] }),
+          id: "lyrics-1",
+          songId: "song-1",
+          songTitle: "A song",
+          content: "Text",
+          origin: "user",
+          revision: 3,
+          trashedAt: "2026-07-13T00:00:00.000Z",
+          songIsTrashed: 0,
+        }] : query.includes("FROM scans") ? [{
+          id: "scan-1",
+          songId: "song-1",
+          songTitle: "A song",
+          filename: "page.jpg",
+          notebookName: "Book",
+          pageLabel: "3",
+          revision: 2,
+          trashedAt: "2026-07-13T00:00:00.000Z",
+          songIsTrashed: 0,
+        }] : [{
+          id: "recording-1",
+          songId: "song-1",
+          songTitle: "A song",
+          description: "Old verse",
+          recordedOn: null,
+          filename: "take.mp3",
+          revision: 4,
+          trashedAt: "2026-07-13T00:00:00.000Z",
+          songIsTrashed: 0,
+        }] }),
       }),
     } as unknown as D1Database;
 
@@ -385,6 +395,7 @@ describe("Worker API", () => {
     await expect(editorResponse.json()).resolves.toMatchObject({
       lyrics: [{ id: "lyrics-1", songIsTrashed: false }],
       scans: [{ id: "scan-1", songIsTrashed: false }],
+      recordings: [{ id: "recording-1", songIsTrashed: false }],
     });
 
     const viewerResponse = await app.request(
@@ -583,6 +594,163 @@ describe("Worker API", () => {
     });
   });
 
+  it("updates Recording metadata and Vocals credits atomically", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    let batch: FakeStatement[] = [];
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+          all: async () => ({ results: query.includes("FROM people") ? [{ id: "person-1" }] : [] }),
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => {
+        batch = statements;
+        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/recordings/recording-1",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          description: "  Old verse, different tune  ",
+          recordedOn: "2020-02-29",
+          creditPersonIds: ["person-1"],
+          revision: 2,
+        }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(batch[0].query).toContain("UPDATE recordings");
+    expect(batch[0].values.slice(0, 3)).toEqual([
+      "Old verse, different tune",
+      "old verse, different tune",
+      "2020-02-29",
+    ]);
+    expect(batch[1].query).toContain("DELETE FROM recording_credits");
+    expect(batch[2].query).toContain("INSERT INTO recording_credits");
+    expect(batch.at(-1)?.query).toContain("UPDATE songs");
+    await expect(response.json()).resolves.toEqual({ recording: { id: "recording-1", revision: 3 } });
+  });
+
+  it("moves a Recording and its private media objects to Trash without deleting records", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    let batch: FakeStatement[] = [];
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => {
+        batch = statements;
+        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/recordings/recording-1/trash",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: 2 }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(batch[0].query).toContain("UPDATE recordings");
+    expect(batch[1].query).toContain("UPDATE media_objects");
+    expect(batch.every((statement) => !statement.query.includes("DELETE FROM"))).toBe(true);
+  });
+
+  it("restores a Recording and its private media objects together", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    let batch: FakeStatement[] = [];
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+          first: async () => query.includes("SELECT recordings.song_id AS songId")
+            ? { songId: "song-1" }
+            : null,
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => {
+        batch = statements;
+        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/trash/recordings/recording-1/restore",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: 3 }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(batch[0].query).toContain("UPDATE recordings");
+    expect(batch[1].query).toContain("UPDATE media_objects");
+    await expect(response.json()).resolves.toEqual({
+      recording: { id: "recording-1", songId: "song-1", revision: 4 },
+    });
+  });
+
+  it("reports a duplicate description conflict while restoring a Recording", async () => {
+    const database = {
+      prepare: (query: string) => ({
+        bind: () => ({
+          first: async () => query.includes("SELECT recordings.song_id AS songId")
+            ? { songId: "song-1" }
+            : null,
+        }),
+      }),
+      batch: async () => {
+        throw new Error("UNIQUE constraint failed: recordings.song_id, recordings.normalized_description");
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/trash/recordings/recording-1/restore",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: 3 }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "duplicate_recording_description" });
+  });
+
   it("reports a healthy service", async () => {
     const response = await app.request("http://local.test/api/health", undefined, localBindings());
 
@@ -660,6 +828,7 @@ describe("Worker API", () => {
                 id: "recording-1",
                 description: "First take",
                 recordedOn: null,
+                revision: 4,
                 processingState: "ready",
                 filename: "recording.m4a",
                 hasPlaybackMedia: 1,

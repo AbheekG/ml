@@ -53,6 +53,7 @@ export type SongDetail = {
     playbackMediaId: string | null;
     description: string;
     recordedOn: string | null;
+    revision: number;
     processingState: "processing" | "ready" | "failed";
     filename: string;
     hasPlaybackMedia: boolean;
@@ -211,6 +212,22 @@ export type ScanEditorOptions = {
   notebooks: Array<{ id: string; displayName: string }>;
 };
 
+export type TrashedRecording = {
+  id: string;
+  songId: string;
+  songTitle: string;
+  description: string;
+  recordedOn: string | null;
+  filename: string;
+  revision: number;
+  trashedAt: string;
+  songIsTrashed: boolean;
+};
+
+export type RecordingEditorOptions = {
+  people: Array<{ id: string; fullName: string }>;
+};
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -243,6 +260,14 @@ function apiErrorMessage(code: string): string {
     scan_not_trashed: "This Scan has already been restored.",
     scan_parent_trashed: "Restore the parent Song before restoring this Scan.",
     scan_media_unavailable: "The Scan file is not in the expected recovery state.",
+    duplicate_recording_description: "This Song already has an active Recording with the same description.",
+    invalid_recording_reference: "A selected contributor is no longer available. Reload the form.",
+    recording_edit_conflict: "This Recording changed after you opened it. Reload and try again.",
+    recording_not_found: "This Recording is no longer available.",
+    recording_already_trashed: "This Recording is already in Trash.",
+    recording_not_trashed: "This Recording has already been restored.",
+    recording_parent_trashed: "Restore the parent Song before restoring this Recording.",
+    recording_media_unavailable: "The Recording files are not in the expected recovery state.",
   };
   return messages[code] ?? "The change could not be saved.";
 }
@@ -344,8 +369,16 @@ export async function trashLyric(
   return response.lyric;
 }
 
-export async function loadTrash(): Promise<{ lyrics: TrashedLyric[]; scans: TrashedScan[] }> {
-  return apiJson<{ lyrics: TrashedLyric[]; scans: TrashedScan[] }>("/api/trash");
+export async function loadTrash(): Promise<{
+  lyrics: TrashedLyric[];
+  scans: TrashedScan[];
+  recordings: TrashedRecording[];
+}> {
+  return apiJson<{
+    lyrics: TrashedLyric[];
+    scans: TrashedScan[];
+    recordings: TrashedRecording[];
+  }>("/api/trash");
 }
 
 export async function restoreLyric(
@@ -410,4 +443,59 @@ export async function restoreScan(
     body: JSON.stringify({ revision }),
   });
   return response.scan;
+}
+
+export async function loadRecordingEditorOptions(): Promise<RecordingEditorOptions> {
+  return apiJson<RecordingEditorOptions>("/api/recording-editor/options");
+}
+
+export async function updateRecording(
+  songId: string,
+  recordingId: string,
+  payload: {
+    description: string;
+    recordedOn: string | null;
+    creditPersonIds: string[];
+    revision: number;
+  },
+): Promise<{ id: string; revision: number }> {
+  const response = await apiJson<{ recording: { id: string; revision: number } }>(
+    `/api/songs/${encodeURIComponent(songId)}/recordings/${encodeURIComponent(recordingId)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  return response.recording;
+}
+
+export async function trashRecording(
+  songId: string,
+  recordingId: string,
+  revision: number,
+): Promise<{ id: string; revision: number }> {
+  const response = await apiJson<{ recording: { id: string; revision: number } }>(
+    `/api/songs/${encodeURIComponent(songId)}/recordings/${encodeURIComponent(recordingId)}/trash`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision }),
+    },
+  );
+  return response.recording;
+}
+
+export async function restoreRecording(
+  recordingId: string,
+  revision: number,
+): Promise<{ id: string; songId: string; revision: number }> {
+  const response = await apiJson<{
+    recording: { id: string; songId: string; revision: number };
+  }>(`/api/trash/recordings/${encodeURIComponent(recordingId)}/restore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ revision }),
+  });
+  return response.recording;
 }

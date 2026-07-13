@@ -49,7 +49,8 @@ The private staging application is operational:
 - revisions and per-request mutation identifiers reject stale concurrent edits without allowing their related Language/Tag/Alias changes to leak through;
 - editors/admins can create, edit, move to Trash, and restore typed-lyric blocks;
 - editors/admins can edit Scan Notebook/Page metadata and move existing Scans and their private media to recoverable Trash or restore them;
-- Scan upload/replace, Recording writes, credit editing, and lookup management remain later incremental slices.
+- editors/admins can edit existing Recording descriptions, dates, and Vocals credits, and move Recordings and unshared private media to recoverable Trash or restore them;
+- Scan/Recording upload and replace, broader Recording contribution roles, Song-credit editing, and lookup management remain later incremental slices.
 
 The private staging catalog is loaded into an APAC-primary D1 database for the application's users in India. All 1,325 workbook-linked media files are stored in private APAC R2 and delivered only through the authenticated API. Two unassigned legacy recordings and two unlinked scans remain local for later identification.
 

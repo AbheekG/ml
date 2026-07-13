@@ -239,6 +239,60 @@ describe("initial database schema", () => {
     expect(output).toBe("notebook-1|Page 12|3|scans/test.jpg|page.jpg|1234|hash-1|active\n");
   });
 
+  it("can trash and restore a Recording, its credits, and both private media records", () => {
+    const output = runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO people (
+        id, full_name, normalized_name, created_at, updated_at
+      ) VALUES ('person-1', 'Singer', 'singer', '${timestamp}', '${timestamp}');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES
+        ('original-1', 'recordings/original.wav', 'original.wav', 'audio/wav', 4321, 'original-hash', 'original_audio', '${timestamp}', 'test'),
+        ('playback-1', 'recordings/playback.mp3', 'playback.mp3', 'audio/mpeg', 1234, 'playback-hash', 'playback_audio', '${timestamp}', 'test');
+      INSERT INTO recordings (
+        id, song_id, original_media_id, playback_media_id,
+        description, normalized_description, recorded_on,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'recording-1', 'song-1', 'original-1', 'playback-1',
+        'Old verse', 'old verse', '2020-02-29',
+        '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      INSERT INTO recording_credits (id, recording_id, person_id, role, sort_order)
+      VALUES ('credit-1', 'recording-1', 'person-1', 'vocals', 0);
+      UPDATE recordings
+      SET trashed_at = '${timestamp}', trashed_by = 'test', revision = revision + 1
+      WHERE id = 'recording-1';
+      UPDATE media_objects
+      SET state = 'trashed', trashed_at = '${timestamp}', trashed_by = 'test'
+      WHERE id IN ('original-1', 'playback-1');
+      UPDATE recordings
+      SET trashed_at = NULL, trashed_by = NULL, revision = revision + 1
+      WHERE id = 'recording-1';
+      UPDATE media_objects
+      SET state = 'active', trashed_at = NULL, trashed_by = NULL
+      WHERE id IN ('original-1', 'playback-1');
+      SELECT
+        recordings.description || '|' || recordings.recorded_on || '|' || recordings.revision || '|' ||
+        original_media.object_key || '|' || original_media.state || '|' ||
+        playback_media.object_key || '|' || playback_media.state || '|' ||
+        recording_credits.role || '|' || people.full_name
+      FROM recordings
+      JOIN media_objects AS original_media ON original_media.id = recordings.original_media_id
+      JOIN media_objects AS playback_media ON playback_media.id = recordings.playback_media_id
+      JOIN recording_credits ON recording_credits.recording_id = recordings.id
+      JOIN people ON people.id = recording_credits.person_id
+      WHERE recordings.id = 'recording-1';
+    `);
+
+    expect(output).toBe("Old verse|2020-02-29|3|recordings/original.wav|active|recordings/playback.mp3|active|vocals|Singer\n");
+  });
+
   it("rejects restoring typed lyrics when identical active content now exists", () => {
     expect(() => runSql(`
       INSERT INTO songs (
