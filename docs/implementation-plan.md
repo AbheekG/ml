@@ -56,11 +56,11 @@ delivery that may already have committed never becomes a contradictory failure
 callback. No HTTP server/trigger, container, scheduler, real secret, Cloud Run
 resource, or other hosted invocation mechanism has been created. The accepted
 local design selects a scheduled single-task Cloud Run Job. Its database-enforced
-global running-job gate and three-attempt bounded lease-loss recovery are now
-implemented and tested locally; the remaining gates are a 45-minute processor
-deadline and generated-output ceiling, aggregate-only entrypoint behavior, and
-local container/resource verification. Every cloud action remains separately
-owner-approved.
+global running-job gate, three-attempt bounded lease-loss recovery, 45-minute
+monotonic processor deadline, 55-minute lease-remaining floor, and streaming
+generated-output ceiling are now implemented and tested locally. The remaining
+gates are aggregate-only entrypoint behavior and local container/resource
+verification. Every cloud action remains separately owner-approved.
 
 Proposed application tooling:
 

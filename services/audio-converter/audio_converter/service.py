@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Protocol
@@ -110,17 +111,33 @@ def _write_manifest_atomic(path: Path, payload: dict[str, object]) -> None:
         temporary_path.unlink(missing_ok=True)
 
 
-def sha256_file(path: Path) -> str:
+def _checkpoint(checkpoint: Callable[[], None] | None) -> None:
+    if checkpoint is not None:
+        checkpoint()
+
+
+def sha256_file(
+    path: Path,
+    *,
+    checkpoint: Callable[[], None] | None = None,
+) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            _checkpoint(checkpoint)
             digest.update(chunk)
+    _checkpoint(checkpoint)
     return digest.hexdigest()
 
 
-def summarize(path: Path, info: AudioInfo) -> FileSummary:
+def summarize(
+    path: Path,
+    info: AudioInfo,
+    *,
+    checkpoint: Callable[[], None] | None = None,
+) -> FileSummary:
     return FileSummary(
-        sha256=sha256_file(path),
+        sha256=sha256_file(path, checkpoint=checkpoint),
         byte_size=info.byte_size,
         codec=info.codec_name,
         containers=info.container_names,
@@ -137,9 +154,13 @@ def _inspect_and_decode(
     source: Path,
     *,
     strict: bool,
+    checkpoint: Callable[[], None] | None = None,
 ) -> AudioInfo:
+    _checkpoint(checkpoint)
     info = tools.probe(source)
+    _checkpoint(checkpoint)
     decoded = tools.decode_check(source, info.stream_index, strict=strict)
+    _checkpoint(checkpoint)
     if not strict:
         maximum_difference = max(1.0, info.duration_seconds * 0.05)
         if abs(decoded.duration_seconds - info.duration_seconds) > maximum_difference:
@@ -158,6 +179,7 @@ def _validate_existing_output(
     original: FileSummary,
     decision: Decision,
     policy: ProcessingPolicy,
+    checkpoint: Callable[[], None] | None,
 ) -> tuple[AudioInfo, DerivativeValidation]:
     provenance_path = manifest_path(output)
     if not provenance_path.is_file():
@@ -175,7 +197,12 @@ def _validate_existing_output(
     ):
         raise PreparationError("existing_output_provenance_mismatch")
 
-    derivative_info = _inspect_and_decode(tools, output, strict=True)
+    derivative_info = _inspect_and_decode(
+        tools,
+        output,
+        strict=True,
+        checkpoint=checkpoint,
+    )
     validation = validate_derivative(
         source_info,
         derivative_info,
@@ -186,7 +213,10 @@ def _validate_existing_output(
         raise PreparationError("existing_output_does_not_match_policy")
     if provenance.get("derivativeByteSize") != derivative_info.byte_size:
         raise PreparationError("existing_output_provenance_mismatch")
-    if provenance.get("derivativeSha256") != sha256_file(output):
+    if provenance.get("derivativeSha256") != sha256_file(
+        output,
+        checkpoint=checkpoint,
+    ):
         raise PreparationError("existing_output_provenance_mismatch")
     return derivative_info, validation
 
@@ -198,14 +228,24 @@ def prepare(
     output: Path | None,
     execute: bool,
     policy: ProcessingPolicy = ProcessingPolicy(),
+    checkpoint: Callable[[], None] | None = None,
+    max_generated_output_bytes: int | None = None,
 ) -> PreparationResult:
+    if max_generated_output_bytes is not None and max_generated_output_bytes < 1:
+        raise PreparationError("invalid_generated_output_limit")
+    _checkpoint(checkpoint)
     source = source.resolve(strict=True)
     if not source.is_file():
         raise PreparationError("source_is_not_a_file")
 
-    source_info = _inspect_and_decode(tools, source, strict=False)
+    source_info = _inspect_and_decode(
+        tools,
+        source,
+        strict=False,
+        checkpoint=checkpoint,
+    )
     source_decision = decide(source_info, policy)
-    original_summary = summarize(source, source_info)
+    original_summary = summarize(source, source_info, checkpoint=checkpoint)
 
     if output is not None:
         output = output.resolve(strict=False)
@@ -233,6 +273,7 @@ def prepare(
             original_summary,
             source_decision,
             policy,
+            checkpoint,
         )
         return PreparationResult(
             status="verified_existing_derivative",
@@ -260,11 +301,19 @@ def prepare(
         f".{output.name}.{uuid.uuid4().hex}.temporary.mp3"
     )
     try:
+        _checkpoint(checkpoint)
         tools.transcode(source, temporary_output, source_info)
+        _checkpoint(checkpoint)
+        if (
+            max_generated_output_bytes is not None
+            and temporary_output.stat().st_size > max_generated_output_bytes
+        ):
+            raise PreparationError("generated_output_too_large")
         derivative_info = _inspect_and_decode(
             tools,
             temporary_output,
             strict=True,
+            checkpoint=checkpoint,
         )
         validation = validate_derivative(
             source_info,
@@ -282,7 +331,11 @@ def prepare(
                 )
             raise PreparationError(validation.reason)
 
-        derivative_summary = summarize(temporary_output, derivative_info)
+        derivative_summary = summarize(
+            temporary_output,
+            derivative_info,
+            checkpoint=checkpoint,
+        )
         os.replace(temporary_output, output)
         try:
             _write_manifest_atomic(

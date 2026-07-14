@@ -111,11 +111,11 @@ three nested limits:
 | Cloud Run task timeout | 50 minutes | Terminate a stuck process before the Worker can recycle its lease. |
 | Worker lease | 60 minutes from claim | Keep every capability stale before a later claim can reuse the job. |
 
-The entrypoint records a monotonic process deadline. Before deployment, the
-adapter and FFmpeg runner must enforce that deadline across streamed transfer,
-probe, complete decode, conversion, verification, upload, and callback phases.
-The adapter must also require at least 55 minutes of lease remaining when it
-accepts a claim. A processing soft-timeout should attempt a bounded
+The run-once adapter records a monotonic process deadline and the FFmpeg runner
+enforces it across streamed transfer, probe, complete decode, conversion,
+verification, upload, and callback phases. The adapter also requires at least
+55 minutes of lease remaining when it accepts a claim. A processing soft-timeout
+attempts a bounded
 `processing_deadline_exceeded` failure callback; it must not wait for the
 platform to kill the task.
 
@@ -162,8 +162,8 @@ The configured source and derivative ceilings are each 512 MiB. Merely checking
 the derivative before upload is too late: an unusually long, low-bit-rate source
 could create a larger temporary output or run until the task timeout.
 
-Before deployment, hosted conversion must therefore enforce both the 45-minute
-soft budget and a hard generated-output byte ceiling while FFmpeg is writing.
+Hosted conversion therefore enforces both the 45-minute soft budget and a hard
+generated-output byte ceiling while FFmpeg is writing.
 Exceeding either limit reports a bounded failure and removes the temporary
 directory. A size-limited in-memory volume prevents filesystem growth beyond the
 declared budget even if the process misbehaves.
@@ -246,8 +246,9 @@ The smallest safe sequence after this design is accepted is:
 1. database-backed single-running-job invariant plus bounded expired-lease
    recovery: implemented and tested locally in migration `0008`; the migration
    has not been applied remotely;
-2. add the processor soft deadline, streaming/generated-output bounds, and
-   deadline tests without adding a server or container;
+2. processor soft deadline, 55-minute lease-remaining check,
+   streaming/generated-output bounds, and deadline tests: implemented locally
+   without adding a server or container;
 3. add a minimal run-once entrypoint with strict configuration loading,
    aggregate logging, and exit-code tests;
 4. add and locally test a pinned, non-root FFmpeg container and resource fixture;

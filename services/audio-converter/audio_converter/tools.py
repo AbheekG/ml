@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import subprocess
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -24,13 +26,66 @@ CommandRunner = Callable[
 ]
 
 
-def _run_subprocess(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+def _run_subprocess(
+    command: Sequence[str],
+    *,
+    operation: str,
+    deadline: float | None,
+    monotonic: Callable[[], float],
+    output: Path | None = None,
+    max_output_bytes: int | None = None,
+) -> subprocess.CompletedProcess[str]:
+    if deadline is None and output is None:
+        return subprocess.run(
+            list(command),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    process = subprocess.Popen(
         list(command),
-        check=False,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
     )
+
+    def stop(code: str) -> None:
+        process.kill()
+        process.communicate()
+        raise MediaToolError(code, operation)
+
+    while True:
+        if (
+            output is not None
+            and max_output_bytes is not None
+            and output.exists()
+            and output.stat().st_size > max_output_bytes
+        ):
+            stop("generated_output_too_large")
+        remaining = None if deadline is None else deadline - monotonic()
+        if remaining is not None and remaining <= 0:
+            stop("processing_deadline_exceeded")
+        wait_seconds = 0.05 if remaining is None else min(0.05, remaining)
+        try:
+            stdout, stderr = process.communicate(timeout=wait_seconds)
+        except subprocess.TimeoutExpired:
+            continue
+        if (
+            output is not None
+            and max_output_bytes is not None
+            and output.exists()
+            and output.stat().st_size > max_output_bytes
+        ):
+            raise MediaToolError("generated_output_too_large", operation)
+        if deadline is not None and monotonic() >= deadline:
+            raise MediaToolError("processing_deadline_exceeded", operation)
+        return subprocess.CompletedProcess(
+            list(command),
+            process.returncode,
+            stdout,
+            stderr,
+        )
 
 
 def _positive_int(value: Any) -> int | None:
@@ -66,13 +121,63 @@ class FFmpegTools:
         *,
         ffmpeg: str = "ffmpeg",
         ffprobe: str = "ffprobe",
-        runner: CommandRunner = _run_subprocess,
+        runner: CommandRunner | None = None,
         policy: ProcessingPolicy = ProcessingPolicy(),
+        deadline: float | None = None,
+        max_generated_output_bytes: int | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.ffmpeg = ffmpeg
         self.ffprobe = ffprobe
         self.runner = runner
         self.policy = policy
+        if deadline is not None and (
+            not isinstance(deadline, (int, float))
+            or isinstance(deadline, bool)
+            or not math.isfinite(deadline)
+        ):
+            raise ValueError("invalid processing deadline")
+        if max_generated_output_bytes is not None and (
+            not isinstance(max_generated_output_bytes, int)
+            or isinstance(max_generated_output_bytes, bool)
+            or max_generated_output_bytes < 1
+        ):
+            raise ValueError("invalid generated output limit")
+        self.deadline = float(deadline) if deadline is not None else None
+        self.max_generated_output_bytes = max_generated_output_bytes
+        self.monotonic = monotonic
+
+    def _check_bounds(self, operation: str, output: Path | None = None) -> None:
+        if (
+            output is not None
+            and self.max_generated_output_bytes is not None
+            and output.exists()
+            and output.stat().st_size > self.max_generated_output_bytes
+        ):
+            raise MediaToolError("generated_output_too_large", operation)
+        if self.deadline is not None and self.monotonic() >= self.deadline:
+            raise MediaToolError("processing_deadline_exceeded", operation)
+
+    def _run(
+        self,
+        command: Sequence[str],
+        *,
+        operation: str,
+        output: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        self._check_bounds(operation, output)
+        if self.runner is None:
+            return _run_subprocess(
+                command,
+                operation=operation,
+                deadline=self.deadline,
+                monotonic=self.monotonic,
+                output=output,
+                max_output_bytes=self.max_generated_output_bytes,
+            )
+        result = self.runner(command)
+        self._check_bounds(operation, output)
+        return result
 
     def require_available(self) -> None:
         for executable, code in (
@@ -101,7 +206,7 @@ class FFmpegTools:
             "json",
             str(source),
         ]
-        result = self.runner(command)
+        result = self._run(command, operation="audio inspection")
         if result.returncode != 0:
             raise MediaToolError("probe_failed", "audio inspection")
 
@@ -204,7 +309,7 @@ class FFmpegTools:
             "null",
             "-",
         ])
-        result = self.runner(command)
+        result = self._run(command, operation="complete decode check")
         if result.returncode != 0:
             raise MediaToolError("decode_failed", "complete decode check")
         duration = _decoded_duration_seconds(result.stdout)
@@ -261,7 +366,11 @@ class FFmpegTools:
         output: Path,
         source_info: AudioInfo,
     ) -> None:
-        result = self.runner(self.conversion_command(source, output, source_info))
+        result = self._run(
+            self.conversion_command(source, output, source_info),
+            operation="MP3 conversion",
+            output=output,
+        )
         if result.returncode != 0:
             raise MediaToolError("conversion_failed", "MP3 conversion")
         if not output.is_file() or output.stat().st_size <= 0:

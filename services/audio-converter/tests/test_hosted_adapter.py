@@ -172,6 +172,14 @@ class FakeTools:
         output.write_bytes(self.derivative_bytes)
 
 
+class MutableMonotonic:
+    def __init__(self, value: float = 0.0) -> None:
+        self.value = value
+
+    def __call__(self) -> float:
+        return self.value
+
+
 def processing_request(
     source: bytes = SOURCE,
     **overrides: object,
@@ -431,6 +439,9 @@ class HostedAdapterTests(unittest.TestCase):
                 ("max_source_bytes", 512 * 1024 * 1024 + 1),
                 ("retry_attempts", 6),
                 ("retry_delay_seconds", float("inf")),
+                ("processing_deadline_seconds", 45 * 60 + 1),
+                ("minimum_lease_remaining_seconds", 55 * 60 - 1),
+                ("max_generated_output_bytes", 512 * 1024 * 1024 + 1),
             )
             for field_name, value in invalid_cases:
                 with self.subTest(field_name=field_name, value=value):
@@ -766,6 +777,168 @@ class HostedAdapterTests(unittest.TestCase):
                     clock=fixed_clock,
                 )
             self.assertEqual(len(client.requests), 1)
+
+    def test_requires_at_least_55_minutes_of_lease_after_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            payload = claim_payload()
+            payload["leaseExpiresAt"] = "2026-07-14T00:54:59.000Z"
+            body = json.dumps(payload, separators=(",", ":")).encode()
+            client = FakeHttpClient([
+                ResponseSpec(
+                    200,
+                    body,
+                    {"Content-Type": "application/json", "Content-Length": str(len(body))},
+                )
+            ])
+
+            with self.assertRaisesRegex(HostedAdapterError, "job_claim_lease_too_short"):
+                run_hosted_job_once(
+                    config(Path(raw_root)),
+                    client=client,
+                    clock=fixed_clock,
+                )
+            self.assertEqual(len(client.requests), 1)
+
+    def test_soft_deadline_reports_failure_and_cleans_generated_output(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            root = Path(raw_root)
+            monotonic = MutableMonotonic()
+            client = FakeHttpClient([
+                claim_response(),
+                source_response(),
+                ResponseSpec(200),
+            ])
+
+            class DeadlineTools(FakeTools):
+                def transcode(
+                    self,
+                    source: Path,
+                    output: Path,
+                    source_info: AudioInfo,
+                ) -> None:
+                    super().transcode(source, output, source_info)
+                    monotonic.value = 61
+
+            outcome = run_hosted_job_once(
+                config(root, processing_deadline_seconds=60),
+                client=client,
+                tools_factory=lambda: DeadlineTools(source_codec="aac"),
+                clock=fixed_clock,
+                monotonic=monotonic,
+            )
+
+            self.assertEqual(outcome.status, "failed")
+            self.assertEqual(outcome.error_code, "processing_deadline_exceeded")
+            self.assertTrue(outcome.failure_reported)
+            self.assertEqual(failure_code(client.requests[-1]), "processing_deadline_exceeded")
+            self.assertNotIn("PUT", [request.method for request in client.requests])
+            self.assertEqual(list(root.iterdir()), [])
+
+    def test_soft_deadline_interrupts_streaming_source_and_reports_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            root = Path(raw_root)
+            monotonic = MutableMonotonic()
+
+            class DeadlineSourceClient(FakeHttpClient):
+                def request(
+                    self,
+                    method: str,
+                    url: str,
+                    *,
+                    headers: dict[str, str],
+                    body: HttpRequestBody,
+                    timeout_seconds: float,
+                ) -> HttpResponse:
+                    response = super().request(
+                        method,
+                        url,
+                        headers=headers,
+                        body=body,
+                        timeout_seconds=timeout_seconds,
+                    )
+                    if method == "GET":
+                        class DeadlineBody(BytesIO):
+                            def read(self, size: int = -1) -> bytes:
+                                data = super().read(size)
+                                monotonic.value = 61
+                                return data
+
+                        response.body = DeadlineBody(SOURCE)
+                    return response
+
+            client = DeadlineSourceClient([
+                claim_response(),
+                source_response(),
+                ResponseSpec(200),
+            ])
+            outcome = run_hosted_job_once(
+                config(root, processing_deadline_seconds=60),
+                client=client,
+                tools_factory=lambda: FakeTools(source_codec="mp3"),
+                clock=fixed_clock,
+                monotonic=monotonic,
+            )
+
+            self.assertEqual(outcome.error_code, "processing_deadline_exceeded")
+            self.assertEqual(failure_code(client.requests[-1]), "processing_deadline_exceeded")
+            self.assertEqual([request.method for request in client.requests], ["POST", "GET", "POST"])
+            self.assertEqual(list(root.iterdir()), [])
+
+    def test_result_retry_crossing_deadline_is_ambiguous_without_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            monotonic = MutableMonotonic()
+            client = FakeHttpClient([
+                claim_response(),
+                source_response(),
+                ResponseSpec(503),
+            ])
+
+            def cross_deadline(seconds: float) -> None:
+                self.assertEqual(seconds, 1)
+                monotonic.value = 60
+
+            with self.assertRaisesRegex(HostedAdapterError, "result_delivery_ambiguous"):
+                run_hosted_job_once(
+                    config(
+                        Path(raw_root),
+                        processing_deadline_seconds=60,
+                        retry_delay_seconds=1,
+                    ),
+                    client=client,
+                    tools_factory=lambda: FakeTools(source_codec="mp3"),
+                    clock=fixed_clock,
+                    monotonic=monotonic,
+                    sleeper=cross_deadline,
+                )
+
+            self.assertEqual([request.url for request in client.requests].count(RESULT_URL), 1)
+            self.assertNotIn(FAILURE_URL, [request.url for request in client.requests])
+            self.assertEqual(list(Path(raw_root).iterdir()), [])
+
+    def test_generated_output_limit_fails_before_upload_and_cleans_files(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            root = Path(raw_root)
+            client = FakeHttpClient([
+                claim_response(),
+                source_response(),
+                ResponseSpec(200),
+            ])
+
+            outcome = run_hosted_job_once(
+                config(root, max_generated_output_bytes=3),
+                client=client,
+                tools_factory=lambda: FakeTools(
+                    source_codec="aac",
+                    derivative_bytes=b"four",
+                ),
+                clock=fixed_clock,
+            )
+
+            self.assertEqual(outcome.status, "failed")
+            self.assertEqual(outcome.error_code, "generated_output_too_large")
+            self.assertEqual(failure_code(client.requests[-1]), "generated_output_too_large")
+            self.assertNotIn("PUT", [request.method for request in client.requests])
+            self.assertEqual(list(root.iterdir()), [])
 
     def test_routine_objects_and_bodies_do_not_expose_secrets_or_paths(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:

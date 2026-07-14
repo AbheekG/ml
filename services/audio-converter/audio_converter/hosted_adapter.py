@@ -41,6 +41,8 @@ from .tools import FFmpegTools, MediaToolError
 
 MAX_HOSTED_AUDIO_BYTES = 512 * 1024 * 1024
 MAX_HOSTED_JSON_BYTES = 64 * 1024
+PROCESSOR_SOFT_DEADLINE_SECONDS = 45 * 60
+MINIMUM_LEASE_REMAINING_SECONDS = 55 * 60
 SAFE_FAILURE_CODE = re.compile(r"^[a-z][a-z0-9_]{0,99}$")
 _RETRYABLE_HTTP_STATUSES = {408, 425, 429}
 _TRANSFER_CHUNK_BYTES = 1024 * 1024
@@ -68,9 +70,11 @@ class HostedAdapterConfig:
     max_callback_body_bytes: int = MAX_HOSTED_JSON_BYTES
     max_source_bytes: int = MAX_HOSTED_AUDIO_BYTES
     max_derivative_bytes: int = MAX_HOSTED_AUDIO_BYTES
+    max_generated_output_bytes: int = MAX_HOSTED_AUDIO_BYTES
     retry_attempts: int = 3
     retry_delay_seconds: float = 0.25
-    minimum_lease_remaining_seconds: float = 30.0
+    processing_deadline_seconds: float = PROCESSOR_SOFT_DEADLINE_SECONDS
+    minimum_lease_remaining_seconds: float = MINIMUM_LEASE_REMAINING_SECONDS
 
     def __post_init__(self) -> None:
         worker_origin = _validate_https_origin(
@@ -130,14 +134,26 @@ class HostedAdapterConfig:
             MAX_HOSTED_AUDIO_BYTES,
         ):
             raise HostedAdapterError("invalid_derivative_size_limit")
+        if not _bounded_integer(
+            self.max_generated_output_bytes,
+            1,
+            MAX_HOSTED_AUDIO_BYTES,
+        ):
+            raise HostedAdapterError("invalid_generated_output_limit")
         if not _bounded_integer(self.retry_attempts, 1, 5):
             raise HostedAdapterError("invalid_retry_attempts")
         if not _bounded_number(self.retry_delay_seconds, 0.0, 5.0):
             raise HostedAdapterError("invalid_retry_delay")
         if not _bounded_number(
+            self.processing_deadline_seconds,
+            60.0,
+            PROCESSOR_SOFT_DEADLINE_SECONDS,
+        ):
+            raise HostedAdapterError("invalid_processing_deadline")
+        if not _bounded_number(
             self.minimum_lease_remaining_seconds,
-            0.0,
-            300.0,
+            MINIMUM_LEASE_REMAINING_SECONDS,
+            60 * 60,
         ):
             raise HostedAdapterError("invalid_minimum_lease_remaining")
 
@@ -257,6 +273,45 @@ class _JobFailure(RuntimeError):
     def __init__(self, code: str):
         super().__init__(code)
         self.code = code
+
+
+@dataclass(frozen=True)
+class _ProcessingBudget:
+    deadline: float
+    monotonic: Callable[[], float] = field(repr=False)
+
+    @classmethod
+    def start(
+        cls,
+        duration_seconds: float,
+        monotonic: Callable[[], float],
+    ) -> _ProcessingBudget:
+        try:
+            started_at = float(monotonic())
+        except Exception:
+            raise HostedAdapterError("invalid_monotonic_clock") from None
+        if not started_at == started_at or started_at in {float("inf"), float("-inf")}:
+            raise HostedAdapterError("invalid_monotonic_clock")
+        return cls(started_at + duration_seconds, monotonic)
+
+    def remaining_seconds(self) -> float:
+        try:
+            remaining = self.deadline - float(self.monotonic())
+        except Exception:
+            raise _JobFailure("processing_deadline_exceeded") from None
+        if not remaining == remaining:
+            raise _JobFailure("processing_deadline_exceeded")
+        return remaining
+
+    def ensure_remaining(self) -> None:
+        if self.remaining_seconds() <= 0:
+            raise _JobFailure("processing_deadline_exceeded")
+
+    def request_timeout(self, configured_timeout: float) -> float:
+        remaining = self.remaining_seconds()
+        if remaining <= 0:
+            raise _JobFailure("processing_deadline_exceeded")
+        return min(configured_timeout, max(0.001, remaining))
 
 
 def _bounded_integer(value: object, minimum: int, maximum: int) -> bool:
@@ -391,6 +446,7 @@ def _parse_claim_body(body: bytes) -> object:
 def _claim_one_job(
     config: HostedAdapterConfig,
     client: HttpClient,
+    budget: _ProcessingBudget,
 ) -> HostedJobClaim | None:
     # Claim has a leasing side effect. A lost response must not cause this
     # invocation to claim a second job, so this request deliberately has no retry.
@@ -409,8 +465,11 @@ def _claim_one_job(
             config.claim_url,
             headers=headers,
             body=b"",
-            timeout_seconds=config.request_timeout_seconds,
+            timeout_seconds=budget.request_timeout(config.request_timeout_seconds),
         )
+        budget.ensure_remaining()
+    except _JobFailure as error:
+        raise HostedAdapterError(error.code) from None
     except HostedTransportError:
         raise HostedAdapterError("claim_delivery_failed") from None
 
@@ -425,6 +484,10 @@ def _claim_one_job(
         if content_type is None or content_type.partition(";")[0].strip().casefold() != "application/json":
             raise HostedAdapterError("invalid_claim_response")
         body = _read_bounded(response, config.max_claim_body_bytes)
+        try:
+            budget.ensure_remaining()
+        except _JobFailure as error:
+            raise HostedAdapterError(error.code) from None
 
     try:
         claim = parse_hosted_job_claim(
@@ -481,7 +544,9 @@ def _download_source(
     client: HttpClient,
     claim: HostedJobClaim,
     destination: Path,
+    budget: _ProcessingBudget,
 ) -> None:
+    budget.ensure_remaining()
     expected_size = claim.processing_request.source_byte_size
     if expected_size > config.max_source_bytes:
         raise _JobFailure("source_too_large")
@@ -497,9 +562,10 @@ def _download_source(
                 "User-Agent": "music-library-audio-processor/1",
             },
             body=None,
-            timeout_seconds=config.request_timeout_seconds,
+            timeout_seconds=budget.request_timeout(config.request_timeout_seconds),
         )
     except HostedTransportError:
+        budget.ensure_remaining()
         raise _JobFailure("source_download_failed") from None
 
     with response:
@@ -523,6 +589,7 @@ def _download_source(
             with destination.open("xb") as output:
                 os.chmod(destination, 0o600)
                 while True:
+                    budget.ensure_remaining()
                     chunk = response.body.read(_TRANSFER_CHUNK_BYTES)
                     if not chunk:
                         break
@@ -533,6 +600,7 @@ def _download_source(
                     digest.update(chunk)
                 output.flush()
                 os.fsync(output.fileno())
+                budget.ensure_remaining()
         except _JobFailure:
             raise
         except Exception:
@@ -555,12 +623,19 @@ def _retryable_status(status: int, *, include_conflict: bool) -> bool:
 def _pause_before_retry(
     config: HostedAdapterConfig,
     sleeper: Callable[[float], None],
+    budget: _ProcessingBudget | None = None,
 ) -> None:
     if config.retry_delay_seconds:
+        if budget is not None:
+            budget.ensure_remaining()
+            if config.retry_delay_seconds >= budget.remaining_seconds():
+                raise _JobFailure("processing_deadline_exceeded")
         try:
             sleeper(config.retry_delay_seconds)
         except Exception:
             raise HostedAdapterError("retry_pause_failed") from None
+        if budget is not None:
+            budget.ensure_remaining()
 
 
 def _upload_derivative(
@@ -570,13 +645,15 @@ def _upload_derivative(
     path: Path,
     preparation: PreparationResult,
     sleeper: Callable[[float], None],
+    budget: _ProcessingBudget,
 ) -> None:
+    budget.ensure_remaining()
     derivative = preparation.derivative
     if derivative is None or not path.is_file():
         raise _JobFailure("verified_derivative_missing")
     try:
         actual_size = path.stat().st_size
-        actual_hash = sha256_file(path)
+        actual_hash = sha256_file(path, checkpoint=budget.ensure_remaining)
     except OSError:
         raise _JobFailure("verified_derivative_unreadable") from None
     if actual_size != derivative.byte_size or actual_hash != derivative.sha256:
@@ -600,11 +677,12 @@ def _upload_derivative(
                 claim.processing_request.derivative_upload_url,
                 headers=headers,
                 body=path,
-                timeout_seconds=config.request_timeout_seconds,
+                timeout_seconds=budget.request_timeout(config.request_timeout_seconds),
             )
         except HostedTransportError:
+            budget.ensure_remaining()
             if attempt + 1 < config.retry_attempts:
-                _pause_before_retry(config, sleeper)
+                _pause_before_retry(config, sleeper, budget)
                 continue
             raise _JobFailure("derivative_upload_failed") from None
         with response:
@@ -616,7 +694,7 @@ def _upload_derivative(
                 attempt + 1 < config.retry_attempts
                 and _retryable_status(response.status, include_conflict=False)
             ):
-                _pause_before_retry(config, sleeper)
+                _pause_before_retry(config, sleeper, budget)
                 continue
             raise _JobFailure("derivative_upload_failed")
 
@@ -633,8 +711,15 @@ def _safe_processing_error_code(error: Exception) -> str:
     return "audio_preparation_failed"
 
 
-def _default_tools_factory() -> AudioTools:
-    tools = FFmpegTools()
+def _default_tools_factory(
+    config: HostedAdapterConfig,
+    budget: _ProcessingBudget,
+) -> AudioTools:
+    tools = FFmpegTools(
+        deadline=budget.deadline,
+        max_generated_output_bytes=config.max_generated_output_bytes,
+        monotonic=budget.monotonic,
+    )
     tools.require_available()
     return tools
 
@@ -644,21 +729,29 @@ def _prepare_callback(
     client: HttpClient,
     claim: HostedJobClaim,
     directory: Path,
-    tools_factory: Callable[[], AudioTools],
+    tools_factory: Callable[[], AudioTools] | None,
     sleeper: Callable[[float], None],
+    budget: _ProcessingBudget,
 ) -> _PreparedCallback:
     source_path = directory / "source.bin"
     derivative_path = directory / "playback.mp3"
-    _download_source(config, client, claim, source_path)
+    _download_source(config, client, claim, source_path, budget)
 
     try:
         validate_output_path(derivative_path)
-        tools = tools_factory()
+        budget.ensure_remaining()
+        tools = (
+            tools_factory()
+            if tools_factory is not None
+            else _default_tools_factory(config, budget)
+        )
         preparation = prepare(
             tools,
             source_path,
             output=derivative_path,
             execute=True,
+            checkpoint=budget.ensure_remaining,
+            max_generated_output_bytes=config.max_generated_output_bytes,
         )
         result = build_hosted_processing_result(
             claim.processing_request,
@@ -672,6 +765,7 @@ def _prepare_callback(
                 derivative_path,
                 preparation,
                 sleeper,
+                budget,
             )
         elif result.get("playbackKind") != "original":
             raise HostedContractError("invalid_processing_playback_kind")
@@ -700,6 +794,7 @@ def _deliver_callback(
     operation: str,
     include_conflict: bool,
     sleeper: Callable[[float], None],
+    budget: _ProcessingBudget | None = None,
 ) -> None:
     headers = {
         "Accept": "application/json",
@@ -712,17 +807,37 @@ def _deliver_callback(
     }
     for attempt in range(config.retry_attempts):
         try:
+            if budget is not None:
+                budget.ensure_remaining()
             response = _safe_request(
                 client,
                 "POST",
                 url,
                 headers=headers,
                 body=body,
-                timeout_seconds=config.request_timeout_seconds,
+                timeout_seconds=(
+                    budget.request_timeout(config.request_timeout_seconds)
+                    if budget is not None
+                    else config.request_timeout_seconds
+                ),
             )
+        except _JobFailure:
+            raise HostedAdapterError(f"{operation}_delivery_ambiguous") from None
         except HostedTransportError:
+            if budget is not None:
+                try:
+                    budget.ensure_remaining()
+                except _JobFailure:
+                    raise HostedAdapterError(
+                        f"{operation}_delivery_ambiguous"
+                    ) from None
             if attempt + 1 < config.retry_attempts:
-                _pause_before_retry(config, sleeper)
+                try:
+                    _pause_before_retry(config, sleeper, budget)
+                except _JobFailure:
+                    raise HostedAdapterError(
+                        f"{operation}_delivery_ambiguous"
+                    ) from None
                 continue
             raise HostedAdapterError(f"{operation}_delivery_ambiguous") from None
         with response:
@@ -737,7 +852,12 @@ def _deliver_callback(
                     include_conflict=include_conflict,
                 )
             ):
-                _pause_before_retry(config, sleeper)
+                try:
+                    _pause_before_retry(config, sleeper, budget)
+                except _JobFailure:
+                    raise HostedAdapterError(
+                        f"{operation}_delivery_ambiguous"
+                    ) from None
                 continue
             if _retryable_status(
                 response.status,
@@ -783,12 +903,14 @@ def run_hosted_job_once(
     config: HostedAdapterConfig,
     *,
     client: HttpClient | None = None,
-    tools_factory: Callable[[], AudioTools] = _default_tools_factory,
+    tools_factory: Callable[[], AudioTools] | None = None,
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    monotonic: Callable[[], float] = time.monotonic,
     sleeper: Callable[[float], None] = time.sleep,
 ) -> HostedRunOutcome:
     http_client = client or UrllibHttpClient()
-    claim = _claim_one_job(config, http_client)
+    budget = _ProcessingBudget.start(config.processing_deadline_seconds, monotonic)
+    claim = _claim_one_job(config, http_client, budget)
     if claim is None:
         return HostedRunOutcome(status="no_work")
 
@@ -812,6 +934,7 @@ def run_hosted_job_once(
                 directory,
                 tools_factory,
                 sleeper,
+                budget,
             )
     except _JobFailure as error:
         return _report_failure(
@@ -830,6 +953,17 @@ def run_hosted_job_once(
             sleeper,
         )
 
+    try:
+        budget.ensure_remaining()
+    except _JobFailure as error:
+        return _report_failure(
+            config,
+            http_client,
+            claim,
+            error.code,
+            sleeper,
+        )
+
     # Result delivery is outside the processing-failure handler. A lost callback
     # response may mean success already committed, so never follow it with failure.
     _deliver_callback(
@@ -840,6 +974,7 @@ def run_hosted_job_once(
         operation="result",
         include_conflict=True,
         sleeper=sleeper,
+        budget=budget,
     )
     return HostedRunOutcome(
         status="succeeded",

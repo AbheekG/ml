@@ -66,8 +66,11 @@ allowlist, an existing temporary root, and bounded request/body/retry limits. It
 creates a private `0700` per-job directory and `0600` source, disables redirects,
 streams and verifies the exact source, runs `prepare()`, rechecks and streams only
 a selected derivative, sends exact-length callbacks, and removes the temporary
-directory before reporting success. Routine outcomes and errors contain no job
-ID, signed URL, token, or filesystem path.
+directory before reporting success. A monotonic 45-minute soft deadline covers
+streaming, FFmpeg, hashing, upload, cleanup, and result delivery; claims require
+at least 55 minutes of lease remaining. The default FFmpeg runner is killed while
+writing if its output exceeds the configured ceiling. Routine outcomes and errors
+contain no job ID, signed URL, token, or filesystem path.
 
 Claim is intentionally attempted once: retrying a response-lost claim could
 lease a second job during the same invocation. Create-only derivative upload and

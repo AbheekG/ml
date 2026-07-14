@@ -74,7 +74,7 @@ capabilities must name different paths, and the eventual HTTP transfer client
 must reject or revalidate every redirect against the same allowlist rather than
 following an allowlisted URL to an arbitrary host.
 
-Cloud Run project creation, billing activation, secrets, scheduling, and deployment remain separate owner-approved external actions after the local concurrency, deadline, output-bound, entrypoint, and container behavior is tested.
+Cloud Run project creation, billing activation, secrets, scheduling, and deployment remain separate owner-approved external actions after the remaining local entrypoint and container/resource behavior is tested.
 
 ## Worker processing control plane
 
@@ -111,8 +111,10 @@ source length/hash and selected derivative length/hash are checked again before
 use. Result and failure delivery retries are bounded and idempotent, and a result
 delivery that may already have committed is never followed by a failure
 callback. The Worker now globally prevents concurrent running jobs and bounds
-repeated lease-expiry recovery; the adapter must still enforce a soft deadline
-and generated-output limit below the platform timeout. No
+repeated lease-expiry recovery. The adapter enforces a monotonic 45-minute soft
+deadline across transfer, FFmpeg, hashing, upload, and result delivery, requires
+at least 55 minutes of lease remaining, and kills FFmpeg if its generated output
+exceeds the configured ceiling while it is writing. No
 processor token/origin is configured in staging, and no HTTP server, Cloud Run
 Job, scheduler, credentials, infrastructure, or deployment is part of this
 local design.

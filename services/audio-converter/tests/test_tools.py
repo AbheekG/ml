@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import stat
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from collections.abc import Sequence
@@ -155,6 +157,98 @@ class FFmpegToolsTests(unittest.TestCase):
         self.assertIn("-vn", command)
         self.assertIn("-sn", command)
         self.assertIn("-dn", command)
+
+    def test_conversion_process_is_killed_while_generated_output_exceeds_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "fake-ffmpeg"
+            executable.write_text(
+                """#!/usr/bin/env python3
+import pathlib
+import sys
+import time
+
+output = pathlib.Path(sys.argv[-1])
+with output.open("wb") as destination:
+    destination.write(b"1234")
+    destination.flush()
+    time.sleep(0.15)
+    destination.write(b"5678")
+    destination.flush()
+    time.sleep(1)
+output.with_suffix(".done").write_text("finished")
+""",
+                encoding="utf-8",
+            )
+            executable.chmod(
+                stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+            )
+            source = root / "source.bin"
+            source.write_bytes(b"source")
+            output = root / "output.mp3"
+            source_info = AudioInfo(
+                container_names=("mp4",),
+                codec_name="aac",
+                duration_seconds=10,
+                byte_size=6,
+                bit_rate=128_000,
+                sample_rate=44_100,
+                channels=2,
+                stream_index=0,
+            )
+            tools = FFmpegTools(
+                ffmpeg=str(executable),
+                max_generated_output_bytes=4,
+            )
+
+            with self.assertRaisesRegex(MediaToolError, "generated_output_too_large"):
+                tools.transcode(source, output, source_info)
+
+            self.assertFalse(output.with_suffix(".done").exists())
+            self.assertGreater(output.stat().st_size, 4)
+
+    def test_conversion_process_is_killed_at_monotonic_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "fake-ffmpeg"
+            executable.write_text(
+                """#!/usr/bin/env python3
+import pathlib
+import sys
+import time
+
+time.sleep(2)
+pathlib.Path(sys.argv[-1]).write_bytes(b"late")
+""",
+                encoding="utf-8",
+            )
+            executable.chmod(
+                stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+            )
+            source = root / "source.bin"
+            source.write_bytes(b"source")
+            output = root / "deadline.mp3"
+            source_info = AudioInfo(
+                container_names=("mp4",),
+                codec_name="aac",
+                duration_seconds=10,
+                byte_size=6,
+                bit_rate=128_000,
+                sample_rate=44_100,
+                channels=2,
+                stream_index=0,
+            )
+            started_at = time.monotonic()
+            tools = FFmpegTools(
+                ffmpeg=str(executable),
+                deadline=started_at + 0.1,
+            )
+
+            with self.assertRaisesRegex(MediaToolError, "processing_deadline_exceeded"):
+                tools.transcode(source, output, source_info)
+
+            self.assertLess(time.monotonic() - started_at, 1)
+            self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":
