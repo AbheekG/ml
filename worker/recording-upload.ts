@@ -20,6 +20,14 @@ const recordingUploadRevisionSchema = z.object({
   revision: z.number().int().positive(),
 }).strict();
 
+const recordingUploadFinalizationSchema = z.object({
+  revision: z.number().int().positive(),
+  description: z.string()
+    .max(10_000, "Recording description is too long")
+    .refine((value) => value.trim().length > 0, "Recording description must not be blank")
+    .optional(),
+}).strict();
+
 export type RecordingUploadCreateInput = {
   clientMutationId: string;
   filename: string;
@@ -38,6 +46,10 @@ export type RecordingUploadParseResult =
 export type RecordingUploadRevisionParseResult =
   | { success: true; data: { revision: number } }
   | { success: false };
+
+export type RecordingUploadFinalizationParseResult =
+  | { success: true; data: { revision: number; description?: string } }
+  | { success: false; fields: Record<string, string[]> };
 
 function safeOriginalFilename(value: string): string {
   const basename = value.replaceAll("\0", "").split(/[\\/]/u).at(-1)?.trim() ?? "";
@@ -85,6 +97,29 @@ export function parseRecordingUploadCreate(value: unknown): RecordingUploadParse
 export function parseRecordingUploadRevision(value: unknown): RecordingUploadRevisionParseResult {
   const result = recordingUploadRevisionSchema.safeParse(value);
   return result.success ? { success: true, data: result.data } : { success: false };
+}
+
+export function parseRecordingUploadFinalization(
+  value: unknown,
+): RecordingUploadFinalizationParseResult {
+  const result = recordingUploadFinalizationSchema.safeParse(value);
+  if (!result.success) {
+    const fields: Record<string, string[]> = {};
+    for (const issue of result.error.issues) {
+      const field = String(issue.path[0] ?? "form");
+      (fields[field] ??= []).push(issue.message);
+    }
+    return { success: false, fields };
+  }
+  return {
+    success: true,
+    data: {
+      revision: result.data.revision,
+      ...(result.data.description === undefined
+        ? {}
+        : { description: result.data.description.trim() }),
+    },
+  };
 }
 
 export async function recordingUploadRequestFingerprint(

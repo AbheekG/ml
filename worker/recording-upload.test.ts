@@ -3,6 +3,7 @@ import {
   MAX_RECORDING_UPLOAD_BYTES,
   RECORDING_UPLOAD_PART_BYTES,
   expectedRecordingPartBytes,
+  parseRecordingUploadFinalization,
   parseRecordingUploadCreate,
   recordingUploadRequestFingerprint,
   recordingUploadShape,
@@ -84,6 +85,22 @@ describe("Recording multipart upload contract", () => {
       recordedOn: "2999-01-01",
       creditPersonIds: ["person-1", "person-1"],
     }).success).toBe(false);
+  });
+
+  it("accepts an optional trimmed finalization override and rejects blank metadata", () => {
+    expect(parseRecordingUploadFinalization({
+      revision: 5,
+      description: "  Alternate take  ",
+    })).toEqual({
+      success: true,
+      data: { revision: 5, description: "Alternate take" },
+    });
+    expect(parseRecordingUploadFinalization({ revision: 5 })).toEqual({
+      success: true,
+      data: { revision: 5 },
+    });
+    expect(parseRecordingUploadFinalization({ revision: 5, description: "   " }).success)
+      .toBe(false);
   });
   it("bounds originals and calculates the exact part count", () => {
     expect(recordingUploadShape(1)).toEqual({ byteSize: 1, partCount: 1 });

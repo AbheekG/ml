@@ -44,11 +44,19 @@ stops durably at `stored`, or at `duplicate` with the existing private Recording
 identity when a fingerprinted original already exists. It never creates a media
 row, Recording, or processing job in either state.
 
-The next finalization slice must recheck duplicate content inside the same D1
-transaction that creates the fingerprinted `original_audio` media row,
-processing Recording, and pending audio-processing job. The job snapshots the
-original media ID, hash, size, and policy. This second duplicate check is needed
-even after completion because another upload could finalize concurrently.
+The implemented finalization endpoint rechecks duplicate content inside the same
+D1 transaction that creates the fingerprinted `original_audio` media row,
+processing Recording, copied credits, and pending audio-processing job. The job
+snapshots the original media ID, hash, size, and policy. This second duplicate
+check is required even after completion because another upload could finalize
+concurrently. A successful transaction moves the session to `finalized`; a
+concurrent exact-content match moves only the session to `duplicate`.
+
+A supplied description must remain normalized-unique within its Song. A conflict
+leaves the verified object and session safely at `stored`, identifies the
+existing Recording, and accepts an explicit description override on retry. When
+no description was supplied, finalization chooses the first available stable
+`Recording N` fallback inside the transaction.
 
 If D1 finalization fails, the completed opaque R2 object stays private and
 unreferenced for explicit retry/reconciliation; it is never silently deleted.
@@ -70,11 +78,14 @@ The server-side transport exposes editor-only, online-only operations to:
 3. inspect completed part numbers for resume;
 4. complete, size-check, and fingerprint the private object, stopping for an
    exact-content duplicate;
-5. abort an incomplete session without deleting any finalized media.
+5. atomically finalize a nonduplicate stored object into its original media,
+   processing Recording, credits, and pending processing job;
+6. abort an incomplete session without deleting any finalized media.
 
-The browser form and the separate stored-to-Recording/job finalization operation
-remain unimplemented. A client retry supplies only the current session revision;
-it never supplies an ETag, object key, multipart ID, or claimed fingerprint.
+The browser form and multipart orchestration remain unimplemented. A client retry
+supplies only the current session revision and, when resolving a description
+conflict, an explicit replacement description. It never supplies an ETag,
+object key, multipart ID, claimed fingerprint, media ID, Recording ID, or job ID.
 
 Filenames, titles, signed capabilities, hashes, and private object keys must not
 enter routine logs. The client cannot select the parent Song or object key after
@@ -108,6 +119,11 @@ the session is created.
   Recording requires a later explicit confirmation path and removal of the
   current `recordings.original_media_id` uniqueness constraint; finalization
   must not imply or bypass that schema decision.
+- Finalization is one D1 transaction: media, Recording, copied credits, job, Song
+  timestamp, and session outcome either all commit or all roll back. A response
+  lost after commit is retried idempotently from the terminal session. The
+  processing original is not served by the media endpoint until a verified job
+  makes a ready playback source available.
 - Multipart IDs, ETags, object keys, hashes, filenames, and transfer capabilities
   are excluded from routine logs. Authenticated status responses return only the
   minimum editor-facing filename and completed part numbers.

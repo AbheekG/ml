@@ -30,10 +30,11 @@ application Worker and private R2 binding, as defined in
 [recording-upload.md](recording-upload.md). This avoids whole-file Worker request
 limits, browser-visible storage credentials, and public/CORS bucket access. The
 Worker streams the completed object through SHA-256 verification before it
-stops at a durable stored-or-duplicate boundary. The next local slice atomically
-creates the fingerprinted media row, processing Recording, and durable job only
-for a nonduplicate stored upload; readiness still requires independently
-verified hosted-processing output.
+stops at a durable stored-or-duplicate boundary. A separate idempotent endpoint
+then rechecks duplicates and atomically creates the fingerprinted media row,
+processing Recording, copied credits, and durable job only for a nonduplicate
+stored upload. Readiness still requires independently verified hosted-processing
+output; processing originals are not exposed as playback media.
 
 Proposed application tooling:
 
