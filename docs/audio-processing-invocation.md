@@ -243,8 +243,9 @@ or conversion quality, discard originals, expose media, or bypass processing.
 
 The smallest safe sequence after this design is accepted is:
 
-1. implement and test the database-backed single-running-job invariant plus
-   bounded expired-lease recovery; do not apply the migration remotely;
+1. database-backed single-running-job invariant plus bounded expired-lease
+   recovery: implemented and tested locally in migration `0008`; the migration
+   has not been applied remotely;
 2. add the processor soft deadline, streaming/generated-output bounds, and
    deadline tests without adding a server or container;
 3. add a minimal run-once entrypoint with strict configuration loading,

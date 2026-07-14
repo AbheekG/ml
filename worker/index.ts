@@ -4,6 +4,7 @@ import { verifyWithJwks } from "hono/jwt";
 import { loadOfflineLibrary } from "./offline-library";
 import {
   AUDIO_PROCESSING_LEASE_MS,
+  MAX_EXPIRED_AUDIO_PROCESSING_ATTEMPTS,
   MAX_AUDIO_DERIVATIVE_BYTES,
   MAX_AUDIO_PROCESSING_RESULT_BYTES,
   audioProcessingDerivativeObjectKey,
@@ -1002,10 +1003,66 @@ app.post("/api/processing/jobs/claim", async (context) => {
   try {
     const results = await context.env.DB.batch([
       context.env.DB.prepare(`
+        UPDATE recordings
+        SET processing_state = 'failed', processing_error = 'processing_lease_expired',
+            revision = revision + 1, updated_at = ?, updated_by = 'audio-processor'
+        WHERE processing_state = 'processing' AND processing_error IS NULL
+          AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM audio_processing_jobs
+            JOIN media_objects
+              ON media_objects.id = audio_processing_jobs.source_media_id
+            WHERE audio_processing_jobs.recording_id = recordings.id
+              AND audio_processing_jobs.status = 'running'
+              AND audio_processing_jobs.attempt_count >= ?
+              AND audio_processing_jobs.lease_expires_at <= ?
+              AND recordings.original_media_id = audio_processing_jobs.source_media_id
+              AND media_objects.kind = 'original_audio'
+              AND media_objects.state = 'active'
+              AND media_objects.sha256 = audio_processing_jobs.source_sha256
+              AND media_objects.byte_size = audio_processing_jobs.source_byte_size
+          )
+      `).bind(timestamp, MAX_EXPIRED_AUDIO_PROCESSING_ATTEMPTS, timestamp),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = 'audio-processor'
+        WHERE trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM recordings
+            JOIN audio_processing_jobs
+              ON audio_processing_jobs.recording_id = recordings.id
+            WHERE recordings.song_id = songs.id
+              AND recordings.processing_state = 'failed'
+              AND recordings.processing_error = 'processing_lease_expired'
+              AND recordings.updated_at = ?
+              AND audio_processing_jobs.status = 'running'
+              AND audio_processing_jobs.attempt_count >= ?
+              AND audio_processing_jobs.lease_expires_at <= ?
+          )
+      `).bind(
+        timestamp, timestamp, MAX_EXPIRED_AUDIO_PROCESSING_ATTEMPTS, timestamp,
+      ),
+      context.env.DB.prepare(`
+        UPDATE audio_processing_jobs
+        SET status = 'failed', lease_token_hash = NULL, lease_expires_at = NULL,
+            error_code = 'processing_lease_expired', updated_at = ?
+        WHERE status = 'running' AND attempt_count >= ? AND lease_expires_at <= ?
+          AND EXISTS (
+            SELECT 1 FROM recordings
+            WHERE recordings.id = audio_processing_jobs.recording_id
+              AND recordings.processing_state = 'failed'
+              AND recordings.processing_error = 'processing_lease_expired'
+              AND recordings.trashed_at IS NULL
+          )
+      `).bind(timestamp, MAX_EXPIRED_AUDIO_PROCESSING_ATTEMPTS, timestamp),
+      context.env.DB.prepare(`
         UPDATE audio_processing_jobs
         SET status = 'pending', lease_token_hash = NULL, lease_expires_at = NULL,
             updated_at = ?
         WHERE status = 'running' AND lease_expires_at <= ?
+          AND attempt_count < ?
           AND EXISTS (
             SELECT 1
             FROM recordings
@@ -1020,7 +1077,7 @@ app.post("/api/processing/jobs/claim", async (context) => {
               AND media_objects.sha256 = audio_processing_jobs.source_sha256
               AND media_objects.byte_size = audio_processing_jobs.source_byte_size
           )
-      `).bind(timestamp, timestamp),
+      `).bind(timestamp, timestamp, MAX_EXPIRED_AUDIO_PROCESSING_ATTEMPTS),
       context.env.DB.prepare(`
         UPDATE audio_processing_jobs
         SET status = 'running', attempt_count = attempt_count + 1,
@@ -1041,15 +1098,21 @@ app.post("/api/processing/jobs/claim", async (context) => {
             AND media_objects.state = 'active'
             AND media_objects.sha256 = audio_processing_jobs.source_sha256
             AND media_objects.byte_size = audio_processing_jobs.source_byte_size
+            AND NOT EXISTS (
+              SELECT 1
+              FROM audio_processing_jobs AS running_job
+              WHERE running_job.status = 'running'
+                AND running_job.lease_expires_at > ?
+            )
           ORDER BY audio_processing_jobs.created_at, audio_processing_jobs.id
           LIMIT 1
         ) AND status = 'pending'
       `).bind(
         leaseTokenHash, leaseExpiresAt, timestamp,
-        AUDIO_PROCESSING_POLICY_ID, MAX_AUDIO_DERIVATIVE_BYTES,
+        AUDIO_PROCESSING_POLICY_ID, MAX_AUDIO_DERIVATIVE_BYTES, timestamp,
       ),
     ]);
-    claimed = results[1].meta.changes === 1;
+    claimed = results[4].meta.changes === 1;
   } catch {
     return context.json({ error: "audio_processing_claim_failed" }, 503);
   }

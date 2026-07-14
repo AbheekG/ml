@@ -2,6 +2,7 @@ import { z } from "zod";
 import { MAX_RECORDING_UPLOAD_BYTES } from "./recording-upload";
 
 export const AUDIO_PROCESSING_LEASE_MS = 60 * 60 * 1000;
+export const MAX_EXPIRED_AUDIO_PROCESSING_ATTEMPTS = 3;
 export const MAX_AUDIO_DERIVATIVE_BYTES = MAX_RECORDING_UPLOAD_BYTES;
 export const MAX_AUDIO_PROCESSING_RESULT_BYTES = 64 * 1024;
 

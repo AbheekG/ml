@@ -15,6 +15,7 @@ const migrationNames = [
   "audio_processing_jobs",
   "recording_upload_sessions",
   "audio_processing_control",
+  "audio_processing_concurrency",
 ];
 const migration = migrationNames.map((name, index) => readFileSync(
   resolve(`migrations/${String(index + 1).padStart(4, "0")}_${name}.sql`),
@@ -244,43 +245,59 @@ function seedPendingJob(
   database: DatabaseSync,
   media: MemoryR2,
   sourceBytes: Uint8Array,
+  fixtureId = "1",
 ): void {
   const sourceHash = sha256(sourceBytes);
+  const songId = `song-${fixtureId}`;
+  const recordingId = `recording-${fixtureId}`;
+  const jobId = `job-${fixtureId}`;
+  const sourceMediaId = fixtureId === "1" ? "source-media" : `source-media-${fixtureId}`;
+  const objectKey = `recordings/original/${sourceMediaId}`;
   database.prepare(`
     INSERT INTO songs (
       id, title_latin, normalized_title_latin, status,
       created_at, created_by, updated_at, updated_by
-    ) VALUES ('song-1', 'Test', 'test', 'draft', ?, ?, ?, ?)
-  `).run(seedTimestamp, actor, seedTimestamp, actor);
+    ) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?)
+  `).run(
+    songId, `Test ${fixtureId}`, `test ${fixtureId}`,
+    seedTimestamp, actor, seedTimestamp, actor,
+  );
   database.prepare(`
     INSERT INTO media_objects (
       id, object_key, original_filename, byte_size, sha256, kind,
       state, created_at, created_by
     ) VALUES (
-      'source-media', 'recordings/original/source-media', 'source.bin', ?, ?,
+      ?, ?, 'source.bin', ?, ?,
       'original_audio', 'active', ?, ?
     )
-  `).run(sourceBytes.byteLength, sourceHash, seedTimestamp, actor);
+  `).run(sourceMediaId, objectKey, sourceBytes.byteLength, sourceHash, seedTimestamp, actor);
   database.prepare(`
     INSERT INTO recordings (
       id, song_id, original_media_id, playback_media_id,
       description, normalized_description, processing_state, revision,
       created_at, created_by, updated_at, updated_by
     ) VALUES (
-      'recording-1', 'song-1', 'source-media', NULL,
-      'Recording 1', 'recording 1', 'processing', 1, ?, ?, ?, ?
+      ?, ?, ?, NULL,
+      ?, ?, 'processing', 1, ?, ?, ?, ?
     )
-  `).run(seedTimestamp, actor, seedTimestamp, actor);
+  `).run(
+    recordingId, songId, sourceMediaId,
+    `Recording ${fixtureId}`, `recording ${fixtureId}`,
+    seedTimestamp, actor, seedTimestamp, actor,
+  );
   database.prepare(`
     INSERT INTO audio_processing_jobs (
       id, recording_id, source_media_id, source_sha256, source_byte_size,
       policy_id, status, attempt_count, created_at, updated_at
     ) VALUES (
-      'job-1', 'recording-1', 'source-media', ?, ?,
+      ?, ?, ?, ?, ?,
       'mp3-v1-libmp3lame-q2', 'pending', 0, ?, ?
     )
-  `).run(sourceHash, sourceBytes.byteLength, seedTimestamp, seedTimestamp);
-  media.seed("recordings/original/source-media", sourceBytes);
+  `).run(
+    jobId, recordingId, sourceMediaId, sourceHash, sourceBytes.byteLength,
+    seedTimestamp, seedTimestamp,
+  );
+  media.seed(objectKey, sourceBytes);
 }
 
 type Claim = {
@@ -694,6 +711,145 @@ describe("audio processing Worker control plane", () => {
       expect(claimed.processingRequest.derivativeUploadUrl)
         .toContain("/derivative?token=");
       expect(media.objects.has("recordings/playback/pending/job-1/attempt-1.mp3")).toBe(false);
+    } finally {
+      native.close();
+    }
+  });
+
+  it("serializes overlapping claims across different pending jobs", async () => {
+    const { binding, native } = createD1();
+    const media = new MemoryR2();
+    try {
+      seedPendingJob(native, media, new TextEncoder().encode("first original"));
+      seedPendingJob(native, media, new TextEncoder().encode("second original"), "2");
+      const bindings = processorBindings(binding, media);
+      const request = () => app.request(
+        "https://app.example.invalid/api/processing/jobs/claim",
+        { method: "POST", headers: { Authorization: `Bearer ${processorToken}` } },
+        bindings,
+      );
+      const responses = await Promise.all([request(), request()]);
+      expect(responses.map((response) => response.status).sort()).toEqual([200, 204]);
+      expect(native.prepare(`
+        SELECT
+          SUM(status = 'running') AS runningCount,
+          SUM(status = 'pending') AS pendingCount,
+          SUM(attempt_count) AS totalAttempts
+        FROM audio_processing_jobs
+      `).get()).toEqual({ runningCount: 1, pendingCount: 1, totalAttempts: 1 });
+    } finally {
+      native.close();
+    }
+  });
+
+  it("returns no work while a pre-existing lease is still running", async () => {
+    const { binding, native } = createD1();
+    const media = new MemoryR2();
+    try {
+      seedPendingJob(native, media, new TextEncoder().encode("leased original"));
+      const bindings = processorBindings(binding, media);
+      await claim(bindings);
+      const duplicateExecution = await app.request(
+        "https://app.example.invalid/api/processing/jobs/claim",
+        { method: "POST", headers: { Authorization: `Bearer ${processorToken}` } },
+        bindings,
+      );
+      expect(duplicateExecution.status).toBe(204);
+      expect(native.prepare(`
+        SELECT status, attempt_count AS attemptCount FROM audio_processing_jobs
+      `).get()).toEqual({ status: "running", attemptCount: 1 });
+    } finally {
+      native.close();
+    }
+  });
+
+  it("fails the third expired attempt and requires an explicit editor retry", async () => {
+    const { binding, native } = createD1();
+    const media = new MemoryR2();
+    try {
+      seedPendingJob(native, media, new TextEncoder().encode("repeatedly lost original"));
+      native.prepare(`
+        UPDATE audio_processing_jobs
+        SET status = 'running', attempt_count = 1,
+            lease_token_hash = ?, lease_expires_at = '2026-07-13T00:00:00.000Z',
+            updated_at = '2026-07-12T00:00:01.000Z'
+        WHERE id = 'job-1'
+      `).run("c".repeat(64));
+      native.prepare(`
+        UPDATE audio_processing_jobs
+        SET status = 'pending', lease_token_hash = NULL, lease_expires_at = NULL,
+            updated_at = '2026-07-13T00:00:01.000Z'
+        WHERE id = 'job-1'
+      `).run();
+      native.prepare(`
+        UPDATE audio_processing_jobs
+        SET status = 'running', attempt_count = 2,
+            lease_token_hash = ?, lease_expires_at = '2026-07-13T01:00:00.000Z',
+            updated_at = '2026-07-13T00:00:02.000Z'
+        WHERE id = 'job-1'
+      `).run("d".repeat(64));
+      native.prepare(`
+        UPDATE audio_processing_jobs
+        SET status = 'pending', lease_token_hash = NULL, lease_expires_at = NULL,
+            updated_at = '2026-07-13T01:00:01.000Z'
+        WHERE id = 'job-1'
+      `).run();
+      native.prepare(`
+        UPDATE audio_processing_jobs
+        SET status = 'running', attempt_count = 3,
+            lease_token_hash = ?, lease_expires_at = '2026-07-13T02:00:00.000Z',
+            updated_at = '2026-07-13T01:00:02.000Z'
+        WHERE id = 'job-1'
+      `).run("e".repeat(64));
+      expect(() => native.prepare(`
+        UPDATE audio_processing_jobs
+        SET status = 'pending', lease_token_hash = NULL, lease_expires_at = NULL,
+            updated_at = '2026-07-13T02:00:01.000Z'
+        WHERE id = 'job-1'
+      `).run()).toThrow(/invalid_audio_processing_job_expired_recovery/u);
+
+      const bindings = processorBindings(binding, media);
+      const recovery = await app.request(
+        "https://app.example.invalid/api/processing/jobs/claim",
+        { method: "POST", headers: { Authorization: `Bearer ${processorToken}` } },
+        bindings,
+      );
+      expect(recovery.status).toBe(204);
+      expect(native.prepare(`
+        SELECT audio_processing_jobs.status, audio_processing_jobs.attempt_count AS attemptCount,
+               audio_processing_jobs.error_code AS errorCode,
+               recordings.processing_state AS processingState,
+               recordings.processing_error AS processingError,
+               recordings.revision
+        FROM audio_processing_jobs
+        JOIN recordings ON recordings.id = audio_processing_jobs.recording_id
+      `).get()).toEqual({
+        status: "failed",
+        attemptCount: 3,
+        errorCode: "processing_lease_expired",
+        processingState: "failed",
+        processingError: "processing_lease_expired",
+        revision: 2,
+      });
+
+      const retry = await app.request(
+        "https://app.example.invalid/api/recordings/recording-1/retry-processing",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ revision: 2 }),
+        },
+        localBindings(binding, media),
+      );
+      expect(retry.status).toBe(200);
+      await expect(retry.json()).resolves.toMatchObject({
+        job: { status: "pending", attemptCount: 3 },
+        recording: { revision: 3, processingState: "processing" },
+      });
+      await claim(bindings);
+      expect(native.prepare(`
+        SELECT status, attempt_count AS attemptCount FROM audio_processing_jobs
+      `).get()).toEqual({ status: "running", attemptCount: 4 });
     } finally {
       native.close();
     }

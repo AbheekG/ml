@@ -57,7 +57,7 @@ The conversion core is a small Python module that invokes FFmpeg without contain
 - The separately authorized D1 phase requires the reviewed plan hash, complete upload state, a fresh verification of every planned R2 object, and the already-applied derivative-provenance migration. It submits one guarded import whose live row/revision preconditions and final relationship reconciliation fail the whole database transaction if the catalog has diverged. It never applies schema migrations automatically.
 - R2 and D1 cannot share one cross-service transaction. If upload succeeds but D1 is rejected, the new objects remain private and unreferenced; the saved state and idempotent guards make review and retry safe without deleting or replacing source media.
 - A provider-neutral local HTTP adapter now handles one claimed job per call around the same conversion core. The proposed invocation boundary uses a single-task scheduled Cloud Run Job with no HTTP server; its local prerequisites and still-unapproved cloud gates are defined in [audio-processing-invocation.md](audio-processing-invocation.md).
-- The Cloudflare Worker now implements the local control-plane half: separate processor authentication, FIFO pending-job claim, one-hour leases, expired-lease recovery, operation-scoped transfer authorization, immutable derivative attempts, independent R2 byte verification, privacy-safe failure state, explicit editor retry, and atomic finalization.
+- The Cloudflare Worker now implements the local control-plane half: separate processor authentication, FIFO pending-job claim, a database-enforced global single-running-job gate, one-hour leases, automatic recovery of the first two expired attempts, a durable failure on the third expiry, operation-scoped transfer authorization, immutable derivative attempts, independent R2 byte verification, privacy-safe failure state, explicit editor retry, and atomic finalization.
 - The hosted service receives no permanent public media URL and should not require broad R2 credentials.
 
 The hosted boundary is schema-versioned and binds each request to an opaque job,
@@ -110,9 +110,9 @@ derivative transfers plus result/failure callbacks reject redirects; exact
 source length/hash and selected derivative length/hash are checked again before
 use. Result and failure delivery retries are bounded and idempotent, and a result
 delivery that may already have committed is never followed by a failure
-callback. Before hosting, the Worker must globally prevent concurrent running
-jobs and bound repeated lease-expiry recovery, while the adapter must enforce a
-soft deadline and generated-output limit below the platform timeout. No
+callback. The Worker now globally prevents concurrent running jobs and bounds
+repeated lease-expiry recovery; the adapter must still enforce a soft deadline
+and generated-output limit below the platform timeout. No
 processor token/origin is configured in staging, and no HTTP server, Cloud Run
 Job, scheduler, credentials, infrastructure, or deployment is part of this
 local design.

@@ -55,11 +55,12 @@ derivative, and sends bounded idempotent result/failure callbacks. A result
 delivery that may already have committed never becomes a contradictory failure
 callback. No HTTP server/trigger, container, scheduler, real secret, Cloud Run
 resource, or other hosted invocation mechanism has been created. The accepted
-local design selects a scheduled single-task Cloud Run Job, but first requires
-a database-enforced global running-job gate, bounded lease-loss recovery, a
-45-minute processor deadline and generated-output ceiling, aggregate-only
-entrypoint behavior, and local container/resource verification. Every cloud
-action remains separately owner-approved.
+local design selects a scheduled single-task Cloud Run Job. Its database-enforced
+global running-job gate and three-attempt bounded lease-loss recovery are now
+implemented and tested locally; the remaining gates are a 45-minute processor
+deadline and generated-output ceiling, aggregate-only entrypoint behavior, and
+local container/resource verification. Every cloud action remains separately
+owner-approved.
 
 Proposed application tooling:
 
