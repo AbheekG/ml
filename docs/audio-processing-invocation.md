@@ -1,6 +1,6 @@
 # Hosted audio-processing invocation
 
-Status: proposed local design for owner review, 2026-07-14. Nothing in this
+Status: accepted local design, 2026-07-14. Nothing in this
 document authorizes cloud creation, configuration, deployment, or staging
 changes.
 
@@ -10,6 +10,14 @@ This document chooses how the existing one-job hosted adapter should eventually
 run. It does not change the processing contract in
 [audio-processing.md](audio-processing.md), create a server, add a container, or
 provision credentials or infrastructure.
+
+The owner separately completed the administrative staging foundation on
+2026-07-15: Google Cloud project `music-library-audio-staging` is active with
+billing linked, a monthly notification-only budget is configured with
+promotional credits excluded from its alert calculation, and an isolated local
+CLI configuration selects the project and `asia-south1`. This created no
+processor credential, service account, runtime API/resource, container, Job,
+Scheduler trigger, or deployment.
 
 The boundary must preserve these invariants:
 
@@ -197,19 +205,39 @@ private job belongs only under ignored private notes.
 
 ## Cost boundary
 
+The operating objective is $0 recurring Google Cloud cost for the expected rare
+uploads, when that can be achieved without compromising correctness, privacy,
+durability, or conversion quality. It cannot be an "always free" guarantee:
+Google free allowances and prices may change, several allowances are shared by
+billing account, and the required billing account can be charged for overage.
+
 Cloud Run Jobs currently have a one-minute minimum billable lifetime. A
 15-minute schedule normally creates 96 idle executions per day, before any rare
-duplicate trigger. At 1 vCPU and 2 GiB, the idle minimum alone fits within the
-currently published monthly Cloud Run free CPU and memory allowances, but those
-allowances are shared by billing
-account and actual processing adds usage. Outbound transfer from Google Cloud to
-the Worker, Artifact Registry storage/builds, Secret Manager, logs, and any usage
-above free allowances can still be billed.
+duplicate trigger. In a 31-day month that is 2,976 minimum billed minutes, or
+178,560 vCPU-seconds and 357,120 GiB-seconds at 1 vCPU and 2 GiB. As checked on
+2026-07-15, that idle floor fits within the published monthly Cloud Run Job free
+allowances of 240,000 vCPU-seconds and 450,000 GiB-seconds. Actual processing,
+duplicate invocations, and any other use of the billing account consume the
+remaining headroom.
+
+The initial design also stays within one of Cloud Scheduler's currently three
+free jobs and keeps the runtime secret below Secret Manager's free active-version
+and access allowances. Keep the deployed container plus retained rollback image
+within Artifact Registry's current 0.5 GiB-month no-cost storage allowance when
+measurement shows that is practical. Bound ordinary logs and image revisions.
+Downloading an R2 original into Cloud Run is Google ingress; uploading a newly
+created derivative to the Worker is outbound internet transfer and is therefore
+the most likely per-upload Google charge after the current 1 GiB monthly network
+allowance. Direct-original results return only a small callback.
 
 Before enabling the schedule, the owner must review a current pricing-calculator
-estimate, configure a small billing budget/alert, and approve the recurring
-external action. The schedule is created paused and is resumed only after a
-manual no-work execution and one private end-to-end staging job pass.
+estimate, configure a small billing budget with multiple alerts, and approve the
+recurring external action. Budget alerts provide notification but do not cap
+spend. The schedule is created paused and is resumed only after a manual no-work
+execution and one private end-to-end staging job pass. If monitoring projects an
+allowance will be exceeded, pause the schedule where safe and ask the owner to
+choose between a configuration change and paid usage; do not reduce validation
+or conversion quality, discard originals, expose media, or bypass processing.
 
 ## Local implementation gates
 
@@ -224,8 +252,8 @@ The smallest safe sequence after this design is accepted is:
 4. add and locally test a pinned, non-root FFmpeg container and resource fixture;
 5. separately review exact cloud commands, identities, costs, secret rotation,
    rollback, and staging verification; and
-6. only with explicit owner approval, create/configure cloud resources and
-   deploy to staging.
+6. only with explicit owner approval, create/configure the remaining runtime
+   cloud resources and deploy to staging.
 
 Each local step is independently reviewable. Production remains out of scope.
 

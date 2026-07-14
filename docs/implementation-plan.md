@@ -21,7 +21,7 @@ Use one TypeScript Cloudflare Worker project that serves both the PWA static ass
 - private R2 for scans, original audio, and playback derivatives;
 - Cloudflare Access for allowlisted identity at the deployed boundary.
 
-Audio decode validation and conversion are deliberately outside the 128 MB Worker runtime. Use the provider-neutral Python/FFmpeg core described in [audio-processing.md](audio-processing.md): run existing-media preparation locally, and later execute the same core once per single-task scheduled Cloud Run Job for rare new uploads, as proposed in [audio-processing-invocation.md](audio-processing-invocation.md). Do not add an HTTP server for this boundary. Keep the Cloudflare Worker on the Free plan unless later evidence justifies changing it. Cloud project/billing setup remains an explicit owner action.
+Audio decode validation and conversion are deliberately outside the 128 MB Worker runtime. Use the provider-neutral Python/FFmpeg core described in [audio-processing.md](audio-processing.md): run existing-media preparation locally, and later execute the same core once per single-task scheduled Cloud Run Job for rare new uploads, as defined in the accepted local design in [audio-processing-invocation.md](audio-processing-invocation.md). Do not add an HTTP server for this boundary. Keep Cloudflare and Google Cloud within their free allowances when practical. The owner completed the isolated Google Cloud staging project, billing, budget-alert, and local CLI setup; every runtime resource remains separately approval-gated.
 
 Existing prepared derivatives cross the cloud boundary through a reviewed deterministic plan and a dry-run-by-default executor. R2 upload and D1 finalization remain separate owner-approved commands. Upload is resumable and content-verified; D1 finalization requires the schema migration to exist, re-verifies the complete R2 set, and uses guarded live-state preconditions in one rollback-safe import. The executor does not deploy, apply migrations, or combine these external approvals.
 
@@ -54,8 +54,8 @@ directory with exact length/hash enforcement, uploads only a reverified selected
 derivative, and sends bounded idempotent result/failure callbacks. A result
 delivery that may already have committed never becomes a contradictory failure
 callback. No HTTP server/trigger, container, scheduler, real secret, Cloud Run
-resource, or other hosted invocation mechanism has been created. The proposed
-local boundary selects a scheduled single-task Cloud Run Job, but first requires
+resource, or other hosted invocation mechanism has been created. The accepted
+local design selects a scheduled single-task Cloud Run Job, but first requires
 a database-enforced global running-job gate, bounded lease-loss recovery, a
 45-minute processor deadline and generated-output ceiling, aggregate-only
 entrypoint behavior, and local container/resource verification. Every cloud
@@ -73,11 +73,58 @@ Proposed application tooling:
 
 Keep dependencies modest and pin an LTS Node.js version. Develop locally before creating production cloud resources.
 
+## Operating-cost objective
+
+Target zero recurring cloud spend for the expected 3–4-person workload by
+staying deliberately below the providers' currently published free allowances.
+This is an optimization objective, not a guarantee or a reason to weaken
+privacy, access control, verification, recoverability, preservation of
+originals, transcoding quality, or the usability of the application. Free tiers
+can change and some Google Cloud services require a billing account that can be
+charged for overage.
+
+Treat the allowances as separate measured budgets rather than one generic free
+tier. In particular, Cloudflare R2 Standard currently includes 10 GB-month of
+storage, which is a monthly storage measure rather than a hard 10 GB capacity
+line; D1 storage and row operations, Worker requests/CPU, and R2 operations have
+their own limits. Google Cloud Run compute, outbound network transfer, Artifact
+Registry storage, Secret Manager access, Cloud Scheduler jobs, builds, and logs
+also have separate limits, and some allowances are shared by billing account.
+
+Before enabling any new recurring resource:
+
+- recheck official pricing and calculate expected idle plus worst-reasonable
+  processing use with headroom;
+- configure usage visibility and a small billing budget with multiple alerts,
+  while recognizing that a Google budget alert is not a spending cap;
+- create schedules paused and require an approved manual no-work test plus one
+  private end-to-end staging test before resuming them;
+- keep images, logs, retained revisions, and schedules bounded without removing
+  source media or security/verification safeguards; and
+- if projected use approaches a free allowance, pause the affected optional
+  recurring work where safe and ask the owner to choose between configuration
+  tuning and a small paid allowance. Never silently degrade output or delete
+  private originals to avoid a charge.
+
+Current provider references are [Cloudflare R2 pricing](https://developers.cloudflare.com/r2/pricing/),
+[D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/),
+[Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/),
+[Cloud Run pricing](https://cloud.google.com/run/pricing), and
+[Google Cloud budgets](https://docs.cloud.google.com/billing/docs/how-to/budgets).
+
 ## Environments
 
 - **Local:** local D1/R2 emulation and a sanitized or private local import; no cloud dependency for routine development.
 - **Staging:** real Cloudflare bindings, private access, and a copy of data for device testing.
 - **Production:** separate D1 database and R2 bucket, created only after staging acceptance.
+
+The Google audio-processing staging project is
+`music-library-audio-staging`. Billing is linked, a monthly notification-only
+budget is active with promotional credits excluded from its alert calculation,
+and the isolated local CLI configuration defaults Cloud Run to `asia-south1`.
+No processor secret, service account, runtime API/resource, container, Job,
+Scheduler trigger, or hosted deployment has been configured. A separate Google
+production project has not been created.
 
 Never point development code at production data by default.
 
