@@ -5,6 +5,7 @@ import unittest
 from audio_converter.hosted_contract import (
     HostedContractError,
     build_hosted_processing_result,
+    parse_hosted_job_claim,
     parse_hosted_processing_request,
 )
 from audio_converter.models import Decision, DecisionKind, DerivativeValidation
@@ -25,6 +26,16 @@ def request_payload() -> dict[str, object]:
         "sourceByteSize": 100,
         "sourceDownloadUrl": "https://transfer.invalid/source?token=short-lived",
         "derivativeUploadUrl": "https://transfer.invalid/derivative?token=short-lived",
+    }
+
+
+def claim_payload() -> dict[str, object]:
+    return {
+        "schemaVersion": 1,
+        "leaseExpiresAt": "2099-01-01T00:00:00.000Z",
+        "processingRequest": request_payload(),
+        "resultUrl": "https://transfer.invalid/result?token=short-lived",
+        "failureUrl": "https://transfer.invalid/failure?token=short-lived",
     }
 
 
@@ -51,6 +62,48 @@ class HostedContractTests(unittest.TestCase):
         self.assertEqual(parsed.job_id, "job_opaque-123")
         self.assertEqual(parsed.source_sha256, SOURCE_HASH)
         self.assertEqual(parsed.source_byte_size, 100)
+        self.assertNotIn("short-lived", repr(parsed))
+
+    def test_parses_strict_claim_without_exposing_capabilities(self) -> None:
+        claim = parse_hosted_job_claim(
+            claim_payload(),
+            allowed_transfer_origins=TRANSFER_ORIGINS,
+            expected_callback_origin="https://transfer.invalid",
+        )
+
+        self.assertEqual(claim.processing_request.job_id, "job_opaque-123")
+        self.assertEqual(claim.lease_expires_at.year, 2099)
+        self.assertNotIn("short-lived", repr(claim))
+
+    def test_rejects_invalid_claim_callback_and_overlapping_resource(self) -> None:
+        unexpected_origin = claim_payload()
+        unexpected_origin["resultUrl"] = "https://other.invalid/result?token=x"
+        with self.assertRaisesRegex(HostedContractError, "unexpected_callback_origin"):
+            parse_hosted_job_claim(
+                unexpected_origin,
+                allowed_transfer_origins=frozenset(
+                    {*TRANSFER_ORIGINS, "https://other.invalid"}
+                ),
+                expected_callback_origin="https://transfer.invalid",
+            )
+
+        overlapping = claim_payload()
+        overlapping["failureUrl"] = "https://transfer.invalid/result?token=other"
+        with self.assertRaisesRegex(HostedContractError, "job_claim_urls_must_differ"):
+            parse_hosted_job_claim(
+                overlapping,
+                allowed_transfer_origins=TRANSFER_ORIGINS,
+                expected_callback_origin="https://transfer.invalid",
+            )
+
+        invalid_expiry = claim_payload()
+        invalid_expiry["leaseExpiresAt"] = "tomorrow"
+        with self.assertRaisesRegex(HostedContractError, "invalid_lease_expires_at"):
+            parse_hosted_job_claim(
+                invalid_expiry,
+                allowed_transfer_origins=TRANSFER_ORIGINS,
+                expected_callback_origin="https://transfer.invalid",
+            )
 
     def test_rejects_unknown_fields_and_non_https_transfer_urls(self) -> None:
         extra = request_payload()

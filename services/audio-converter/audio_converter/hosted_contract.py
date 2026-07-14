@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field as dataclass_field
+from datetime import datetime
 from typing import Mapping
 from urllib.parse import urlparse
 
@@ -29,8 +30,16 @@ class HostedProcessingRequest:
     policy_id: str
     source_sha256: str
     source_byte_size: int
-    source_download_url: str
-    derivative_upload_url: str
+    source_download_url: str = dataclass_field(repr=False)
+    derivative_upload_url: str = dataclass_field(repr=False)
+
+
+@dataclass(frozen=True)
+class HostedJobClaim:
+    lease_expires_at: datetime
+    processing_request: HostedProcessingRequest
+    result_url: str = dataclass_field(repr=False)
+    failure_url: str = dataclass_field(repr=False)
 
 
 def _required_string(payload: Mapping[str, object], key: str) -> str:
@@ -67,7 +76,7 @@ def _job_scoped_https_url(
         or parsed.fragment
     ):
         raise HostedContractError(f"invalid_{field}")
-    origin = f"{parsed.scheme}://{parsed.netloc}"
+    origin = _url_origin(value)
     if origin not in allowed_transfer_origins:
         raise HostedContractError(f"untrusted_{field}")
     return value
@@ -76,6 +85,28 @@ def _job_scoped_https_url(
 def _transfer_resource_identity(value: str) -> tuple[str, str, str]:
     parsed = urlparse(value)
     return parsed.scheme, parsed.netloc, parsed.path
+
+
+def _url_origin(value: str) -> str:
+    parsed = urlparse(value)
+    return f"{parsed.scheme.casefold()}://{parsed.netloc.casefold()}"
+
+
+def _lease_expiration(value: object) -> datetime:
+    if (
+        not isinstance(value, str)
+        or not 20 <= len(value) <= 64
+        or "T" not in value
+        or not value.endswith("Z")
+    ):
+        raise HostedContractError("invalid_lease_expires_at")
+    try:
+        parsed = datetime.fromisoformat(f"{value[:-1]}+00:00")
+    except ValueError as error:
+        raise HostedContractError("invalid_lease_expires_at") from error
+    if parsed.utcoffset() is None:
+        raise HostedContractError("invalid_lease_expires_at")
+    return parsed
 
 
 def parse_hosted_processing_request(
@@ -134,6 +165,67 @@ def parse_hosted_processing_request(
         source_byte_size=source_byte_size,
         source_download_url=source_download_url,
         derivative_upload_url=derivative_upload_url,
+    )
+
+
+def parse_hosted_job_claim(
+    payload: object,
+    *,
+    allowed_transfer_origins: frozenset[str],
+    expected_callback_origin: str,
+    policy: ProcessingPolicy = ProcessingPolicy(),
+) -> HostedJobClaim:
+    if not allowed_transfer_origins:
+        raise HostedContractError("transfer_origin_allowlist_required")
+    if not isinstance(payload, dict):
+        raise HostedContractError("invalid_job_claim")
+    allowed_keys = {
+        "schemaVersion",
+        "leaseExpiresAt",
+        "processingRequest",
+        "resultUrl",
+        "failureUrl",
+    }
+    if set(payload) != allowed_keys:
+        raise HostedContractError("invalid_job_claim_fields")
+    if payload.get("schemaVersion") != HOSTED_CONTRACT_SCHEMA_VERSION:
+        raise HostedContractError("unsupported_job_claim_schema")
+
+    processing_request = parse_hosted_processing_request(
+        payload.get("processingRequest"),
+        allowed_transfer_origins=allowed_transfer_origins,
+        policy=policy,
+    )
+    result_url = _job_scoped_https_url(
+        payload.get("resultUrl"),
+        "result_url",
+        allowed_transfer_origins,
+    )
+    failure_url = _job_scoped_https_url(
+        payload.get("failureUrl"),
+        "failure_url",
+        allowed_transfer_origins,
+    )
+    if (
+        _url_origin(result_url) != expected_callback_origin
+        or _url_origin(failure_url) != expected_callback_origin
+    ):
+        raise HostedContractError("unexpected_callback_origin")
+
+    resource_identities = {
+        _transfer_resource_identity(processing_request.source_download_url),
+        _transfer_resource_identity(processing_request.derivative_upload_url),
+        _transfer_resource_identity(result_url),
+        _transfer_resource_identity(failure_url),
+    }
+    if len(resource_identities) != 4:
+        raise HostedContractError("job_claim_urls_must_differ")
+
+    return HostedJobClaim(
+        lease_expires_at=_lease_expiration(payload.get("leaseExpiresAt")),
+        processing_request=processing_request,
+        result_url=result_url,
+        failure_url=failure_url,
     )
 
 

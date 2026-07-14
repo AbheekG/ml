@@ -52,29 +52,39 @@ Do not put private filenames, titles, or personal information in tracked fixture
 
 ## Hosted-processing boundary
 
-`audio_converter.hosted_contract` defines the versioned boundary for a later
-scale-to-zero HTTP adapter. The Worker supplies only an opaque job ID, the exact
+`audio_converter.hosted_contract` defines the versioned boundary for the local
+provider-neutral HTTP adapter. The Worker supplies only an opaque job ID, the exact
 policy ID, the expected original hash/size, and short-lived job-scoped HTTPS
 transfer URLs. The converter result repeats the job/policy identity and contains
 only verified media facts; it never echoes transfer URLs.
 
-The adapter must authenticate the Worker separately, avoid logging request bodies
-or signed URLs, download the original to temporary storage, run the same
-`prepare()` core, upload a derivative only when the verified result requires one,
-and remove all temporary files. The Worker remains responsible for authorization,
-job state, independent R2 verification, D1 finalization, retries, and expiry.
+`audio_converter.hosted_adapter.run_hosted_job_once()` implements one bounded
+processor pass without selecting an HTTP server or deployment platform. Its
+configuration requires the exact Worker origin, a separately provisioned random
+32-or-more-character printable processor token, a nonempty HTTPS transfer-origin
+allowlist, an existing temporary root, and bounded request/body/retry limits. It
+creates a private `0700` per-job directory and `0600` source, disables redirects,
+streams and verifies the exact source, runs `prepare()`, rechecks and streams only
+a selected derivative, sends exact-length callbacks, and removes the temporary
+directory before reporting success. Routine outcomes and errors contain no job
+ID, signed URL, token, or filesystem path.
+
+Claim is intentionally attempted once: retrying a response-lost claim could
+lease a second job during the same invocation. Create-only derivative upload and
+result/failure callbacks have bounded retries because their Worker operations are
+idempotent. An exhausted or redirected result callback is surfaced for
+reconciliation and is never followed by a failure callback, because success may
+already have committed. The Worker remains responsible for authorization, job
+state, independent R2 verification, D1 finalization, retries, and expiry.
 This contract does not create a hosted service, credentials, or cloud resources.
 The HTTP adapter must pass an explicit nonempty allowlist of application transfer
 origins to the contract parser; arbitrary HTTPS download/upload hosts are rejected
 to keep job payloads from becoming an SSRF mechanism. Source and destination
-paths must differ. The later HTTP client must disable redirects or validate every
-redirect target against the same origin allowlist.
+paths must differ. The implemented client rejects redirects for every operation.
 
-The application Worker now implements the complementary local-only claim and
+The application Worker implements the complementary local-only claim and
 callback boundary. A claim wrapper contains `processingRequest` (the exact
-payload parsed here), `resultUrl`, `failureUrl`, and the lease expiry. A future
-adapter must authenticate claim/result/failure with the separately provisioned
-processor secret, send the nested request unchanged to this parser, use only its
-operation-scoped transfer URLs, set exact content lengths, and return the strict
-result to `resultUrl`. Adapter code, cloud credentials, scheduling, and
-deployment remain unimplemented.
+payload parsed here), `resultUrl`, `failureUrl`, and the lease expiry. The local
+adapter authenticates claim/result/failure with the separately supplied token and
+uses only the strict operation-scoped URLs. No command-line secret interface,
+HTTP server, container, cloud credentials, scheduling, or deployment is included.

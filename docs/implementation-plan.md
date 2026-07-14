@@ -43,8 +43,18 @@ private source, and immutably upload one derivative attempt. The Worker accepts
 only a strict policy/job/source-bound result, independently re-hashes stored
 source and derivative bytes, and atomically records provenance, playback
 readiness, and job success. Safe failures are durable and editor-retryable. No
-processor secret/origin has been configured, no hosted adapter or scheduler has
-been created, and none of this local slice has been deployed to staging.
+processor secret/origin has been configured and none of this local slice has
+been deployed to staging.
+
+The provider-neutral processor-side HTTP adapter is also implemented locally as
+a one-job library boundary around the existing Python/FFmpeg `prepare()` core.
+It does not retry claim, validates the strict lease/capability envelope and exact
+Worker routes, disables redirects, streams the source into a private temporary
+directory with exact length/hash enforcement, uploads only a reverified selected
+derivative, and sends bounded idempotent result/failure callbacks. A result
+delivery that may already have committed never becomes a contradictory failure
+callback. No HTTP server/trigger, container, scheduler, real secret, Cloud Run
+resource, or other hosted invocation mechanism has been selected or created.
 
 Proposed application tooling:
 
