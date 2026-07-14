@@ -19,7 +19,8 @@
     "import:appsheet": "tsx scripts/appsheet-import.ts",
     "db:load-local": "tsx scripts/load-local-db.ts",
     "media:upload": "tsx scripts/upload-r2.ts",
-    "media:plan-audio": "tsx scripts/plan-audio-integration.ts"
+    "media:plan-audio": "tsx scripts/plan-audio-integration.ts",
+    "media:integrate-audio": "tsx scripts/audio-integration-executor.ts"
   },
   "dependencies": {
     "dexie": "4.4.4",

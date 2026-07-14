@@ -125,3 +125,25 @@ npm run media:plan-audio
 ```
 
 Add `-- --write-plan` only to save the detailed proposed operations under ignored `data/import-output/`. This command never applies the plan or contacts cloud services. Review its aggregate counts before separately authorizing any future upload or database write.
+
+After a plan has been reviewed, preview its execution locally. This re-hashes every
+planned derivative and reports only aggregate counts; it does not contact R2 or D1:
+
+```bash
+npm run media:integrate-audio
+```
+
+The executor keeps cloud changes in two explicit, independently retryable phases.
+Neither phase runs without the exact reviewed plan SHA-256:
+
+```bash
+npm run media:integrate-audio -- --upload-r2 --confirm-plan-sha256 REVIEWED_HASH
+npm run media:integrate-audio -- --apply-d1 --confirm-plan-sha256 REVIEWED_HASH
+```
+
+Do not run these write commands until the owner has separately approved the target
+resources and migration `0004_audio_derivatives.sql` has been applied. R2 upload
+checks existing bytes before writing, verifies bytes after writing, and checkpoints
+progress under ignored `data/import-output/`. The D1 phase freshly verifies every
+planned R2 object, checks that migration `0004` is present, and then submits one
+guarded transactional import. It will not apply the migration automatically.

@@ -23,6 +23,8 @@ Use one TypeScript Cloudflare Worker project that serves both the PWA static ass
 
 Audio decode validation and conversion are deliberately outside the 128 MB Worker runtime. Use the provider-neutral Python/FFmpeg core described in [audio-processing.md](audio-processing.md): run existing-media preparation locally, and later wrap the same core in a scale-to-zero Google Cloud Run service for rare new uploads. Keep the Cloudflare Worker on the Free plan unless later evidence justifies changing it. Cloud project/billing setup remains an explicit owner action.
 
+Existing prepared derivatives cross the cloud boundary through a reviewed deterministic plan and a dry-run-by-default executor. R2 upload and D1 finalization remain separate owner-approved commands. Upload is resumable and content-verified; D1 finalization requires the schema migration to exist, re-verifies the complete R2 set, and uses guarded live-state preconditions in one rollback-safe import. The executor does not deploy, apply migrations, or combine these external approvals.
+
 Proposed application tooling:
 
 - React + TypeScript + Vite for the interface;
