@@ -66,6 +66,18 @@ const hostedResultSchema = z.object({
   if (!derivativeStatus && !discardedCandidate && value.validation !== null) {
     context.addIssue({ code: "custom", message: "Direct original result includes validation" });
   }
+  if (value.playbackKind === "original" && (
+    value.original.codec !== "mp3" || !value.original.containers.includes("mp3")
+  )) {
+    context.addIssue({ code: "custom", message: "Original playback result is not MP3" });
+  }
+  if (value.playbackKind === "derivative" && (
+    value.derivative?.codec !== "mp3"
+    || !value.derivative.containers.includes("mp3")
+    || value.derivative.had_decode_warnings
+  )) {
+    context.addIssue({ code: "custom", message: "Derivative playback result is not strict MP3" });
+  }
 });
 
 export type VerifiedHostedResult = {

@@ -68,6 +68,16 @@ in [audio-processing.md](audio-processing.md). It prepares and verifies playback
 media before the Worker independently verifies stored bytes and atomically marks
 the Recording ready. Play never starts conversion.
 
+The Worker half of that control plane is implemented locally. Processor claim
+authentication is separate from end-user Access roles. One claim creates a
+one-hour opaque lease and four HMAC-bound operation capabilities, so changing a
+source URL into a derivative/result URL fails authentication. Only the lease
+hash is retained in D1. Derivative upload uses a deterministic attempt-specific
+private key with create-only semantics: a lost response can be retried without
+overwriting the first stored bytes, and a new lease receives a new attempt key.
+The hosted HTTP adapter, invocation/scheduling choice, secrets, deployment, and
+browser orchestration remain separate later work.
+
 ## Upload-session API shape
 
 The server-side transport exposes editor-only, online-only operations to:
@@ -124,6 +134,13 @@ the session is created.
   lost after commit is retried idempotently from the terminal session. The
   processing original is not served by the media endpoint until a verified job
   makes a ready playback source available.
+- A processor result cannot make media playable by assertion alone. The Worker
+  re-hashes the stored original and, when selected, the attempt-specific
+  derivative; a missing derivative is retryable, a byte mismatch durably fails
+  the job without cataloging the object, and the ready/provenance/job graph is a
+  single guarded D1 batch. A lost success response is idempotent. Failed jobs
+  retain privacy-safe codes and require an explicit editor retry before another
+  lease can be claimed.
 - Multipart IDs, ETags, object keys, hashes, filenames, and transfer capabilities
   are excluded from routine logs. Authenticated status responses return only the
   minimum editor-facing filename and completed part numbers.

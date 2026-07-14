@@ -1,2 +1,7 @@
 # Local development deliberately bypasses Cloudflare Access.
 AUTH_MODE=local
+
+# Optional hosted-audio control-plane placeholders. The token is a secret and
+# must be supplied through deployment secret management, never wrangler.jsonc.
+AUDIO_PROCESSOR_TOKEN=replace-with-at-least-32-random-characters
+AUDIO_PROCESSOR_TRANSFER_ORIGIN=https://app.example.invalid

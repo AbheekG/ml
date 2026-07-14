@@ -50,7 +50,7 @@ describe("audio processing job boundary", () => {
     expect(parseVerifiedHostedResult(result({
       status: "original_is_playback",
       playbackKind: "original",
-      original: { ...original, codec: "mp3" },
+      original: { ...original, codec: "mp3", containers: ["mp3"] },
       derivative: null,
       decision: { kind: "use_original", reason: "canonical_mp3" },
       validation: null,
@@ -62,6 +62,12 @@ describe("audio processing job boundary", () => {
     expect(parseVerifiedHostedResult(result({ playbackKind: "original" }))).toBeNull();
     expect(parseVerifiedHostedResult(result({ validation: { accepted: false } }))).toBeNull();
     expect(parseVerifiedHostedResult(result({ sourceDownloadUrl: "private" }))).toBeNull();
+    expect(parseVerifiedHostedResult(result({
+      derivative: { ...derivative, codec: "aac" },
+    }))).toBeNull();
+    expect(parseVerifiedHostedResult(result({
+      derivative: { ...derivative, had_decode_warnings: true },
+    }))).toBeNull();
   });
 
   it("accepts an uneconomical oversized candidate as verified direct-original playback", () => {

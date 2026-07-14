@@ -69,3 +69,12 @@ origins to the contract parser; arbitrary HTTPS download/upload hosts are reject
 to keep job payloads from becoming an SSRF mechanism. Source and destination
 paths must differ. The later HTTP client must disable redirects or validate every
 redirect target against the same origin allowlist.
+
+The application Worker now implements the complementary local-only claim and
+callback boundary. A claim wrapper contains `processingRequest` (the exact
+payload parsed here), `resultUrl`, `failureUrl`, and the lease expiry. A future
+adapter must authenticate claim/result/failure with the separately provisioned
+processor secret, send the nested request unchanged to this parser, use only its
+operation-scoped transfer URLs, set exact content lengths, and return the strict
+result to `resultUrl`. Adapter code, cloud credentials, scheduling, and
+deployment remain unimplemented.

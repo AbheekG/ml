@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { app } from "../worker/index";
 
-const migration = [1, 2, 3, 4, 5, 6]
+const migration = [1, 2, 3, 4, 5, 6, 7]
   .map((number) => readFileSync(
     resolve(`migrations/${String(number).padStart(4, "0")}_${[
       "initial",
@@ -15,6 +15,7 @@ const migration = [1, 2, 3, 4, 5, 6]
       "audio_derivatives",
       "audio_processing_jobs",
       "recording_upload_sessions",
+      "audio_processing_control",
     ][number - 1]}.sql`),
     "utf8",
   ))

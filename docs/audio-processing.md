@@ -57,7 +57,7 @@ The conversion core is a small Python module that invokes FFmpeg without contain
 - The separately authorized D1 phase requires the reviewed plan hash, complete upload state, a fresh verification of every planned R2 object, and the already-applied derivative-provenance migration. It submits one guarded import whose live row/revision preconditions and final relationship reconciliation fail the whole database transaction if the catalog has diverged. It never applies schema migrations automatically.
 - R2 and D1 cannot share one cross-service transaction. If upload succeeds but D1 is rejected, the new objects remain private and unreferenced; the saved state and idempotent guards make review and retry safe without deleting or replacing source media.
 - A later HTTP adapter handles rare new uploads on a scale-to-zero Google Cloud Run service.
-- The Cloudflare Worker remains responsible for authorization, D1/R2 state, expiring job-scoped transfer authorization, retry orchestration, and atomic finalization.
+- The Cloudflare Worker now implements the local control-plane half: separate processor authentication, FIFO pending-job claim, one-hour leases, expired-lease recovery, operation-scoped transfer authorization, immutable derivative attempts, independent R2 byte verification, privacy-safe failure state, explicit editor retry, and atomic finalization.
 - The hosted service receives no permanent public media URL and should not require broad R2 credentials.
 
 The hosted boundary is schema-versioned and binds each request to an opaque job,
@@ -75,3 +75,34 @@ must reject or revalidate every redirect against the same allowlist rather than
 following an allowlisted URL to an arbitrary host.
 
 Cloud Run project creation, billing activation, secrets, and deployment remain separate owner-approved external actions after local conversion behavior is tested.
+
+## Worker processing control plane
+
+The processor routes deliberately bypass end-user Cloudflare Access handling but
+do not become public application APIs. Claim, result, and failure requests
+require a high-entropy `AUDIO_PROCESSOR_TOKEN` secret; transfer routes require an
+opaque job/attempt/operation-scoped capability. The public application origin is
+an explicit HTTPS-only `AUDIO_PROCESSOR_TRANSFER_ORIGIN`. Neither value belongs
+in `wrangler.jsonc`, tracked logs, browser state, or result bodies.
+
+A successful claim returns the already-approved hosted request nested with a
+result URL and failure URL. The four URL tokens contain the random lease plus an
+HMAC over job, attempt, and operation. D1 stores only the lease hash. The source
+and derivative resources therefore differ both by path and cryptographic scope;
+editing one path cannot grant another operation. A claim response contains no
+filename, object key, Song/Recording/media ID, or long-lived processor secret.
+
+Derivative upload is streaming, bounded to the original upload ceiling, and
+create-only at `recordings/playback/pending/{job}/attempt-{n}.mp3`. Repeating a
+completed PUT is harmless and cannot overwrite the first attempt. Before result
+finalization, the Worker streams and hashes the exact original again and hashes
+the derivative when one is selected. A derivative that is not yet readable
+leaves the lease running for result retry; wrong bytes fail the Recording/job and
+remain private and unreferenced. Direct-original and derivative success each use
+one D1 batch whose final job guard rolls every catalog change back unless the
+Recording, playback media, and provenance graph is complete. A response lost
+after commit is reconciled from the succeeded job and returns idempotently.
+
+This implementation does not choose how the scale-to-zero adapter is invoked.
+No processor token/origin is configured in staging, and no Cloud Run service,
+scheduler, credentials, infrastructure, or deployment is part of this slice.

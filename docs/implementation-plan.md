@@ -36,6 +36,16 @@ processing Recording, copied credits, and durable job only for a nonduplicate
 stored upload. Readiness still requires independently verified hosted-processing
 output; processing originals are not exposed as playback media.
 
+The Worker-side processing control plane is now implemented and tested locally.
+A separately configured processor can claim one pending job, receive an expiring
+lease plus operation-bound same-origin transfer capabilities, stream the exact
+private source, and immutably upload one derivative attempt. The Worker accepts
+only a strict policy/job/source-bound result, independently re-hashes stored
+source and derivative bytes, and atomically records provenance, playback
+readiness, and job success. Safe failures are durable and editor-retryable. No
+processor secret/origin has been configured, no hosted adapter or scheduler has
+been created, and none of this local slice has been deployed to staging.
+
 Proposed application tooling:
 
 - React + TypeScript + Vite for the interface;

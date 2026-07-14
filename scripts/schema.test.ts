@@ -10,7 +10,8 @@ const songWritesMigration = readFileSync(resolve("migrations/0003_song_writes.sq
 const audioDerivativesMigration = readFileSync(resolve("migrations/0004_audio_derivatives.sql"), "utf8");
 const audioProcessingJobsMigration = readFileSync(resolve("migrations/0005_audio_processing_jobs.sql"), "utf8");
 const recordingUploadSessionsMigration = readFileSync(resolve("migrations/0006_recording_upload_sessions.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}`;
+const audioProcessingControlMigration = readFileSync(resolve("migrations/0007_audio_processing_control.sql"), "utf8");
+const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}`;
 const timestamp = "2026-07-12T00:00:00.000Z";
 
 function runSql(sql: string): string {
@@ -24,7 +25,7 @@ function runSql(sql: string): string {
 function migrateLegacy(beforeMigration: string, afterMigration: string): string {
   return execFileSync("sqlite3", [":memory:"], {
     encoding: "utf8",
-    input: `${initialMigration}\n${beforeMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${afterMigration}`,
+    input: `${initialMigration}\n${beforeMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${afterMigration}`,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -377,6 +378,56 @@ describe("initial database schema", () => {
       SELECT status || '|' || playback_kind FROM audio_processing_jobs;
     `);
     expect(output).toBe("succeeded|original\n");
+  });
+
+  it("rejects expired leases and pending retries whose exact source is not processing", () => {
+    const seed = `
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, byte_size, sha256, kind, created_at, created_by
+      ) VALUES (
+        'media-1', 'recordings/new/original', 'recording.bin', 100,
+        '${"a".repeat(64)}', 'original_audio', '${timestamp}', 'test'
+      );
+      INSERT INTO recordings (
+        id, song_id, original_media_id, description, normalized_description,
+        processing_state, created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'recording-1', 'song-1', 'media-1', 'Recording 1', 'recording 1',
+        'processing', '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      INSERT INTO audio_processing_jobs (
+        id, recording_id, source_media_id, source_sha256, source_byte_size,
+        policy_id, status, created_at, updated_at
+      ) VALUES (
+        'job-1', 'recording-1', 'media-1', '${"a".repeat(64)}', 100,
+        'mp3-v1-libmp3lame-q2', 'pending', '${timestamp}', '${timestamp}'
+      );
+    `;
+    expect(() => runSql(`${seed}
+      UPDATE audio_processing_jobs
+      SET status = 'running', attempt_count = 1,
+          lease_token_hash = '${"b".repeat(64)}',
+          lease_expires_at = '2026-07-11T23:59:00.000Z'
+      WHERE id = 'job-1';
+    `)).toThrow(/invalid_audio_processing_job_lease/);
+
+    expect(() => runSql(`${seed}
+      UPDATE audio_processing_jobs
+      SET status = 'running', attempt_count = 1,
+          lease_token_hash = '${"b".repeat(64)}',
+          lease_expires_at = '2026-07-12T01:00:00.000Z'
+      WHERE id = 'job-1';
+      UPDATE recordings
+      SET processing_state = 'failed', processing_error = 'test_failure'
+      WHERE id = 'recording-1';
+      UPDATE audio_processing_jobs
+      SET status = 'pending', lease_token_hash = NULL, lease_expires_at = NULL
+      WHERE id = 'job-1';
+    `)).toThrow(/invalid_audio_processing_job_pending_source/);
   });
 
   it("losslessly transforms legacy lyrics, Recording metadata, and credit roles", () => {

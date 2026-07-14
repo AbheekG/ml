@@ -2,7 +2,29 @@ import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { verifyWithJwks } from "hono/jwt";
 import { loadOfflineLibrary } from "./offline-library";
-import { AUDIO_PROCESSING_POLICY_ID } from "./audio-processing-jobs";
+import {
+  AUDIO_PROCESSING_LEASE_MS,
+  MAX_AUDIO_DERIVATIVE_BYTES,
+  MAX_AUDIO_PROCESSING_RESULT_BYTES,
+  audioProcessingDerivativeObjectKey,
+  buildAudioProcessingCapabilityUrl,
+  createAudioProcessingCapabilityToken,
+  createAudioProcessingLeaseToken,
+  hashAudioProcessingToken,
+  normalizeProcessorTransferOrigin,
+  parseAudioProcessingFailure,
+  parseBearerToken,
+  processorTokenMatches,
+  verifyAudioProcessingCapabilityToken,
+  type AudioProcessingCapabilityOperation,
+} from "./audio-processing-control";
+import {
+  AUDIO_PROCESSING_POLICY_ID,
+  hostedResultMatchesAudioProcessingJob,
+  parseVerifiedHostedResult,
+  type AudioProcessingJobStatus,
+  type VerifiedHostedResult,
+} from "./audio-processing-jobs";
 import {
   parseLookupCreate,
   parseLookupKind,
@@ -68,6 +90,8 @@ type Bindings = {
   ACCESS_ISSUER: string;
   ACCESS_JWKS_URL: string;
   LOCAL_ROLE?: AppRole;
+  AUDIO_PROCESSOR_TOKEN?: string;
+  AUDIO_PROCESSOR_TRANSFER_ORIGIN?: string;
 };
 
 type Variables = {
@@ -206,6 +230,31 @@ type FinalizedRecordingRow = {
   id: string;
   revision: number;
   processingState: "processing" | "ready" | "failed";
+};
+
+type AudioProcessingJobRow = {
+  id: string;
+  recordingId: string;
+  songId: string;
+  sourceMediaId: string;
+  sourceObjectKey: string;
+  sourceMediaState: "active" | "trashed";
+  sourceSha256: string;
+  sourceByteSize: number;
+  policyId: typeof AUDIO_PROCESSING_POLICY_ID;
+  status: AudioProcessingJobStatus;
+  attemptCount: number;
+  leaseTokenHash: string | null;
+  leaseExpiresAt: string | null;
+  playbackKind: "original" | "derivative" | null;
+  derivativeMediaId: string | null;
+  derivativeObjectKey: string | null;
+  derivativeSha256: string | null;
+  derivativeByteSize: number | null;
+  errorCode: string | null;
+  recordingRevision: number;
+  recordingProcessingState: "processing" | "ready" | "failed";
+  recordingTrashedAt: string | null;
 };
 
 type SongStateRow = {
@@ -437,6 +486,183 @@ async function loadFinalizedRecording(
     FROM recordings
     WHERE id = ? AND song_id = ?
   `).bind(session.recordingId, session.songId).first<FinalizedRecordingRow>();
+}
+
+async function loadAudioProcessingJob(
+  database: D1Database,
+  jobId: string,
+): Promise<AudioProcessingJobRow | null> {
+  return database.prepare(`
+    SELECT
+      audio_processing_jobs.id,
+      audio_processing_jobs.recording_id AS recordingId,
+      recordings.song_id AS songId,
+      audio_processing_jobs.source_media_id AS sourceMediaId,
+      source_media.object_key AS sourceObjectKey,
+      source_media.state AS sourceMediaState,
+      audio_processing_jobs.source_sha256 AS sourceSha256,
+      audio_processing_jobs.source_byte_size AS sourceByteSize,
+      audio_processing_jobs.policy_id AS policyId,
+      audio_processing_jobs.status,
+      audio_processing_jobs.attempt_count AS attemptCount,
+      audio_processing_jobs.lease_token_hash AS leaseTokenHash,
+      audio_processing_jobs.lease_expires_at AS leaseExpiresAt,
+      audio_processing_jobs.playback_kind AS playbackKind,
+      audio_processing_jobs.derivative_media_id AS derivativeMediaId,
+      derivative_media.object_key AS derivativeObjectKey,
+      derivative_media.sha256 AS derivativeSha256,
+      derivative_media.byte_size AS derivativeByteSize,
+      audio_processing_jobs.error_code AS errorCode,
+      recordings.revision AS recordingRevision,
+      recordings.processing_state AS recordingProcessingState,
+      recordings.trashed_at AS recordingTrashedAt
+    FROM audio_processing_jobs
+    JOIN recordings ON recordings.id = audio_processing_jobs.recording_id
+    JOIN media_objects AS source_media
+      ON source_media.id = audio_processing_jobs.source_media_id
+    LEFT JOIN media_objects AS derivative_media
+      ON derivative_media.id = audio_processing_jobs.derivative_media_id
+    WHERE audio_processing_jobs.id = ?
+  `).bind(jobId).first<AudioProcessingJobRow>();
+}
+
+async function loadAudioProcessingJobByRecording(
+  database: D1Database,
+  recordingId: string,
+): Promise<AudioProcessingJobRow | null> {
+  const job = await database.prepare(`
+    SELECT id FROM audio_processing_jobs WHERE recording_id = ?
+  `).bind(recordingId).first<{ id: string }>();
+  return job ? loadAudioProcessingJob(database, job.id) : null;
+}
+
+async function audioProcessorAuthorization(
+  authorization: string | undefined,
+  configuredToken: string | undefined,
+): Promise<"authorized" | "unauthorized" | "unconfigured"> {
+  if (!configuredToken || configuredToken.length < 32) return "unconfigured";
+  return await processorTokenMatches(parseBearerToken(authorization), configuredToken)
+    ? "authorized"
+    : "unauthorized";
+}
+
+async function audioProcessingLeaseMatches(
+  job: AudioProcessingJobRow,
+  capabilityToken: string | null,
+  operation: AudioProcessingCapabilityOperation,
+  processorToken: string | undefined,
+  now: string,
+): Promise<boolean> {
+  const leaseToken = await verifyAudioProcessingCapabilityToken(
+    capabilityToken, job.id, job.attemptCount, operation, processorToken,
+  );
+  if (
+    !leaseToken
+    || job.status !== "running"
+    || job.policyId !== AUDIO_PROCESSING_POLICY_ID
+    || job.recordingProcessingState !== "processing"
+    || job.recordingTrashedAt !== null
+    || job.sourceMediaState !== "active"
+    || !job.leaseTokenHash
+    || !job.leaseExpiresAt
+    || job.leaseExpiresAt <= now
+  ) return false;
+  return await hashAudioProcessingToken(leaseToken) === job.leaseTokenHash;
+}
+
+type StoredAudioVerification =
+  | { status: "verified" }
+  | { status: "missing" }
+  | { status: "mismatch" }
+  | { status: "unavailable" };
+
+async function verifyStoredAudioObject(
+  bucket: R2Bucket,
+  objectKey: string,
+  expectedSha256: string,
+  expectedByteSize: number,
+): Promise<StoredAudioVerification> {
+  let object: R2ObjectBody | null;
+  try {
+    object = await bucket.get(objectKey);
+  } catch {
+    return { status: "unavailable" };
+  }
+  if (!object) return { status: "missing" };
+  if (object.size !== expectedByteSize) return { status: "mismatch" };
+  try {
+    const fingerprint = await sha256RecordingStream(object.body);
+    return fingerprint.byteSize === expectedByteSize && fingerprint.sha256 === expectedSha256
+      ? { status: "verified" }
+      : { status: "mismatch" };
+  } catch {
+    return { status: "unavailable" };
+  }
+}
+
+function succeededAudioProcessingJobMatches(
+  job: AudioProcessingJobRow,
+  result: VerifiedHostedResult,
+): boolean {
+  if (
+    job.status !== "succeeded"
+    || !hostedResultMatchesAudioProcessingJob(result, job)
+    || job.playbackKind !== result.playbackKind
+  ) return false;
+  if (result.playbackKind === "original") {
+    return job.derivativeMediaId === null
+      && result.derivativeSha256 === null
+      && result.derivativeByteSize === null;
+  }
+  return job.derivativeMediaId !== null
+    && job.derivativeSha256 === result.derivativeSha256
+    && job.derivativeByteSize === result.derivativeByteSize;
+}
+
+async function failAudioProcessingJob(
+  database: D1Database,
+  job: AudioProcessingJobRow,
+  leaseTokenHash: string,
+  errorCode: string,
+): Promise<boolean> {
+  const timestamp = new Date().toISOString();
+  const results = await database.batch([
+    database.prepare(`
+      UPDATE recordings
+      SET processing_state = 'failed', processing_error = ?,
+          revision = revision + 1, updated_at = ?, updated_by = 'audio-processor'
+      WHERE id = ? AND processing_state = 'processing'
+        AND processing_error IS NULL AND trashed_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM audio_processing_jobs
+          WHERE id = ? AND recording_id = recordings.id
+            AND status = 'running' AND attempt_count = ?
+            AND lease_token_hash = ?
+        )
+    `).bind(
+      errorCode, timestamp, job.recordingId,
+      job.id, job.attemptCount, leaseTokenHash,
+    ),
+    database.prepare(`
+      UPDATE songs
+      SET updated_at = ?, updated_by = 'audio-processor'
+      WHERE id = ? AND trashed_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM recordings
+          WHERE id = ? AND song_id = songs.id
+            AND processing_state = 'failed' AND processing_error = ?
+            AND trashed_at IS NULL
+        )
+    `).bind(timestamp, job.songId, job.recordingId, errorCode),
+    database.prepare(`
+      UPDATE audio_processing_jobs
+      SET status = 'failed', lease_token_hash = NULL, lease_expires_at = NULL,
+          error_code = ?, updated_at = ?
+      WHERE id = ? AND status = 'running' AND attempt_count = ?
+        AND lease_token_hash = ?
+    `).bind(errorCode, timestamp, job.id, job.attemptCount, leaseTokenHash),
+  ]);
+  return results[2].meta.changes === 1;
 }
 
 async function provisionRecordingMultipartUpload(
@@ -687,6 +913,10 @@ export function parseByteRange(value: string, size: number): { offset: number; l
 export const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 app.use("/api/*", async (context, next) => {
+  if (context.req.path.startsWith("/api/processing/")) {
+    await next();
+    return;
+  }
   if (context.env.AUTH_MODE === "local") {
     context.set("accessIdentity", { email: "local@example.invalid", subject: "local-development" });
     context.set("appUser", {
@@ -745,6 +975,528 @@ app.use("/api/*", async (context, next) => {
   }
 
   await next();
+});
+
+app.post("/api/processing/jobs/claim", async (context) => {
+  const authorization = await audioProcessorAuthorization(
+    context.req.header("Authorization"), context.env.AUDIO_PROCESSOR_TOKEN,
+  );
+  if (authorization === "unconfigured") {
+    return context.json({ error: "audio_processor_not_configured" }, 503);
+  }
+  if (authorization !== "authorized") {
+    return context.json({ error: "audio_processor_authentication_required" }, 401);
+  }
+  const transferOrigin = normalizeProcessorTransferOrigin(
+    context.env.AUDIO_PROCESSOR_TRANSFER_ORIGIN,
+  );
+  if (!transferOrigin) {
+    return context.json({ error: "audio_processor_transfer_origin_not_configured" }, 503);
+  }
+
+  const timestamp = new Date().toISOString();
+  const leaseExpiresAt = new Date(Date.now() + AUDIO_PROCESSING_LEASE_MS).toISOString();
+  const leaseToken = createAudioProcessingLeaseToken();
+  const leaseTokenHash = await hashAudioProcessingToken(leaseToken);
+  let claimed = false;
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        UPDATE audio_processing_jobs
+        SET status = 'pending', lease_token_hash = NULL, lease_expires_at = NULL,
+            updated_at = ?
+        WHERE status = 'running' AND lease_expires_at <= ?
+          AND EXISTS (
+            SELECT 1
+            FROM recordings
+            JOIN media_objects ON media_objects.id = recordings.original_media_id
+            WHERE recordings.id = audio_processing_jobs.recording_id
+              AND recordings.trashed_at IS NULL
+              AND recordings.processing_state = 'processing'
+              AND recordings.processing_error IS NULL
+              AND media_objects.id = audio_processing_jobs.source_media_id
+              AND media_objects.kind = 'original_audio'
+              AND media_objects.state = 'active'
+              AND media_objects.sha256 = audio_processing_jobs.source_sha256
+              AND media_objects.byte_size = audio_processing_jobs.source_byte_size
+          )
+      `).bind(timestamp, timestamp),
+      context.env.DB.prepare(`
+        UPDATE audio_processing_jobs
+        SET status = 'running', attempt_count = attempt_count + 1,
+            lease_token_hash = ?, lease_expires_at = ?, updated_at = ?
+        WHERE id = (
+          SELECT audio_processing_jobs.id
+          FROM audio_processing_jobs
+          JOIN recordings ON recordings.id = audio_processing_jobs.recording_id
+          JOIN media_objects ON media_objects.id = audio_processing_jobs.source_media_id
+          WHERE audio_processing_jobs.status = 'pending'
+            AND audio_processing_jobs.policy_id = ?
+            AND audio_processing_jobs.source_byte_size <= ?
+            AND recordings.trashed_at IS NULL
+            AND recordings.processing_state = 'processing'
+            AND recordings.processing_error IS NULL
+            AND recordings.original_media_id = audio_processing_jobs.source_media_id
+            AND media_objects.kind = 'original_audio'
+            AND media_objects.state = 'active'
+            AND media_objects.sha256 = audio_processing_jobs.source_sha256
+            AND media_objects.byte_size = audio_processing_jobs.source_byte_size
+          ORDER BY audio_processing_jobs.created_at, audio_processing_jobs.id
+          LIMIT 1
+        ) AND status = 'pending'
+      `).bind(
+        leaseTokenHash, leaseExpiresAt, timestamp,
+        AUDIO_PROCESSING_POLICY_ID, MAX_AUDIO_DERIVATIVE_BYTES,
+      ),
+    ]);
+    claimed = results[1].meta.changes === 1;
+  } catch {
+    return context.json({ error: "audio_processing_claim_failed" }, 503);
+  }
+  if (!claimed) return new Response(null, { status: 204 });
+
+  const claimedId = await context.env.DB.prepare(`
+    SELECT id FROM audio_processing_jobs
+    WHERE status = 'running' AND lease_token_hash = ? AND lease_expires_at = ?
+  `).bind(leaseTokenHash, leaseExpiresAt).first<{ id: string }>();
+  if (!claimedId) return context.json({ error: "audio_processing_claim_incomplete" }, 503);
+  const job = await loadAudioProcessingJob(context.env.DB, claimedId.id);
+  if (!job || job.policyId !== AUDIO_PROCESSING_POLICY_ID) {
+    return context.json({ error: "audio_processing_claim_incomplete" }, 503);
+  }
+  const derivativeObjectKey = audioProcessingDerivativeObjectKey(job.id, job.attemptCount);
+  if (!derivativeObjectKey) {
+    return context.json({ error: "audio_processing_claim_invalid" }, 500);
+  }
+  const [sourceCapability, derivativeCapability, resultCapability, failureCapability] =
+    await Promise.all([
+      createAudioProcessingCapabilityToken(
+        leaseToken, job.id, job.attemptCount, "source", context.env.AUDIO_PROCESSOR_TOKEN!,
+      ),
+      createAudioProcessingCapabilityToken(
+        leaseToken, job.id, job.attemptCount, "derivative", context.env.AUDIO_PROCESSOR_TOKEN!,
+      ),
+      createAudioProcessingCapabilityToken(
+        leaseToken, job.id, job.attemptCount, "result", context.env.AUDIO_PROCESSOR_TOKEN!,
+      ),
+      createAudioProcessingCapabilityToken(
+        leaseToken, job.id, job.attemptCount, "failure", context.env.AUDIO_PROCESSOR_TOKEN!,
+      ),
+    ]);
+
+  context.header("Cache-Control", "private, no-store");
+  context.header("Referrer-Policy", "no-referrer");
+  return context.json({
+    schemaVersion: 1,
+    leaseExpiresAt,
+    processingRequest: {
+      schemaVersion: 1,
+      jobId: job.id,
+      policyId: job.policyId,
+      sourceSha256: job.sourceSha256,
+      sourceByteSize: job.sourceByteSize,
+      sourceDownloadUrl: buildAudioProcessingCapabilityUrl(
+        transferOrigin, job.id, "source", sourceCapability,
+      ),
+      derivativeUploadUrl: buildAudioProcessingCapabilityUrl(
+        transferOrigin, job.id, "derivative", derivativeCapability,
+      ),
+    },
+    resultUrl: buildAudioProcessingCapabilityUrl(
+      transferOrigin, job.id, "result", resultCapability,
+    ),
+    failureUrl: buildAudioProcessingCapabilityUrl(
+      transferOrigin, job.id, "failure", failureCapability,
+    ),
+  });
+});
+
+app.get("/api/processing/jobs/:jobId/source", async (context) => {
+  const job = await loadAudioProcessingJob(context.env.DB, context.req.param("jobId"));
+  const now = new Date().toISOString();
+  if (!job || !await audioProcessingLeaseMatches(
+    job, context.req.query("token") ?? null, "source",
+    context.env.AUDIO_PROCESSOR_TOKEN, now,
+  )) {
+    return context.json({ error: "audio_processing_capability_invalid" }, 401);
+  }
+  let object: R2ObjectBody | null;
+  try {
+    object = await context.env.MEDIA.get(job.sourceObjectKey);
+  } catch {
+    return context.json({ error: "audio_processing_storage_unavailable" }, 503);
+  }
+  if (!object || object.size !== job.sourceByteSize) {
+    return context.json({ error: "audio_processing_source_unavailable" }, 503);
+  }
+  const headers = new Headers({
+    "Content-Type": "application/octet-stream",
+    "Content-Length": String(object.size),
+    "Cache-Control": "private, no-store",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+  });
+  return new Response(object.body, { headers });
+});
+
+app.put("/api/processing/jobs/:jobId/derivative", async (context) => {
+  const job = await loadAudioProcessingJob(context.env.DB, context.req.param("jobId"));
+  const now = new Date().toISOString();
+  if (!job || !await audioProcessingLeaseMatches(
+    job, context.req.query("token") ?? null, "derivative",
+    context.env.AUDIO_PROCESSOR_TOKEN, now,
+  )) {
+    return context.json({ error: "audio_processing_capability_invalid" }, 401);
+  }
+  const contentLengthValue = context.req.header("Content-Length") ?? "";
+  if (!/^\d+$/u.test(contentLengthValue)) {
+    return context.json({ error: "audio_processing_derivative_length_required" }, 411);
+  }
+  const contentLength = Number(contentLengthValue);
+  if (
+    !Number.isSafeInteger(contentLength)
+    || contentLength < 1
+    || contentLength > MAX_AUDIO_DERIVATIVE_BYTES
+  ) {
+    return context.json({ error: "audio_processing_derivative_too_large" }, 413);
+  }
+  if (!context.req.raw.body) {
+    return context.json({ error: "audio_processing_derivative_required" }, 400);
+  }
+  const objectKey = audioProcessingDerivativeObjectKey(job.id, job.attemptCount);
+  if (!objectKey) return context.json({ error: "audio_processing_job_invalid" }, 500);
+
+  let stored: R2Object | null;
+  try {
+    stored = await context.env.MEDIA.put(objectKey, context.req.raw.body, {
+      onlyIf: { etagDoesNotMatch: "*" },
+      httpMetadata: { contentType: "audio/mpeg" },
+    });
+  } catch {
+    return context.json({ error: "audio_processing_storage_unavailable" }, 503);
+  }
+  if (!stored) {
+    return new Response(null, {
+      status: 204,
+      headers: { "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" },
+    });
+  }
+  if (stored.size !== contentLength) {
+    return context.json({ error: "audio_processing_derivative_store_mismatch" }, 500);
+  }
+  return new Response(null, {
+    status: 201,
+    headers: { "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" },
+  });
+});
+
+app.post("/api/processing/jobs/:jobId/result", async (context) => {
+  const authorization = await audioProcessorAuthorization(
+    context.req.header("Authorization"), context.env.AUDIO_PROCESSOR_TOKEN,
+  );
+  if (authorization === "unconfigured") {
+    return context.json({ error: "audio_processor_not_configured" }, 503);
+  }
+  if (authorization !== "authorized") {
+    return context.json({ error: "audio_processor_authentication_required" }, 401);
+  }
+  context.header("Cache-Control", "private, no-store");
+  context.header("Referrer-Policy", "no-referrer");
+  const contentLengthValue = context.req.header("Content-Length") ?? "";
+  if (!/^\d+$/u.test(contentLengthValue)) {
+    return context.json({ error: "audio_processing_result_length_required" }, 411);
+  }
+  const contentLength = Number(contentLengthValue);
+  if (
+    !Number.isSafeInteger(contentLength)
+    || contentLength < 1
+    || contentLength > MAX_AUDIO_PROCESSING_RESULT_BYTES
+  ) {
+    return context.json({ error: "audio_processing_result_too_large" }, 413);
+  }
+  let body: unknown;
+  try {
+    const text = await context.req.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_AUDIO_PROCESSING_RESULT_BYTES) {
+      return context.json({ error: "audio_processing_result_too_large" }, 413);
+    }
+    body = JSON.parse(text);
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const result = parseVerifiedHostedResult(body);
+  const jobId = context.req.param("jobId");
+  if (!result || result.jobId !== jobId) {
+    return context.json({ error: "invalid_audio_processing_result" }, 400);
+  }
+  let job = await loadAudioProcessingJob(context.env.DB, jobId);
+  if (!job) return context.json({ error: "audio_processing_job_not_found" }, 404);
+  if (!hostedResultMatchesAudioProcessingJob(result, job)) {
+    return context.json({ error: "audio_processing_result_mismatch" }, 422);
+  }
+  if (job.status === "succeeded") {
+    return succeededAudioProcessingJobMatches(job, result)
+      ? context.json({ job: { id: job.id, status: job.status, playbackKind: job.playbackKind } })
+      : context.json({ error: "audio_processing_result_conflict" }, 409);
+  }
+  const leaseToken = context.req.query("token") ?? null;
+  const now = new Date().toISOString();
+  if (!await audioProcessingLeaseMatches(
+    job, leaseToken, "result", context.env.AUDIO_PROCESSOR_TOKEN, now,
+  ) || !job.leaseTokenHash) {
+    return context.json({ error: "audio_processing_lease_stale" }, 409);
+  }
+  const leaseTokenHash = job.leaseTokenHash;
+
+  const sourceVerification = await verifyStoredAudioObject(
+    context.env.MEDIA, job.sourceObjectKey, job.sourceSha256, job.sourceByteSize,
+  );
+  if (sourceVerification.status === "missing" || sourceVerification.status === "unavailable") {
+    return context.json({ error: "audio_processing_source_unavailable" }, 503);
+  }
+  if (sourceVerification.status === "mismatch") {
+    try {
+      const failed = await failAudioProcessingJob(
+        context.env.DB, job, leaseTokenHash, "source_verification_failed",
+      );
+      if (!failed) {
+        return context.json({ error: "audio_processing_result_conflict" }, 409);
+      }
+    } catch {
+      return context.json({ error: "audio_processing_failure_checkpoint_failed" }, 503);
+    }
+    return context.json({ error: "audio_processing_source_verification_failed" }, 422);
+  }
+
+  const timestamp = new Date().toISOString();
+  let statements: D1PreparedStatement[];
+  let finalStatementIndex: number;
+  if (result.playbackKind === "original") {
+    statements = [
+      context.env.DB.prepare(`
+        UPDATE media_objects
+        SET mime_type = 'audio/mpeg'
+        WHERE id = ? AND object_key = ? AND kind = 'original_audio'
+          AND state = 'active' AND sha256 = ? AND byte_size = ?
+      `).bind(
+        job.sourceMediaId, job.sourceObjectKey, job.sourceSha256, job.sourceByteSize,
+      ),
+      context.env.DB.prepare(`
+        UPDATE recordings
+        SET playback_media_id = ?, processing_state = 'ready', processing_error = NULL,
+            revision = revision + 1, updated_at = ?, updated_by = 'audio-processor'
+        WHERE id = ? AND original_media_id = ? AND processing_state = 'processing'
+          AND processing_error IS NULL AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM media_objects
+            WHERE id = ? AND kind = 'original_audio' AND state = 'active'
+              AND sha256 = ? AND byte_size = ? AND mime_type = 'audio/mpeg'
+          )
+      `).bind(
+        job.sourceMediaId, timestamp, job.recordingId, job.sourceMediaId,
+        job.sourceMediaId, job.sourceSha256, job.sourceByteSize,
+      ),
+      context.env.DB.prepare(`
+        UPDATE songs SET updated_at = ?, updated_by = 'audio-processor'
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM recordings
+            WHERE id = ? AND song_id = songs.id AND processing_state = 'ready'
+              AND playback_media_id = ? AND trashed_at IS NULL
+          )
+      `).bind(timestamp, job.songId, job.recordingId, job.sourceMediaId),
+      context.env.DB.prepare(`
+        UPDATE audio_processing_jobs
+        SET status = CASE
+              WHEN status = 'running' AND attempt_count = ? AND lease_token_hash = ?
+              THEN 'succeeded' ELSE 'stale_result'
+            END,
+            lease_token_hash = NULL, lease_expires_at = NULL,
+            playback_kind = 'original', derivative_media_id = NULL,
+            error_code = NULL, updated_at = ?
+        WHERE id = ?
+      `).bind(job.attemptCount, leaseTokenHash, timestamp, job.id),
+    ];
+    finalStatementIndex = 3;
+  } else {
+    if (
+      !result.derivativeSha256
+      || !result.derivativeByteSize
+      || result.derivativeByteSize > MAX_AUDIO_DERIVATIVE_BYTES
+    ) {
+      return context.json({ error: "invalid_audio_processing_result" }, 400);
+    }
+    const derivativeObjectKey = audioProcessingDerivativeObjectKey(job.id, job.attemptCount);
+    if (!derivativeObjectKey) return context.json({ error: "audio_processing_job_invalid" }, 500);
+    const derivativeVerification = await verifyStoredAudioObject(
+      context.env.MEDIA,
+      derivativeObjectKey,
+      result.derivativeSha256,
+      result.derivativeByteSize,
+    );
+    if (derivativeVerification.status === "missing") {
+      return context.json({ error: "audio_processing_derivative_not_available" }, 409);
+    }
+    if (derivativeVerification.status === "unavailable") {
+      return context.json({ error: "audio_processing_storage_unavailable" }, 503);
+    }
+    if (derivativeVerification.status === "mismatch") {
+      try {
+        const failed = await failAudioProcessingJob(
+          context.env.DB, job, leaseTokenHash, "derivative_verification_failed",
+        );
+        if (!failed) {
+          return context.json({ error: "audio_processing_result_conflict" }, 409);
+        }
+      } catch {
+        return context.json({ error: "audio_processing_failure_checkpoint_failed" }, 503);
+      }
+      return context.json({ error: "audio_processing_derivative_verification_failed" }, 422);
+    }
+    const derivativeMediaId = crypto.randomUUID();
+    statements = [
+      context.env.DB.prepare(`
+        INSERT INTO media_objects (
+          id, object_key, original_filename, mime_type, byte_size, sha256,
+          kind, state, created_at, created_by
+        ) VALUES (?, ?, 'playback.mp3', 'audio/mpeg', ?, ?,
+                  'playback_audio', 'active', ?, 'audio-processor')
+      `).bind(
+        derivativeMediaId, derivativeObjectKey,
+        result.derivativeByteSize, result.derivativeSha256, timestamp,
+      ),
+      context.env.DB.prepare(`
+        INSERT INTO audio_derivatives (
+          playback_media_id, source_media_id, policy_id,
+          source_sha256, source_byte_size,
+          derivative_sha256, derivative_byte_size
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        derivativeMediaId, job.sourceMediaId, job.policyId,
+        job.sourceSha256, job.sourceByteSize,
+        result.derivativeSha256, result.derivativeByteSize,
+      ),
+      context.env.DB.prepare(`
+        UPDATE recordings
+        SET playback_media_id = ?, processing_state = 'ready', processing_error = NULL,
+            revision = revision + 1, updated_at = ?, updated_by = 'audio-processor'
+        WHERE id = ? AND original_media_id = ? AND processing_state = 'processing'
+          AND processing_error IS NULL AND trashed_at IS NULL
+      `).bind(derivativeMediaId, timestamp, job.recordingId, job.sourceMediaId),
+      context.env.DB.prepare(`
+        UPDATE songs SET updated_at = ?, updated_by = 'audio-processor'
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM recordings
+            WHERE id = ? AND song_id = songs.id AND processing_state = 'ready'
+              AND playback_media_id = ? AND trashed_at IS NULL
+          )
+      `).bind(timestamp, job.songId, job.recordingId, derivativeMediaId),
+      context.env.DB.prepare(`
+        UPDATE audio_processing_jobs
+        SET status = CASE
+              WHEN status = 'running' AND attempt_count = ? AND lease_token_hash = ?
+              THEN 'succeeded' ELSE 'stale_result'
+            END,
+            lease_token_hash = NULL, lease_expires_at = NULL,
+            playback_kind = 'derivative', derivative_media_id = ?,
+            error_code = NULL, updated_at = ?
+        WHERE id = ?
+      `).bind(
+        job.attemptCount, leaseTokenHash, derivativeMediaId, timestamp, job.id,
+      ),
+    ];
+    finalStatementIndex = 4;
+  }
+
+  try {
+    const results = await context.env.DB.batch(statements);
+    if (results[finalStatementIndex].meta.changes !== 1) {
+      return context.json({ error: "audio_processing_result_conflict" }, 409);
+    }
+  } catch {
+    job = await loadAudioProcessingJob(context.env.DB, job.id);
+    if (job && succeededAudioProcessingJobMatches(job, result)) {
+      return context.json({
+        job: { id: job.id, status: job.status, playbackKind: job.playbackKind },
+      });
+    }
+    return context.json({ error: "audio_processing_finalization_failed" }, 500);
+  }
+  job = await loadAudioProcessingJob(context.env.DB, job.id);
+  if (!job || !succeededAudioProcessingJobMatches(job, result)) {
+    return context.json({ error: "audio_processing_finalization_incomplete" }, 500);
+  }
+  return context.json({
+    job: { id: job.id, status: job.status, playbackKind: job.playbackKind },
+  });
+});
+
+app.post("/api/processing/jobs/:jobId/failure", async (context) => {
+  const authorization = await audioProcessorAuthorization(
+    context.req.header("Authorization"), context.env.AUDIO_PROCESSOR_TOKEN,
+  );
+  if (authorization === "unconfigured") {
+    return context.json({ error: "audio_processor_not_configured" }, 503);
+  }
+  if (authorization !== "authorized") {
+    return context.json({ error: "audio_processor_authentication_required" }, 401);
+  }
+  context.header("Cache-Control", "private, no-store");
+  context.header("Referrer-Policy", "no-referrer");
+  const contentLengthValue = context.req.header("Content-Length") ?? "";
+  if (!/^\d+$/u.test(contentLengthValue)) {
+    return context.json({ error: "audio_processing_failure_length_required" }, 411);
+  }
+  const contentLength = Number(contentLengthValue);
+  if (
+    !Number.isSafeInteger(contentLength)
+    || contentLength < 1
+    || contentLength > MAX_AUDIO_PROCESSING_RESULT_BYTES
+  ) {
+    return context.json({ error: "audio_processing_failure_too_large" }, 413);
+  }
+  let body: unknown;
+  try {
+    const text = await context.req.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_AUDIO_PROCESSING_RESULT_BYTES) {
+      return context.json({ error: "audio_processing_failure_too_large" }, 413);
+    }
+    body = JSON.parse(text);
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const failure = parseAudioProcessingFailure(body);
+  if (!failure) return context.json({ error: "invalid_audio_processing_failure" }, 400);
+  const job = await loadAudioProcessingJob(context.env.DB, context.req.param("jobId"));
+  if (!job) return context.json({ error: "audio_processing_job_not_found" }, 404);
+  if (job.status === "failed") {
+    return job.errorCode === failure.errorCode
+      ? context.json({ job: { id: job.id, status: job.status, errorCode: job.errorCode } })
+      : context.json({ error: "audio_processing_failure_conflict" }, 409);
+  }
+  const now = new Date().toISOString();
+  if (
+    !await audioProcessingLeaseMatches(
+      job, context.req.query("token") ?? null, "failure",
+      context.env.AUDIO_PROCESSOR_TOKEN, now,
+    )
+    || !job.leaseTokenHash
+  ) {
+    return context.json({ error: "audio_processing_lease_stale" }, 409);
+  }
+  try {
+    if (!await failAudioProcessingJob(
+      context.env.DB, job, job.leaseTokenHash, failure.errorCode,
+    )) {
+      return context.json({ error: "audio_processing_failure_conflict" }, 409);
+    }
+  } catch {
+    return context.json({ error: "audio_processing_failure_checkpoint_failed" }, 503);
+  }
+  return context.json({
+    job: { id: job.id, status: "failed", errorCode: failure.errorCode },
+  });
 });
 
 app.get("/api/health", (context) => {
@@ -806,6 +1558,85 @@ app.get("/api/recording-editor/options", requireRole("editor"), async (context) 
     ORDER BY full_name COLLATE NOCASE, id
   `).all<{ id: string; fullName: string }>();
   return context.json({ people: people.results });
+});
+
+app.post("/api/recordings/:recordingId/retry-processing", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const retry = parseRecordingRevision(body);
+  if (!retry.success) return context.json({ error: "invalid_audio_processing_retry" }, 400);
+  let job = await loadAudioProcessingJobByRecording(
+    context.env.DB, context.req.param("recordingId"),
+  );
+  if (!job) return context.json({ error: "audio_processing_job_not_found" }, 404);
+  if (job.status === "succeeded") {
+    return context.json({ error: "audio_processing_already_succeeded" }, 409);
+  }
+  if (job.status !== "failed") {
+    return context.json({ error: "audio_processing_already_active" }, 409);
+  }
+  if (job.recordingRevision !== retry.data.revision) {
+    return context.json({ error: "audio_processing_retry_conflict" }, 409);
+  }
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        UPDATE recordings
+        SET processing_state = 'processing', processing_error = NULL,
+            revision = revision + 1, updated_at = ?, updated_by = ?
+        WHERE id = ? AND processing_state = 'failed' AND processing_error = ?
+          AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM audio_processing_jobs
+            WHERE id = ? AND recording_id = recordings.id
+              AND status = 'failed' AND attempt_count = ?
+              AND error_code = recordings.processing_error
+          )
+      `).bind(
+        timestamp, actor, job.recordingId, job.errorCode,
+        job.id, job.attemptCount,
+      ),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM recordings
+            WHERE id = ? AND song_id = songs.id
+              AND processing_state = 'processing' AND processing_error IS NULL
+              AND trashed_at IS NULL
+          )
+      `).bind(timestamp, actor, job.songId, job.recordingId),
+      context.env.DB.prepare(`
+        UPDATE audio_processing_jobs
+        SET status = 'pending', error_code = NULL, updated_at = ?
+        WHERE id = ? AND status = 'failed' AND attempt_count = ?
+      `).bind(timestamp, job.id, job.attemptCount),
+    ]);
+    if (results[2].meta.changes !== 1) {
+      return context.json({ error: "audio_processing_retry_conflict" }, 409);
+    }
+  } catch {
+    return context.json({ error: "audio_processing_retry_failed" }, 500);
+  }
+  job = await loadAudioProcessingJob(context.env.DB, job.id);
+  if (!job || job.status !== "pending" || job.recordingProcessingState !== "processing") {
+    return context.json({ error: "audio_processing_retry_incomplete" }, 500);
+  }
+  return context.json({
+    job: { status: job.status, attemptCount: job.attemptCount },
+    recording: {
+      id: job.recordingId,
+      revision: job.recordingRevision,
+      processingState: job.recordingProcessingState,
+    },
+  });
 });
 
 app.post("/api/songs/:songId/recording-uploads", requireRole("editor"), async (context) => {
