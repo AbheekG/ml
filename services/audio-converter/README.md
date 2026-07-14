@@ -94,3 +94,24 @@ HTTP server, container, cloud credentials, scheduling, or deployment is included
 The separately reviewable proposed run-once Job boundary and its required local
 safeguards are documented in
 [`docs/audio-processing-invocation.md`](../../docs/audio-processing-invocation.md).
+
+## Run-once hosted entrypoint
+
+`music-audio-hosted-run-once` calls the adapter exactly once and emits exactly
+one aggregate JSON record. `no_work` and verified success exit zero; a durably
+reported failure exits one; ambiguous delivery or an incomplete outcome exits
+two for reconciliation. Exceptions, signed URLs, tokens, hashes, IDs, filenames,
+and paths are never logged.
+
+The entrypoint accepts no command-line secret. It requires these settings:
+
+- `AUDIO_PROCESSOR_WORKER_ORIGIN`;
+- `AUDIO_PROCESSOR_ALLOWED_TRANSFER_ORIGINS_JSON`, a nonempty JSON string array;
+- `AUDIO_PROCESSOR_TOKEN_FILE`, an absolute path to a printable 32–512 byte
+  secret file with no trailing newline; and
+- `AUDIO_PROCESSOR_TEMPORARY_ROOT`, an existing absolute private directory.
+
+Bounded timeout, retry, source/derivative/generated-byte, soft-deadline, and
+minimum-lease settings may be overridden only through the documented
+`AUDIO_PROCESSOR_` names enforced in `hosted_entrypoint.py`. An
+`AUDIO_PROCESSOR_TOKEN` environment value and unknown prefixed names are rejected.

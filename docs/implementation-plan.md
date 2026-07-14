@@ -58,9 +58,12 @@ resource, or other hosted invocation mechanism has been created. The accepted
 local design selects a scheduled single-task Cloud Run Job. Its database-enforced
 global running-job gate, three-attempt bounded lease-loss recovery, 45-minute
 monotonic processor deadline, 55-minute lease-remaining floor, and streaming
-generated-output ceiling are now implemented and tested locally. The remaining
-gates are aggregate-only entrypoint behavior and local container/resource
-verification. Every cloud action remains separately owner-approved.
+generated-output ceiling are now implemented and tested locally. A minimal
+run-once entrypoint also loads strict file-secret configuration, emits one
+aggregate-only outcome, and maps success, durable failure, and ambiguous
+reconciliation to tested exit codes. The remaining local gate is pinned non-root
+container/resource verification. Every cloud action remains separately
+owner-approved.
 
 Proposed application tooling:
 

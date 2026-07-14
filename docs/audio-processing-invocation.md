@@ -249,8 +249,9 @@ The smallest safe sequence after this design is accepted is:
 2. processor soft deadline, 55-minute lease-remaining check,
    streaming/generated-output bounds, and deadline tests: implemented locally
    without adding a server or container;
-3. add a minimal run-once entrypoint with strict configuration loading,
-   aggregate logging, and exit-code tests;
+3. minimal run-once entrypoint with strict configuration loading, file-only
+   processor secret, aggregate logging, and exit-code tests: implemented
+   locally;
 4. add and locally test a pinned, non-root FFmpeg container and resource fixture;
 5. separately review exact cloud commands, identities, costs, secret rotation,
    rollback, and staging verification; and

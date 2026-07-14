@@ -74,7 +74,7 @@ capabilities must name different paths, and the eventual HTTP transfer client
 must reject or revalidate every redirect against the same allowlist rather than
 following an allowlisted URL to an arbitrary host.
 
-Cloud Run project creation, billing activation, secrets, scheduling, and deployment remain separate owner-approved external actions after the remaining local entrypoint and container/resource behavior is tested.
+Cloud Run project creation, billing activation, secrets, scheduling, and deployment remain separate owner-approved external actions after the remaining local container/resource behavior is tested.
 
 ## Worker processing control plane
 
@@ -115,6 +115,9 @@ repeated lease-expiry recovery. The adapter enforces a monotonic 45-minute soft
 deadline across transfer, FFmpeg, hashing, upload, and result delivery, requires
 at least 55 minutes of lease remaining, and kills FFmpeg if its generated output
 exceeds the configured ceiling while it is writing. No
-processor token/origin is configured in staging, and no HTTP server, Cloud Run
+processor token/origin is configured in staging. The run-once entrypoint reads
+the token only from a secret file, rejects unknown processor-prefixed settings,
+emits one aggregate-only JSON record, and uses nonzero exits for durable failure
+or reconciliation. No HTTP server, Cloud Run
 Job, scheduler, credentials, infrastructure, or deployment is part of this
 local design.

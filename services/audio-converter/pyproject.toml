@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 [project.scripts]
 music-audio-converter = "audio_converter.cli:main"
 music-audio-batch = "audio_converter.batch_cli:main"
+music-audio-hosted-run-once = "audio_converter.hosted_entrypoint:cli"
 
 [tool.setuptools]
 packages = ["audio_converter"]
