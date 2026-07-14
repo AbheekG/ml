@@ -360,6 +360,80 @@ describe("audio integration R2 phase", () => {
     expect(remote.puts).toHaveLength(callCounts.puts);
   });
 
+  it("retries a temporarily missing uploaded object before checkpointing", async () => {
+    const item = await fixture();
+    const state: IntegrationState = {
+      schemaVersion: 1,
+      planSha256: "a".repeat(64),
+      bucket: "fixture-private-bucket",
+      completed: {},
+    };
+    let uploaded = false;
+    let temporaryMisses = 0;
+    const pauses: number[] = [];
+    const runner: CommandRunner = async (_executable, arguments_) => {
+      const operation = arguments_[2];
+      const fileIndex = arguments_.indexOf("--file");
+      const file = arguments_[fileIndex + 1];
+      if (!file) throw new Error("missing fake file argument");
+      if (operation === "put") {
+        uploaded = true;
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+      if (operation !== "get") throw new Error("unexpected fake operation");
+      if (!uploaded || temporaryMisses < 2) {
+        if (uploaded) temporaryMisses += 1;
+        return { exitCode: 1, stdout: "", stderr: "NoSuchKey" };
+      }
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, item.derivativeBytes);
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+
+    await uploadR2Objects(item.plan, state, {
+      bucket: state.bucket,
+      concurrency: 1,
+      statePath: item.statePath,
+      projectRoot: item.root,
+    }, runner, async (milliseconds) => {
+      pauses.push(milliseconds);
+    });
+
+    expect(pauses).toEqual([1_000, 2_000]);
+    expect(Object.keys(state.completed)).toEqual(["media-playback-fixture"]);
+    expect(JSON.parse(await readFile(item.statePath, "utf8"))).toEqual(state);
+  });
+
+  it("leaves an acknowledged but unreadable upload uncheckpointed", async () => {
+    const item = await fixture();
+    const state: IntegrationState = {
+      schemaVersion: 1,
+      planSha256: "a".repeat(64),
+      bucket: "fixture-private-bucket",
+      completed: {},
+    };
+    let puts = 0;
+    const runner: CommandRunner = async (_executable, arguments_) => {
+      if (arguments_[2] === "put") {
+        puts += 1;
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+      return { exitCode: 1, stdout: "", stderr: "NoSuchKey" };
+    };
+
+    await expect(uploadR2Objects(item.plan, state, {
+      bucket: state.bucket,
+      concurrency: 1,
+      statePath: item.statePath,
+      projectRoot: item.root,
+    }, runner, async () => {})).rejects.toMatchObject({
+      code: "r2_upload_verification_deferred",
+    });
+
+    expect(puts).toBe(1);
+    expect(state.completed).toEqual({});
+  });
+
   it("reuses matching remote bytes and refuses a conflicting object", async () => {
     const item = await fixture();
     const objectName = `fixture-private-bucket/${item.plan.playbackMediaInserts[0].objectKey}`;

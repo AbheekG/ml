@@ -584,7 +584,7 @@ async function defaultCommandRunner(
     child.stdout.on("data", (chunk: string) => { stdout += chunk; });
     child.stderr.on("data", (chunk: string) => { stderr += chunk; });
     child.on("error", reject);
-    child.on("exit", (code) => {
+    child.on("close", (code) => {
       resolvePromise({ exitCode: code ?? 1, stdout, stderr });
     });
   });
@@ -829,11 +829,17 @@ export async function uploadR2Objects(
     projectRoot: string;
   },
   runner: CommandRunner = defaultCommandRunner,
+  pause: (milliseconds: number) => Promise<void> = async (milliseconds) => {
+    await new Promise<void>((resolvePromise) => {
+      setTimeout(resolvePromise, milliseconds);
+    });
+  },
 ): Promise<void> {
   reconcileState(plan, state);
   const pending = plan.playbackMediaInserts.filter((media) => !state.completed[media.id]);
   const temporaryRoot = await mkdtemp(resolve(tmpdir(), "audio-r2-upload-"));
   let saveQueue = Promise.resolve();
+  let deferredVerification = 0;
   try {
     await mapLimit(pending, options.concurrency, async (media) => {
       const beforePath = resolve(temporaryRoot, `${randomUUID()}.before.mp3`);
@@ -850,15 +856,21 @@ export async function uploadR2Objects(
           options.projectRoot,
           media,
         );
-        const afterPath = resolve(temporaryRoot, `${randomUUID()}.after.mp3`);
-        const after = await downloadRemoteObject(
-          runner,
-          options.bucket,
-          media,
-          afterPath,
-        );
+        let after: "verified" | "missing" = "missing";
+        for (const delay of [0, 1_000, 2_000]) {
+          if (delay > 0) await pause(delay);
+          const afterPath = resolve(temporaryRoot, `${randomUUID()}.after.mp3`);
+          after = await downloadRemoteObject(
+            runner,
+            options.bucket,
+            media,
+            afterPath,
+          );
+          if (after === "verified") break;
+        }
         if (after !== "verified") {
-          throw new AudioIntegrationExecutionError("uploaded_r2_object_missing");
+          deferredVerification += 1;
+          return;
         }
       }
       state.completed[media.id] = {
@@ -873,6 +885,9 @@ export async function uploadR2Objects(
       ));
       await saveQueue;
     });
+    if (deferredVerification > 0) {
+      throw new AudioIntegrationExecutionError("r2_upload_verification_deferred");
+    }
   } finally {
     await saveQueue;
     await rm(temporaryRoot, { recursive: true, force: true });
