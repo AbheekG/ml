@@ -49,3 +49,18 @@ python3 -m audio_converter.batch_cli /private/batch-manifest.json \
 Standard output contains aggregate counts only. The optional detail report contains opaque labels and hashes but no source/output paths. Execute mode uses the same manifest and produces only individually verified, provenance-bound derivatives.
 
 Do not put private filenames, titles, or personal information in tracked fixtures or captured logs. A catalog-specific manifest must use stable opaque IDs, deterministic output keys, aggregate reconciliation, and a separate ignored output area.
+
+## Hosted-processing boundary
+
+`audio_converter.hosted_contract` defines the versioned boundary for a later
+scale-to-zero HTTP adapter. The Worker supplies only an opaque job ID, the exact
+policy ID, the expected original hash/size, and short-lived job-scoped HTTPS
+transfer URLs. The converter result repeats the job/policy identity and contains
+only verified media facts; it never echoes transfer URLs.
+
+The adapter must authenticate the Worker separately, avoid logging request bodies
+or signed URLs, download the original to temporary storage, run the same
+`prepare()` core, upload a derivative only when the verified result requires one,
+and remove all temporary files. The Worker remains responsible for authorization,
+job state, independent R2 verification, D1 finalization, retries, and expiry.
+This contract does not create a hosted service, credentials, or cloud resources.

@@ -60,4 +60,12 @@ The conversion core is a small Python module that invokes FFmpeg without contain
 - The Cloudflare Worker remains responsible for authorization, D1/R2 state, expiring job-scoped transfer authorization, retry orchestration, and atomic finalization.
 - The hosted service receives no permanent public media URL and should not require broad R2 credentials.
 
+The hosted boundary is schema-versioned and binds each request to an opaque job,
+the exact conversion-policy ID, and the expected original SHA-256/byte size. Only
+short-lived job-scoped HTTPS download/upload capabilities cross the boundary; they
+must not be logged or returned in the result. The service returns verified media
+facts from the same `prepare()` core, while the Worker independently verifies
+stored bytes before it changes Recording or playback state. A stale policy,
+changed source, unverified derivative, or non-final processing result is rejected.
+
 Cloud Run project creation, billing activation, secrets, and deployment remain separate owner-approved external actions after local conversion behavior is tested.
