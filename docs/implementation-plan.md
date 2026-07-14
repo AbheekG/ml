@@ -25,6 +25,14 @@ Audio decode validation and conversion are deliberately outside the 128 MB Worke
 
 Existing prepared derivatives cross the cloud boundary through a reviewed deterministic plan and a dry-run-by-default executor. R2 upload and D1 finalization remain separate owner-approved commands. Upload is resumable and content-verified; D1 finalization requires the schema migration to exist, re-verifies the complete R2 set, and uses guarded live-state preconditions in one rollback-safe import. The executor does not deploy, apply migrations, or combine these external approvals.
 
+New Recording originals use authenticated 8 MiB multipart requests through the
+application Worker and private R2 binding, as defined in
+[recording-upload.md](recording-upload.md). This avoids whole-file Worker request
+limits, browser-visible storage credentials, and public/CORS bucket access. The
+Worker streams the completed object through SHA-256 verification before it
+atomically creates the processing Recording and durable job; readiness still
+requires independently verified hosted-processing output.
+
 Proposed application tooling:
 
 - React + TypeScript + Vite for the interface;
