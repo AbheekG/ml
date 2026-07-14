@@ -14,6 +14,8 @@ Song
 └── Alias[]
 
 Recording ── Recording credit[] ── Person
+Recording upload session ── Uploaded part[] / pending Recording credit[]
+Recording ── Audio processing job
 Scan ── optional Notebook
 ```
 
@@ -25,6 +27,8 @@ Scan ── optional Notebook
 - `recordings` stores one required, normalized-unique per-Song description, optional recorded date and contributors, processing state, an original media object, and an optional playback object. Imported Version and the four populated Notes are combined losslessly for display and also remain in hidden `legacy_*` columns.
 - `media_objects` stores private R2 object metadata and recovery state; binary data does not enter D1.
 - `audio_derivatives` immutably binds each playback-audio media object to its original-audio source, conversion-policy ID, and the verified source/derivative hashes and byte sizes.
+- `recording_upload_sessions`, `recording_upload_parts`, and `recording_upload_credits` durably retain an editor-owned multipart request, only the R2-returned part ETags, intended metadata, revisions, and terminal outcome. Private object keys, multipart IDs, ETags, and hashes are never browser inputs to completion or returned as status details.
+- `audio_processing_jobs` durably binds one processing Recording to the exact original media ID/hash/size and conversion policy. Attempt counts, leases, results, and privacy-safe failure codes follow a database-enforced retry state machine.
 - `people`, `song_credits`, and `recording_credits` model contributors using stable contribution codes (`lyrics`, `music`, `vocals`, and later instrument/production codes) with friendly display labels.
 - `languages`, `tags`, and `notebooks` are controlled lookup records.
 - join tables model Song languages and tags without comma-separated IDs.
@@ -38,6 +42,7 @@ Scan ── optional Notebook
 - Media objects cannot be deleted while referenced.
 - Normal application removal sets Trash metadata; later permanent cleanup is an explicit administrator process.
 - Revisions support optimistic edit-conflict detection when online editing is added.
+- Song Trash is also blocked while a Recording upload is live, stored but not finalized, or awaiting duplicate review. Recording Trash is blocked while its processing job is pending or running.
 
 ## Import pipeline
 

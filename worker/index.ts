@@ -32,6 +32,17 @@ import {
   type RecordingUpdateInput,
 } from "./recording-writes";
 import {
+  RECORDING_UPLOAD_EXPIRY_MS,
+  RECORDING_UPLOAD_PART_BYTES,
+  expectedRecordingPartBytes,
+  parseRecordingUploadCreate,
+  parseRecordingUploadRevision,
+  recordingUploadRequestFingerprint,
+  sha256RecordingStream,
+  validateCompletedRecordingParts,
+  type RecordingUploadCreateInput,
+} from "./recording-upload";
+import {
   parseSongCreate,
   parseSongRevision,
   parseSongUpdate,
@@ -152,6 +163,40 @@ type RecordingStateRow = {
   playbackMediaState: "active" | "trashed" | null;
 };
 
+type RecordingUploadStatus =
+  | "creating" | "open" | "completing" | "stored"
+  | "duplicate" | "finalized" | "aborted" | "failed";
+
+type RecordingUploadSessionRow = {
+  id: string;
+  songId: string;
+  requestFingerprint: string;
+  filename: string;
+  byteSize: number;
+  partCount: number;
+  objectKey: string;
+  uploadId: string | null;
+  status: RecordingUploadStatus;
+  revision: number;
+  expiresAt: string;
+  sha256: string | null;
+  duplicateMediaId: string | null;
+  recordingId: string | null;
+};
+
+type RecordingUploadPartRow = {
+  partNumber: number;
+  etag: string;
+  byteSize: number;
+};
+
+type RecordingUploadDuplicateRow = {
+  mediaId: string;
+  recordingId: string | null;
+  songId: string | null;
+  recordingTrashedAt: string | null;
+};
+
 type SongStateRow = {
   revision: number;
   trashedAt: string | null;
@@ -230,7 +275,176 @@ function recordingWriteError(error: unknown): { error: string; status: 400 | 409
   if (message.includes("invalid_recording_values") || message.includes("CHECK constraint")) {
     return { error: "invalid_recording", status: 400 };
   }
+  if (message.includes("recording_has_active_audio_processing")) {
+    return { error: "recording_processing_active", status: 409 };
+  }
   return { error: "recording_write_failed", status: 500 };
+}
+
+async function loadRecordingUploadSession(
+  database: D1Database,
+  sessionId: string,
+  actor: string,
+): Promise<RecordingUploadSessionRow | null> {
+  return database.prepare(`
+    SELECT
+      id,
+      song_id AS songId,
+      request_fingerprint AS requestFingerprint,
+      original_filename AS filename,
+      byte_size AS byteSize,
+      part_count AS partCount,
+      object_key AS objectKey,
+      r2_upload_id AS uploadId,
+      status,
+      revision,
+      expires_at AS expiresAt,
+      sha256,
+      duplicate_media_id AS duplicateMediaId,
+      recording_id AS recordingId
+    FROM recording_upload_sessions
+    WHERE id = ? AND created_by = ?
+  `).bind(sessionId, actor).first<RecordingUploadSessionRow>();
+}
+
+async function loadRecordingUploadByMutation(
+  database: D1Database,
+  actor: string,
+  clientMutationId: string,
+): Promise<RecordingUploadSessionRow | null> {
+  return database.prepare(`
+    SELECT
+      id,
+      song_id AS songId,
+      request_fingerprint AS requestFingerprint,
+      original_filename AS filename,
+      byte_size AS byteSize,
+      part_count AS partCount,
+      object_key AS objectKey,
+      r2_upload_id AS uploadId,
+      status,
+      revision,
+      expires_at AS expiresAt,
+      sha256,
+      duplicate_media_id AS duplicateMediaId,
+      recording_id AS recordingId
+    FROM recording_upload_sessions
+    WHERE created_by = ? AND client_mutation_id = ?
+  `).bind(actor, clientMutationId).first<RecordingUploadSessionRow>();
+}
+
+function publicRecordingUploadSession(
+  session: RecordingUploadSessionRow,
+  completedParts: number[] = [],
+  duplicate: RecordingUploadDuplicateRow | null = null,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {
+    id: session.id,
+    songId: session.songId,
+    filename: session.filename,
+    byteSize: session.byteSize,
+    partSize: RECORDING_UPLOAD_PART_BYTES,
+    partCount: session.partCount,
+    completedParts,
+    status: session.status,
+    revision: session.revision,
+    expiresAt: session.expiresAt,
+    recordingId: session.recordingId,
+  };
+  if (session.status === "duplicate") {
+    result.duplicateRecording = {
+      id: duplicate?.recordingId ?? null,
+      songId: duplicate?.songId ?? null,
+      trashed: duplicate ? duplicate.recordingTrashedAt !== null : null,
+    };
+  }
+  return result;
+}
+
+async function loadRecordingUploadParts(
+  database: D1Database,
+  sessionId: string,
+): Promise<RecordingUploadPartRow[]> {
+  const parts = await database.prepare(`
+    SELECT part_number AS partNumber, etag, byte_size AS byteSize
+    FROM recording_upload_parts
+    WHERE session_id = ?
+    ORDER BY part_number
+  `).bind(sessionId).all<RecordingUploadPartRow>();
+  return parts.results;
+}
+
+async function findDuplicateRecordingOriginal(
+  database: D1Database,
+  sha256: string,
+  byteSize: number,
+): Promise<RecordingUploadDuplicateRow | null> {
+  return database.prepare(`
+    SELECT
+      media_objects.id AS mediaId,
+      recordings.id AS recordingId,
+      recordings.song_id AS songId,
+      recordings.trashed_at AS recordingTrashedAt
+    FROM media_objects
+    LEFT JOIN recordings ON recordings.original_media_id = media_objects.id
+    WHERE media_objects.kind = 'original_audio'
+      AND media_objects.sha256 = ?
+      AND media_objects.byte_size = ?
+    ORDER BY recordings.id IS NULL, recordings.trashed_at IS NOT NULL, recordings.id
+    LIMIT 1
+  `).bind(sha256, byteSize).first<RecordingUploadDuplicateRow>();
+}
+
+async function loadRecordingUploadDuplicate(
+  database: D1Database,
+  session: RecordingUploadSessionRow,
+): Promise<RecordingUploadDuplicateRow | null> {
+  if (!session.duplicateMediaId) return null;
+  return database.prepare(`
+    SELECT
+      media_objects.id AS mediaId,
+      recordings.id AS recordingId,
+      recordings.song_id AS songId,
+      recordings.trashed_at AS recordingTrashedAt
+    FROM media_objects
+    LEFT JOIN recordings ON recordings.original_media_id = media_objects.id
+    WHERE media_objects.id = ? AND media_objects.kind = 'original_audio'
+  `).bind(session.duplicateMediaId).first<RecordingUploadDuplicateRow>();
+}
+
+async function provisionRecordingMultipartUpload(
+  database: D1Database,
+  media: R2Bucket,
+  session: RecordingUploadSessionRow,
+  actor: string,
+): Promise<RecordingUploadSessionRow> {
+  const multipart = await media.createMultipartUpload(session.objectKey);
+  let result: D1Result;
+  try {
+    const timestamp = new Date().toISOString();
+    result = await database.prepare(`
+      UPDATE recording_upload_sessions
+      SET r2_upload_id = ?, status = 'open', revision = revision + 1,
+          updated_at = ?, updated_by = ?
+      WHERE id = ? AND created_by = ? AND request_fingerprint = ?
+        AND status = 'creating' AND revision = ?
+    `).bind(
+      multipart.uploadId, timestamp, actor,
+      session.id, actor, session.requestFingerprint, session.revision,
+    ).run();
+  } catch (error) {
+    await multipart.abort().catch(() => undefined);
+    throw error;
+  }
+  if (result.meta.changes === 0) {
+    await multipart.abort().catch(() => undefined);
+    const current = await loadRecordingUploadSession(database, session.id, actor);
+    if (!current) throw new Error("recording_upload_session_lost");
+    return current;
+  }
+  const current = await loadRecordingUploadSession(database, session.id, actor);
+  if (!current) throw new Error("recording_upload_session_lost");
+  return current;
 }
 
 function lookupWriteError(error: unknown): { error: string; status: 400 | 409 | 500 } {
@@ -567,6 +781,486 @@ app.get("/api/recording-editor/options", requireRole("editor"), async (context) 
   return context.json({ people: people.results });
 });
 
+app.post("/api/songs/:songId/recording-uploads", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseRecordingUploadCreate(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_recording_upload", fields: parsed.fields }, 400);
+  }
+  const upload: RecordingUploadCreateInput = parsed.data;
+  const songId = context.req.param("songId");
+  const actor = context.get("appUser").identity;
+  const [song, peopleExist] = await Promise.all([
+    context.env.DB.prepare(`
+      SELECT id FROM songs WHERE id = ? AND trashed_at IS NULL
+    `).bind(songId).first<{ id: string }>(),
+    lookupIdsExist(context.env.DB, "people", upload.creditPersonIds),
+  ]);
+  if (!song) return context.json({ error: "song_not_found" }, 404);
+  if (!peopleExist) return context.json({ error: "invalid_recording_reference" }, 400);
+
+  const fingerprint = await recordingUploadRequestFingerprint(songId, upload);
+  let session = await loadRecordingUploadByMutation(
+    context.env.DB, actor, upload.clientMutationId,
+  );
+  let created = false;
+  if (session && session.requestFingerprint !== fingerprint) {
+    return context.json({ error: "recording_upload_mutation_reused" }, 409);
+  }
+
+  if (!session) {
+    const sessionId = crypto.randomUUID();
+    const timestamp = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + RECORDING_UPLOAD_EXPIRY_MS).toISOString();
+    const objectKey = `recordings/original/${sessionId}`;
+    const statements: D1PreparedStatement[] = [context.env.DB.prepare(`
+      INSERT INTO recording_upload_sessions (
+        id, song_id, client_mutation_id, request_fingerprint,
+        description, recorded_on, original_filename, mime_type_hint,
+        byte_size, part_size, part_count, object_key, status, revision,
+        expires_at, created_at, created_by, updated_at, updated_by
+      )
+      SELECT ?, songs.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', 1, ?, ?, ?, ?, ?
+      FROM songs
+      WHERE songs.id = ? AND songs.trashed_at IS NULL
+    `).bind(
+      sessionId, upload.clientMutationId, fingerprint,
+      upload.description, upload.recordedOn, upload.filename, upload.mimeTypeHint,
+      upload.byteSize, RECORDING_UPLOAD_PART_BYTES, upload.partCount, objectKey,
+      expiresAt, timestamp, actor, timestamp, actor, songId,
+    )];
+    for (const [sortOrder, personId] of upload.creditPersonIds.entries()) {
+      statements.push(context.env.DB.prepare(`
+        INSERT INTO recording_upload_credits (session_id, person_id, role, sort_order)
+        SELECT id, ?, 'vocals', ?
+        FROM recording_upload_sessions
+        WHERE id = ? AND request_fingerprint = ? AND status = 'creating'
+      `).bind(personId, sortOrder, sessionId, fingerprint));
+    }
+    try {
+      const results = await context.env.DB.batch(statements);
+      if (results[0].meta.changes === 0) return context.json({ error: "song_not_found" }, 404);
+      created = true;
+    } catch {
+      session = await loadRecordingUploadByMutation(
+        context.env.DB, actor, upload.clientMutationId,
+      );
+      if (!session || session.requestFingerprint !== fingerprint) {
+        return context.json({ error: "recording_upload_create_failed" }, 500);
+      }
+    }
+    session ??= await loadRecordingUploadSession(context.env.DB, sessionId, actor);
+    if (!session) return context.json({ error: "recording_upload_create_failed" }, 500);
+  }
+
+  if (session.status === "creating") {
+    if (session.expiresAt <= new Date().toISOString()) {
+      const timestamp = new Date().toISOString();
+      try {
+        await context.env.DB.prepare(`
+          UPDATE recording_upload_sessions
+          SET status = 'aborted', revision = revision + 1,
+              updated_at = ?, updated_by = ?
+          WHERE id = ? AND created_by = ? AND status = 'creating' AND revision = ?
+        `).bind(timestamp, actor, session.id, actor, session.revision).run();
+      } catch {
+        return context.json({ error: "recording_upload_expiry_checkpoint_failed" }, 503);
+      }
+      const current = await loadRecordingUploadSession(context.env.DB, session.id, actor);
+      if (!current) return context.json({ error: "recording_upload_not_found" }, 404);
+      if (current.status === "aborted") {
+        return context.json({
+          error: "recording_upload_expired",
+          upload: publicRecordingUploadSession(current),
+        }, 410);
+      }
+      if (current.status === "creating") {
+        return context.json({ error: "recording_upload_expiry_checkpoint_failed" }, 503);
+      }
+      session = current;
+    }
+    if (session.status === "creating") {
+      try {
+        session = await provisionRecordingMultipartUpload(
+          context.env.DB, context.env.MEDIA, session, actor,
+        );
+      } catch {
+        return context.json({ error: "recording_upload_storage_unavailable" }, 503);
+      }
+    }
+  }
+  return context.json(
+    { upload: publicRecordingUploadSession(session) },
+    created ? 201 : 200,
+  );
+});
+
+app.get("/api/recording-uploads/:sessionId", requireRole("editor"), async (context) => {
+  const actor = context.get("appUser").identity;
+  const session = await loadRecordingUploadSession(
+    context.env.DB, context.req.param("sessionId"), actor,
+  );
+  if (!session) return context.json({ error: "recording_upload_not_found" }, 404);
+  const [parts, duplicate] = await Promise.all([
+    loadRecordingUploadParts(context.env.DB, session.id),
+    loadRecordingUploadDuplicate(context.env.DB, session),
+  ]);
+  return context.json({
+    upload: publicRecordingUploadSession(
+      session,
+      parts.map((part) => part.partNumber),
+      duplicate,
+    ),
+  });
+});
+
+app.put("/api/recording-uploads/:sessionId/parts/:partNumber", requireRole("editor"), async (context) => {
+  const actor = context.get("appUser").identity;
+  const session = await loadRecordingUploadSession(
+    context.env.DB, context.req.param("sessionId"), actor,
+  );
+  if (!session) return context.json({ error: "recording_upload_not_found" }, 404);
+  if (session.status !== "open" || !session.uploadId) {
+    return context.json({ error: "recording_upload_not_open" }, 409);
+  }
+  if (session.expiresAt <= new Date().toISOString()) {
+    return context.json({ error: "recording_upload_expired" }, 410);
+  }
+  const partNumber = Number(context.req.param("partNumber"));
+  const expectedBytes = expectedRecordingPartBytes(session.byteSize, partNumber);
+  if (expectedBytes === null) return context.json({ error: "invalid_recording_upload_part" }, 400);
+  const contentLength = Number(context.req.header("Content-Length"));
+  if (!Number.isSafeInteger(contentLength) || contentLength !== expectedBytes) {
+    return context.json({ error: "recording_upload_part_size_mismatch" }, 400);
+  }
+  const contentEncoding = context.req.header("Content-Encoding");
+  if (contentEncoding && contentEncoding !== "identity") {
+    return context.json({ error: "recording_upload_content_encoding_unsupported" }, 415);
+  }
+  const requestBody = context.req.raw.body;
+  if (!requestBody) return context.json({ error: "recording_upload_part_required" }, 400);
+
+  let uploaded: R2UploadedPart;
+  try {
+    uploaded = await context.env.MEDIA
+      .resumeMultipartUpload(session.objectKey, session.uploadId)
+      .uploadPart(partNumber, requestBody);
+  } catch {
+    return context.json({ error: "recording_upload_part_storage_failed" }, 503);
+  }
+  if (
+    uploaded.partNumber !== partNumber
+    || !uploaded.etag
+    || uploaded.etag.length > 200
+    || /[\r\n]/u.test(uploaded.etag)
+  ) {
+    return context.json({ error: "recording_upload_part_invalid_etag" }, 503);
+  }
+
+  const timestamp = new Date().toISOString();
+  const newRevision = session.revision + 1;
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        UPDATE recording_upload_sessions
+        SET revision = revision + 1, updated_at = ?, updated_by = ?
+        WHERE id = ? AND created_by = ? AND status = 'open' AND revision = ?
+      `).bind(timestamp, actor, session.id, actor, session.revision),
+      context.env.DB.prepare(`
+        INSERT INTO recording_upload_parts (
+          session_id, part_number, etag, byte_size, uploaded_at, uploaded_by
+        )
+        SELECT ?, ?, ?, ?, ?, ?
+        WHERE EXISTS (
+          SELECT 1 FROM recording_upload_sessions
+          WHERE id = ? AND created_by = ? AND status = 'open'
+            AND revision = ? AND updated_at = ? AND updated_by = ?
+        )
+        ON CONFLICT(session_id, part_number) DO UPDATE SET
+          etag = excluded.etag,
+          byte_size = excluded.byte_size,
+          uploaded_at = excluded.uploaded_at,
+          uploaded_by = excluded.uploaded_by
+      `).bind(
+        session.id, partNumber, uploaded.etag, expectedBytes, timestamp, actor,
+        session.id, actor, newRevision, timestamp, actor,
+      ),
+    ]);
+    if (results[0].meta.changes === 0 || results[1].meta.changes === 0) {
+      return context.json({ error: "recording_upload_conflict" }, 409);
+    }
+  } catch {
+    return context.json({ error: "recording_upload_checkpoint_failed" }, 503);
+  }
+  return context.json({ part: { partNumber }, upload: { revision: newRevision } });
+});
+
+app.post("/api/recording-uploads/:sessionId/complete", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseRecordingUploadRevision(body);
+  if (!parsed.success) return context.json({ error: "invalid_recording_upload" }, 400);
+  const actor = context.get("appUser").identity;
+  let session = await loadRecordingUploadSession(
+    context.env.DB, context.req.param("sessionId"), actor,
+  );
+  if (!session) return context.json({ error: "recording_upload_not_found" }, 404);
+
+  if (session.status === "duplicate" || session.status === "finalized") {
+    const duplicate = await loadRecordingUploadDuplicate(context.env.DB, session);
+    return context.json({ upload: publicRecordingUploadSession(session, [], duplicate) });
+  }
+  if (session.status !== "open" && session.status !== "completing" && session.status !== "stored") {
+    return context.json({ error: "recording_upload_cannot_complete" }, 409);
+  }
+
+  const parts = await loadRecordingUploadParts(context.env.DB, session.id);
+  if (!validateCompletedRecordingParts(session.byteSize, parts)) {
+    return context.json({ error: "recording_upload_parts_incomplete" }, 409);
+  }
+
+  if (session.status === "open") {
+    if (!session.uploadId) return context.json({ error: "recording_upload_not_open" }, 409);
+    if (session.revision !== parsed.data.revision) {
+      return context.json({ error: "recording_upload_conflict" }, 409);
+    }
+    const timestamp = new Date().toISOString();
+    let result: D1Result;
+    try {
+      result = await context.env.DB.prepare(`
+        UPDATE recording_upload_sessions
+        SET status = 'completing', revision = revision + 1,
+            updated_at = ?, updated_by = ?
+        WHERE id = ? AND created_by = ? AND status = 'open' AND revision = ?
+      `).bind(timestamp, actor, session.id, actor, session.revision).run();
+    } catch {
+      return context.json({ error: "recording_upload_completion_checkpoint_failed" }, 503);
+    }
+    if (result.meta.changes === 0) {
+      return context.json({ error: "recording_upload_conflict" }, 409);
+    }
+    const completing = await loadRecordingUploadSession(context.env.DB, session.id, actor);
+    if (!completing) return context.json({ error: "recording_upload_not_found" }, 404);
+    session = completing;
+  } else if (session.status === "completing" && session.revision !== parsed.data.revision) {
+    return context.json({ error: "recording_upload_conflict" }, 409);
+  }
+
+  if (session.status === "completing") {
+    const completingSession = session;
+    if (!completingSession.uploadId) return context.json({ error: "recording_upload_not_open" }, 409);
+    let storedObject: R2Object | null;
+    try {
+      storedObject = await context.env.MEDIA.head(completingSession.objectKey);
+    } catch {
+      return context.json({ error: "recording_upload_storage_unavailable" }, 503);
+    }
+    if (!storedObject) {
+      try {
+        storedObject = await context.env.MEDIA
+          .resumeMultipartUpload(completingSession.objectKey, completingSession.uploadId)
+          .complete(parts.map((part) => ({
+            partNumber: part.partNumber,
+            etag: part.etag,
+          })));
+      } catch {
+        try {
+          storedObject = await context.env.MEDIA.head(completingSession.objectKey);
+        } catch {
+          return context.json({ error: "recording_upload_storage_unavailable" }, 503);
+        }
+        if (!storedObject) {
+          const timestamp = new Date().toISOString();
+          try {
+            await context.env.DB.prepare(`
+              UPDATE recording_upload_sessions
+              SET status = 'open', revision = revision + 1,
+                  updated_at = ?, updated_by = ?
+              WHERE id = ? AND created_by = ? AND status = 'completing' AND revision = ?
+            `).bind(
+              timestamp, actor, completingSession.id, actor, completingSession.revision,
+            ).run();
+          } catch {
+            return context.json({ error: "recording_upload_completion_checkpoint_failed" }, 503);
+          }
+          return context.json({ error: "recording_upload_storage_completion_failed" }, 503);
+        }
+      }
+    }
+
+    const failStoredObject = async (): Promise<Response> => {
+      const timestamp = new Date().toISOString();
+      let result: D1Result;
+      try {
+        result = await context.env.DB.prepare(`
+          UPDATE recording_upload_sessions
+          SET status = 'failed', error_code = 'stored_object_mismatch',
+              revision = revision + 1, updated_at = ?, updated_by = ?
+          WHERE id = ? AND created_by = ? AND status = 'completing' AND revision = ?
+        `).bind(
+          timestamp, actor, completingSession.id, actor, completingSession.revision,
+        ).run();
+      } catch {
+        return context.json({ error: "recording_upload_completion_checkpoint_failed" }, 503);
+      }
+      if (result.meta.changes === 0) {
+        return context.json({ error: "recording_upload_conflict" }, 409);
+      }
+      return context.json({ error: "recording_upload_stored_object_mismatch" }, 500);
+    };
+
+    if (
+      storedObject.key !== completingSession.objectKey
+      || storedObject.size !== completingSession.byteSize
+    ) {
+      return failStoredObject();
+    }
+    let privateObject: R2ObjectBody | null;
+    try {
+      privateObject = await context.env.MEDIA.get(completingSession.objectKey);
+    } catch {
+      return context.json({ error: "recording_upload_storage_unavailable" }, 503);
+    }
+    if (!privateObject) {
+      return context.json({ error: "recording_upload_storage_unavailable" }, 503);
+    }
+    if (
+      privateObject.key !== completingSession.objectKey
+      || privateObject.size !== completingSession.byteSize
+    ) {
+      return failStoredObject();
+    }
+    let fingerprint: { sha256: string; byteSize: number };
+    try {
+      fingerprint = await sha256RecordingStream(privateObject.body);
+    } catch {
+      return context.json({ error: "recording_upload_fingerprint_failed" }, 503);
+    }
+    if (fingerprint.byteSize !== completingSession.byteSize) {
+      return failStoredObject();
+    }
+
+    const timestamp = new Date().toISOString();
+    let result: D1Result;
+    try {
+      result = await context.env.DB.prepare(`
+        UPDATE recording_upload_sessions
+        SET status = 'stored', sha256 = ?, revision = revision + 1,
+            updated_at = ?, updated_by = ?
+        WHERE id = ? AND created_by = ? AND status = 'completing' AND revision = ?
+      `).bind(
+        fingerprint.sha256, timestamp, actor,
+        completingSession.id, actor, completingSession.revision,
+      ).run();
+    } catch {
+      return context.json({ error: "recording_upload_completion_checkpoint_failed" }, 503);
+    }
+    const current = await loadRecordingUploadSession(context.env.DB, completingSession.id, actor);
+    if (!current) return context.json({ error: "recording_upload_not_found" }, 404);
+    if (result.meta.changes === 0 && current.status !== "stored" && current.status !== "duplicate") {
+      return context.json({ error: "recording_upload_conflict" }, 409);
+    }
+    session = current;
+  }
+
+  if (session.status === "stored") {
+    if (!session.sha256) {
+      return context.json({ error: "recording_upload_completion_checkpoint_failed" }, 500);
+    }
+    let duplicate: RecordingUploadDuplicateRow | null;
+    try {
+      duplicate = await findDuplicateRecordingOriginal(
+        context.env.DB, session.sha256, session.byteSize,
+      );
+    } catch {
+      return context.json({ error: "recording_upload_duplicate_check_failed" }, 503);
+    }
+    if (duplicate) {
+      const timestamp = new Date().toISOString();
+      let result: D1Result;
+      try {
+        result = await context.env.DB.prepare(`
+          UPDATE recording_upload_sessions
+          SET status = 'duplicate', duplicate_media_id = ?, revision = revision + 1,
+              updated_at = ?, updated_by = ?
+          WHERE id = ? AND created_by = ? AND status = 'stored' AND revision = ?
+        `).bind(
+          duplicate.mediaId, timestamp, actor,
+          session.id, actor, session.revision,
+        ).run();
+      } catch {
+        return context.json({ error: "recording_upload_duplicate_checkpoint_failed" }, 503);
+      }
+      const current = await loadRecordingUploadSession(context.env.DB, session.id, actor);
+      if (!current) return context.json({ error: "recording_upload_not_found" }, 404);
+      if (result.meta.changes === 0 && current.status !== "duplicate") {
+        return context.json({ error: "recording_upload_conflict" }, 409);
+      }
+      session = current;
+      duplicate = await loadRecordingUploadDuplicate(context.env.DB, session);
+      return context.json({ upload: publicRecordingUploadSession(session, [], duplicate) });
+    }
+  }
+
+  return context.json({ upload: publicRecordingUploadSession(session) });
+});
+
+app.post("/api/recording-uploads/:sessionId/abort", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseRecordingUploadRevision(body);
+  if (!parsed.success) return context.json({ error: "invalid_recording_upload" }, 400);
+  const actor = context.get("appUser").identity;
+  const session = await loadRecordingUploadSession(
+    context.env.DB, context.req.param("sessionId"), actor,
+  );
+  if (!session) return context.json({ error: "recording_upload_not_found" }, 404);
+  if (session.status === "aborted") {
+    return context.json({ upload: publicRecordingUploadSession(session), cleanupDeferred: false });
+  }
+  if (session.status !== "creating" && session.status !== "open") {
+    return context.json({ error: "recording_upload_cannot_abort" }, 409);
+  }
+  const timestamp = new Date().toISOString();
+  let result: D1Result;
+  try {
+    result = await context.env.DB.prepare(`
+      UPDATE recording_upload_sessions
+      SET status = 'aborted', revision = revision + 1, updated_at = ?, updated_by = ?
+      WHERE id = ? AND created_by = ? AND revision = ? AND status IN ('creating', 'open')
+    `).bind(timestamp, actor, session.id, actor, parsed.data.revision).run();
+  } catch {
+    return context.json({ error: "recording_upload_abort_failed" }, 500);
+  }
+  if (result.meta.changes === 0) {
+    return context.json({ error: "recording_upload_conflict" }, 409);
+  }
+  let cleanupDeferred = false;
+  if (session.uploadId) {
+    try {
+      await context.env.MEDIA.resumeMultipartUpload(session.objectKey, session.uploadId).abort();
+    } catch {
+      cleanupDeferred = true;
+    }
+  }
+  const aborted = await loadRecordingUploadSession(context.env.DB, session.id, actor);
+  if (!aborted) return context.json({ error: "recording_upload_not_found" }, 404);
+  return context.json({ upload: publicRecordingUploadSession(aborted), cleanupDeferred });
+});
+
 app.get("/api/lookups", requireRole("editor"), async (context) => {
   const [languages, tags, notebooks, people] = await Promise.all([
     context.env.DB.prepare(`
@@ -858,6 +1552,9 @@ app.post("/api/songs/:songId/trash", requireRole("editor"), async (context) => {
     return context.json({ song: { id: songId, revision: parsed.data.revision + 1 } });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("song_has_active_recording_upload")) {
+      return context.json({ error: "song_has_active_recording_upload" }, 409);
+    }
     if (message.includes("song_has_active_content")) {
       return context.json({
         error: "song_has_active_content",

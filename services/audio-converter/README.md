@@ -64,3 +64,8 @@ or signed URLs, download the original to temporary storage, run the same
 and remove all temporary files. The Worker remains responsible for authorization,
 job state, independent R2 verification, D1 finalization, retries, and expiry.
 This contract does not create a hosted service, credentials, or cloud resources.
+The HTTP adapter must pass an explicit nonempty allowlist of application transfer
+origins to the contract parser; arbitrary HTTPS download/upload hosts are rejected
+to keep job payloads from becoming an SSRF mechanism. Source and destination
+paths must differ. The later HTTP client must disable redirects or validate every
+redirect target against the same origin allowlist.

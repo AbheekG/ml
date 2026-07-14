@@ -14,6 +14,12 @@ upload session and exact expected part length, and streams that request body int
 an R2 multipart upload. Completed parts can be retried idempotently and the
 browser can resume from server-reported state.
 
+The Worker persists each returned R2 part ETag in D1. Completion accepts no
+client-supplied ETags and uses only that server-owned set. Session creation uses
+a client mutation ID plus a canonical request fingerprint, so a lost response can
+be retried without starting two intentional uploads or reusing one mutation ID
+for different metadata.
+
 The initial application limit is 512 MiB per original. This is deliberately far
 above the current private maximum while keeping the bounded workflow small. It
 can be raised later without changing the stored model. Empty files are rejected.
@@ -28,14 +34,21 @@ can be raised later without changing the stored model. Empty files are rejected.
 - The R2 binding carries authorization without adding long-lived S3 credentials,
   presigned-URL generation, or bucket CORS to the application.
 
-## Finalization boundary
+## Storage-completion and finalization boundary
 
-Completing R2 multipart storage does not create a ready Recording. The Worker
-must retrieve the completed private object and stream it through Cloudflare's
-native SHA-256 `DigestStream`, verify the exact expected byte size, then create
-the fingerprinted `original_audio` media row, processing Recording, and pending
-audio-processing job atomically in D1. The job snapshots the original media ID,
-hash, size, and policy.
+Completing R2 multipart storage does not create a Recording. The implemented
+completion endpoint uses only server-held part ETags, recovers a lost R2
+completion response by checking the opaque private object, verifies its exact
+size, and streams it through Cloudflare's native SHA-256 `DigestStream`. It then
+stops durably at `stored`, or at `duplicate` with the existing private Recording
+identity when a fingerprinted original already exists. It never creates a media
+row, Recording, or processing job in either state.
+
+The next finalization slice must recheck duplicate content inside the same D1
+transaction that creates the fingerprinted `original_audio` media row,
+processing Recording, and pending audio-processing job. The job snapshots the
+original media ID, hash, size, and policy. This second duplicate check is needed
+even after completion because another upload could finalize concurrently.
 
 If D1 finalization fails, the completed opaque R2 object stays private and
 unreferenced for explicit retry/reconciliation; it is never silently deleted.
@@ -49,16 +62,52 @@ the Recording ready. Play never starts conversion.
 
 ## Upload-session API shape
 
-The later endpoint slice will expose editor-only, online-only operations to:
+The server-side transport exposes editor-only, online-only operations to:
 
 1. create an opaque upload session from metadata, filename, MIME hint, and exact
    byte size;
 2. upload or retry one numbered raw part with the exact expected length;
 3. inspect completed part numbers for resume;
-4. complete and fingerprint the private object, then atomically create the
-   Recording and processing job;
+4. complete, size-check, and fingerprint the private object, stopping for an
+   exact-content duplicate;
 5. abort an incomplete session without deleting any finalized media.
+
+The browser form and the separate stored-to-Recording/job finalization operation
+remain unimplemented. A client retry supplies only the current session revision;
+it never supplies an ETag, object key, multipart ID, or claimed fingerprint.
 
 Filenames, titles, signed capabilities, hashes, and private object keys must not
 enter routine logs. The client cannot select the parent Song or object key after
 the session is created.
+
+## Failure and concurrency rules
+
+- Durable session states are `creating`, `open`, `completing`, `stored`, and the
+  terminal `duplicate`, `finalized`, `aborted`, or `failed` states.
+- A crash after R2 multipart creation but before D1 records the upload ID may
+  leave an incomplete R2 upload; retry creates a replacement and R2 lifecycle
+  cleanup handles the unreachable incomplete upload.
+- A part stored in R2 but not checkpointed in D1 is retried at the same part
+  number. The replacement ETag becomes the only completion input.
+- A completion retry in `completing` first checks whether the opaque object now
+  exists with the exact expected size before attempting another completion.
+- If R2 completion fails and no object exists, the D1 session returns to `open`
+  with all server-held part checkpoints retained for safe retry. A completed
+  object whose metadata or streamed byte count disagrees with the request moves
+  the session to `failed` and is preserved privately for explicit review.
+- Song Trash is blocked while a nonterminal upload or unresolved duplicate is
+  attached to it. Recording Trash is blocked while audio processing is pending
+  or running.
+- Expired sessions accept no new parts but may complete if every part was already
+  checkpointed. An expired session that never acquired an R2 multipart ID is
+  automatically aborted so it cannot strand its Song. Abort changes D1 first;
+  an R2 abort failure leaves only a private incomplete upload for lifecycle
+  cleanup.
+- A streaming hash duplicate stops before Recording creation and identifies the
+  existing private record. Reusing identical media for a genuinely distinct
+  Recording requires a later explicit confirmation path and removal of the
+  current `recordings.original_media_id` uniqueness constraint; finalization
+  must not imply or bypass that schema decision.
+- Multipart IDs, ETags, object keys, hashes, filenames, and transfer capabilities
+  are excluded from routine logs. Authenticated status responses return only the
+  minimum editor-facing filename and completed part numbers.

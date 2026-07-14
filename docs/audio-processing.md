@@ -67,5 +67,11 @@ must not be logged or returned in the result. The service returns verified media
 facts from the same `prepare()` core, while the Worker independently verifies
 stored bytes before it changes Recording or playback state. A stale policy,
 changed source, unverified derivative, or non-final processing result is rejected.
+The hosted adapter also uses an explicit application-transfer-origin allowlist;
+`https` alone is insufficient because an otherwise valid job body must not turn
+the converter into an arbitrary network fetcher. Source and derivative
+capabilities must name different paths, and the eventual HTTP transfer client
+must reject or revalidate every redirect against the same allowlist rather than
+following an allowlisted URL to an arbitrary host.
 
 Cloud Run project creation, billing activation, secrets, and deployment remain separate owner-approved external actions after local conversion behavior is tested.

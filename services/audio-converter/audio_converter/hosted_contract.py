@@ -51,8 +51,12 @@ def _sha256(value: object) -> str:
     return value
 
 
-def _job_scoped_https_url(value: object, field: str) -> str:
-    if not isinstance(value, str):
+def _job_scoped_https_url(
+    value: object,
+    field: str,
+    allowed_transfer_origins: frozenset[str],
+) -> str:
+    if not isinstance(value, str) or len(value) > 4096:
         raise HostedContractError(f"invalid_{field}")
     parsed = urlparse(value)
     if (
@@ -63,14 +67,25 @@ def _job_scoped_https_url(value: object, field: str) -> str:
         or parsed.fragment
     ):
         raise HostedContractError(f"invalid_{field}")
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    if origin not in allowed_transfer_origins:
+        raise HostedContractError(f"untrusted_{field}")
     return value
+
+
+def _transfer_resource_identity(value: str) -> tuple[str, str, str]:
+    parsed = urlparse(value)
+    return parsed.scheme, parsed.netloc, parsed.path
 
 
 def parse_hosted_processing_request(
     payload: object,
     *,
+    allowed_transfer_origins: frozenset[str],
     policy: ProcessingPolicy = ProcessingPolicy(),
 ) -> HostedProcessingRequest:
+    if not allowed_transfer_origins:
+        raise HostedContractError("transfer_origin_allowlist_required")
     if not isinstance(payload, dict):
         raise HostedContractError("invalid_processing_request")
     allowed_keys = {
@@ -98,13 +113,27 @@ def parse_hosted_processing_request(
     source_byte_size = payload.get("sourceByteSize")
     if not isinstance(source_byte_size, int) or isinstance(source_byte_size, bool) or source_byte_size <= 0:
         raise HostedContractError("invalid_source_byte_size")
+    source_download_url = _job_scoped_https_url(
+        payload.get("sourceDownloadUrl"),
+        "source_download_url",
+        allowed_transfer_origins,
+    )
+    derivative_upload_url = _job_scoped_https_url(
+        payload.get("derivativeUploadUrl"),
+        "derivative_upload_url",
+        allowed_transfer_origins,
+    )
+    if _transfer_resource_identity(source_download_url) == _transfer_resource_identity(
+        derivative_upload_url
+    ):
+        raise HostedContractError("processing_transfer_urls_must_differ")
     return HostedProcessingRequest(
         job_id=job_id,
         policy_id=policy_id,
         source_sha256=_sha256(payload.get("sourceSha256")),
         source_byte_size=source_byte_size,
-        source_download_url=_job_scoped_https_url(payload.get("sourceDownloadUrl"), "source_download_url"),
-        derivative_upload_url=_job_scoped_https_url(payload.get("derivativeUploadUrl"), "derivative_upload_url"),
+        source_download_url=source_download_url,
+        derivative_upload_url=derivative_upload_url,
     )
 
 
@@ -123,12 +152,23 @@ def build_hosted_processing_result(
         "created_derivative",
         "verified_existing_derivative",
     }
+    discarded_candidate = (
+        preparation.status == "candidate_discarded_original_is_playback"
+    )
     if uses_derivative != (preparation.derivative is not None):
         raise HostedContractError("invalid_processing_result_media")
     if uses_derivative and (
         preparation.validation is None or not preparation.validation.accepted
     ):
         raise HostedContractError("unverified_processing_derivative")
+    if discarded_candidate and (
+        preparation.validation is None
+        or preparation.validation.accepted
+        or preparation.validation.reason != "oversized_mp3_saving_not_material"
+    ):
+        raise HostedContractError("invalid_discarded_processing_candidate")
+    if not uses_derivative and not discarded_candidate and preparation.validation is not None:
+        raise HostedContractError("unexpected_processing_validation")
 
     return {
         "schemaVersion": HOSTED_CONTRACT_SCHEMA_VERSION,

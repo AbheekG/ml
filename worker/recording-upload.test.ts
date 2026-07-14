@@ -3,11 +3,88 @@ import {
   MAX_RECORDING_UPLOAD_BYTES,
   RECORDING_UPLOAD_PART_BYTES,
   expectedRecordingPartBytes,
+  parseRecordingUploadCreate,
+  recordingUploadRequestFingerprint,
   recordingUploadShape,
+  sha256RecordingStream,
   validateCompletedRecordingParts,
 } from "./recording-upload";
 
+class TestDigestStream extends WritableStream<ArrayBuffer | ArrayBufferView> {
+  readonly digest: Promise<ArrayBuffer>;
+  bytesWritten = 0;
+
+  constructor() {
+    const chunks: Uint8Array[] = [];
+    let resolveDigest!: (digest: ArrayBuffer) => void;
+    let rejectDigest!: (error: unknown) => void;
+    const digest = new Promise<ArrayBuffer>((resolve, reject) => {
+      resolveDigest = resolve;
+      rejectDigest = reject;
+    });
+    super({
+      write: (chunk) => {
+        const bytes = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+        chunks.push(bytes.slice());
+        this.bytesWritten += bytes.byteLength;
+      },
+      close: async () => {
+        try {
+          const bytes = new Uint8Array(this.bytesWritten);
+          let offset = 0;
+          for (const chunk of chunks) {
+            bytes.set(chunk, offset);
+            offset += chunk.byteLength;
+          }
+          resolveDigest(await crypto.subtle.digest("SHA-256", bytes));
+        } catch (error) {
+          rejectDigest(error);
+        }
+      },
+      abort: rejectDigest,
+    });
+    this.digest = digest;
+  }
+}
+
 describe("Recording multipart upload contract", () => {
+  it("normalizes a strict idempotent upload request without trusting MIME or paths", async () => {
+    const parsed = parseRecordingUploadCreate({
+      clientMutationId: "3f2a1dc0-49aa-4e52-a27a-74d1372aa219",
+      filename: "../private/take.M4A",
+      mimeType: "not a mime type",
+      byteSize: 123,
+      description: "  Early take  ",
+      recordedOn: "2020-02-29",
+      creditPersonIds: ["person-1"],
+    });
+    expect(parsed).toEqual({
+      success: true,
+      data: {
+        clientMutationId: "3f2a1dc0-49aa-4e52-a27a-74d1372aa219",
+        filename: "take.M4A",
+        mimeTypeHint: null,
+        byteSize: 123,
+        partCount: 1,
+        description: "Early take",
+        recordedOn: "2020-02-29",
+        creditPersonIds: ["person-1"],
+      },
+    });
+    if (!parsed.success) throw new Error("fixture failed");
+    await expect(recordingUploadRequestFingerprint("song-1", parsed.data))
+      .resolves.toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it("rejects invalid dates, duplicate credits, empty files, and mutation reuse without a UUID", () => {
+    expect(parseRecordingUploadCreate({
+      clientMutationId: "not-a-uuid",
+      filename: "take.mp3",
+      byteSize: 0,
+      recordedOn: "2999-01-01",
+      creditPersonIds: ["person-1", "person-1"],
+    }).success).toBe(false);
+  });
   it("bounds originals and calculates the exact part count", () => {
     expect(recordingUploadShape(1)).toEqual({ byteSize: 1, partCount: 1 });
     expect(recordingUploadShape(RECORDING_UPLOAD_PART_BYTES)).toEqual({
@@ -35,25 +112,43 @@ describe("Recording multipart upload contract", () => {
   it("accepts a complete unordered R2 part set for finalization", () => {
     const byteSize = RECORDING_UPLOAD_PART_BYTES + 1;
     expect(validateCompletedRecordingParts(byteSize, [
-      { partNumber: 2, etag: "etag-two" },
-      { partNumber: 1, etag: "etag-one" },
+      { partNumber: 2, etag: "etag-two", byteSize: 1 },
+      { partNumber: 1, etag: "etag-one", byteSize: RECORDING_UPLOAD_PART_BYTES },
     ])).toBe(true);
   });
 
   it("rejects missing, duplicate, out-of-range, or unsafe part metadata", () => {
     const byteSize = RECORDING_UPLOAD_PART_BYTES + 1;
-    expect(validateCompletedRecordingParts(byteSize, [{ partNumber: 1, etag: "etag" }])).toBe(false);
     expect(validateCompletedRecordingParts(byteSize, [
-      { partNumber: 1, etag: "one" },
-      { partNumber: 1, etag: "again" },
+      { partNumber: 1, etag: "etag", byteSize: RECORDING_UPLOAD_PART_BYTES },
     ])).toBe(false);
     expect(validateCompletedRecordingParts(byteSize, [
-      { partNumber: 1, etag: "one" },
-      { partNumber: 3, etag: "three" },
+      { partNumber: 1, etag: "one", byteSize: RECORDING_UPLOAD_PART_BYTES },
+      { partNumber: 1, etag: "again", byteSize: 1 },
     ])).toBe(false);
     expect(validateCompletedRecordingParts(byteSize, [
-      { partNumber: 1, etag: "one\nprivate" },
-      { partNumber: 2, etag: "two" },
+      { partNumber: 1, etag: "one", byteSize: RECORDING_UPLOAD_PART_BYTES },
+      { partNumber: 3, etag: "three", byteSize: 1 },
     ])).toBe(false);
+    expect(validateCompletedRecordingParts(byteSize, [
+      { partNumber: 1, etag: "one\nprivate", byteSize: RECORDING_UPLOAD_PART_BYTES },
+      { partNumber: 2, etag: "two", byteSize: 1 },
+    ])).toBe(false);
+    expect(validateCompletedRecordingParts(byteSize, [
+      { partNumber: 1, etag: "one", byteSize: RECORDING_UPLOAD_PART_BYTES - 1 },
+      { partNumber: 2, etag: "two", byteSize: 1 },
+    ])).toBe(false);
+  });
+
+  it("hashes a private object stream without buffering it in application code", async () => {
+    const body = new Response("abc").body;
+    if (!body) throw new Error("missing test body");
+    await expect(sha256RecordingStream(
+      body,
+      () => new TestDigestStream() as unknown as DigestStream,
+    )).resolves.toEqual({
+      sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      byteSize: 3,
+    });
   });
 });

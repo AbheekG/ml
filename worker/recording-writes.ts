@@ -21,12 +21,12 @@ const recordedOn = z.string().nullable().optional().superRefine((value, context)
   }
 });
 
-const updateRecordingSchema = z.object({
-  description,
-  recordedOn,
-  creditPersonIds: z.array(z.string().min(1).max(100)).max(100).default([]),
-  revision: z.number().int().positive(),
-}).strict().superRefine((value, context) => {
+const creditPersonIds = z.array(z.string().min(1).max(100)).max(100).default([]);
+
+function rejectDuplicateCredits(
+  value: { creditPersonIds: string[] },
+  context: z.RefinementCtx,
+): void {
   if (new Set(value.creditPersonIds).size !== value.creditPersonIds.length) {
     context.addIssue({
       code: "custom",
@@ -34,7 +34,20 @@ const updateRecordingSchema = z.object({
       message: "Duplicate contributors are not allowed",
     });
   }
-});
+}
+
+const updateRecordingSchema = z.object({
+  description,
+  recordedOn,
+  creditPersonIds,
+  revision: z.number().int().positive(),
+}).strict().superRefine(rejectDuplicateCredits);
+
+const createRecordingMetadataSchema = z.object({
+  description: z.string().max(10_000, "Recording description is too long").nullable().optional(),
+  recordedOn,
+  creditPersonIds,
+}).strict().superRefine(rejectDuplicateCredits);
 
 const recordingRevisionSchema = z.object({
   revision: z.number().int().positive(),
@@ -46,6 +59,12 @@ export type RecordingUpdateInput = {
   recordedOn: string | null;
   creditPersonIds: string[];
   revision: number;
+};
+
+export type RecordingCreateMetadataInput = {
+  description: string | null;
+  recordedOn: string | null;
+  creditPersonIds: string[];
 };
 
 export type RecordingParseResult<T> =
@@ -73,6 +92,22 @@ export function parseRecordingUpdate(value: unknown): RecordingParseResult<Recor
       recordedOn: result.data.recordedOn || null,
       creditPersonIds: result.data.creditPersonIds,
       revision: result.data.revision,
+    },
+  };
+}
+
+export function parseRecordingCreateMetadata(
+  value: unknown,
+): RecordingParseResult<RecordingCreateMetadataInput> {
+  const result = createRecordingMetadataSchema.safeParse(value);
+  if (!result.success) return { success: false, fields: fieldsFromError(result.error) };
+  const description = result.data.description?.trim() || null;
+  return {
+    success: true,
+    data: {
+      description,
+      recordedOn: result.data.recordedOn || null,
+      creditPersonIds: result.data.creditPersonIds,
     },
   };
 }

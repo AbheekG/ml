@@ -9,7 +9,8 @@ const editingMigration = readFileSync(resolve("migrations/0002_editing_foundatio
 const songWritesMigration = readFileSync(resolve("migrations/0003_song_writes.sql"), "utf8");
 const audioDerivativesMigration = readFileSync(resolve("migrations/0004_audio_derivatives.sql"), "utf8");
 const audioProcessingJobsMigration = readFileSync(resolve("migrations/0005_audio_processing_jobs.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}`;
+const recordingUploadSessionsMigration = readFileSync(resolve("migrations/0006_recording_upload_sessions.sql"), "utf8");
+const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}`;
 const timestamp = "2026-07-12T00:00:00.000Z";
 
 function runSql(sql: string): string {
@@ -23,7 +24,7 @@ function runSql(sql: string): string {
 function migrateLegacy(beforeMigration: string, afterMigration: string): string {
   return execFileSync("sqlite3", [":memory:"], {
     encoding: "utf8",
-    input: `${initialMigration}\n${beforeMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${afterMigration}`,
+    input: `${initialMigration}\n${beforeMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${afterMigration}`,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -31,6 +32,247 @@ function migrateLegacy(beforeMigration: string, afterMigration: string): string 
 describe("initial database schema", () => {
   it("loads successfully", () => {
     expect(() => runSql("PRAGMA foreign_key_check;")).not.toThrow();
+  });
+
+  it("enforces durable Recording upload session, credit, and exact part relationships", () => {
+    const output = runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO people (
+        id, full_name, normalized_name, created_at, updated_at
+      ) VALUES ('person-1', 'Contributor', 'contributor', '${timestamp}', '${timestamp}');
+      INSERT INTO recording_upload_sessions (
+        id, song_id, client_mutation_id, request_fingerprint,
+        original_filename, byte_size, part_size, part_count, object_key,
+        status, revision, expires_at, created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'recording.bin', 8388609, 8388608, 2, 'recordings/original/upload-1',
+        'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      INSERT INTO recording_upload_credits (session_id, person_id, role, sort_order)
+      VALUES ('upload-1', 'person-1', 'vocals', 0);
+      UPDATE recording_upload_sessions
+      SET r2_upload_id = 'multipart-1', status = 'open', revision = 2
+      WHERE id = 'upload-1';
+      INSERT INTO recording_upload_parts (
+        session_id, part_number, etag, byte_size, uploaded_at, uploaded_by
+      ) VALUES
+        ('upload-1', 1, 'etag-1', 8388608, '${timestamp}', 'test'),
+        ('upload-1', 2, 'etag-2', 1, '${timestamp}', 'test');
+      UPDATE recording_upload_sessions
+      SET revision = 3, updated_at = '2026-07-12T00:00:01.000Z', updated_by = 'test'
+      WHERE id = 'upload-1' AND revision = 2;
+      INSERT INTO recording_upload_parts (
+        session_id, part_number, etag, byte_size, uploaded_at, uploaded_by
+      )
+      SELECT 'upload-1', 1, 'etag-1-retry', 8388608, '2026-07-12T00:00:01.000Z', 'test'
+      WHERE EXISTS (
+        SELECT 1 FROM recording_upload_sessions
+        WHERE id = 'upload-1' AND status = 'open' AND revision = 3
+      )
+      ON CONFLICT(session_id, part_number) DO UPDATE SET
+        etag = excluded.etag,
+        byte_size = excluded.byte_size,
+        uploaded_at = excluded.uploaded_at,
+        uploaded_by = excluded.uploaded_by;
+      SELECT status || '|' || revision || '|' || (
+        SELECT COUNT(*) FROM recording_upload_parts WHERE session_id = 'upload-1'
+      ) || '|' || (
+        SELECT etag FROM recording_upload_parts
+        WHERE session_id = 'upload-1' AND part_number = 1
+      ) FROM recording_upload_sessions WHERE id = 'upload-1';
+    `);
+    expect(output).toBe("open|3|2|etag-1-retry\n");
+
+    expect(() => runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO recording_upload_sessions (
+        id, song_id, client_mutation_id, request_fingerprint,
+        original_filename, byte_size, part_size, part_count, object_key,
+        status, revision, expires_at, created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'recording.bin', 8388609, 8388608, 2, 'recordings/original/upload-1',
+        'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      UPDATE recording_upload_sessions
+      SET r2_upload_id = 'multipart-1', status = 'open', revision = 2
+      WHERE id = 'upload-1';
+      INSERT INTO recording_upload_parts (
+        session_id, part_number, etag, byte_size, uploaded_at, uploaded_by
+      ) VALUES ('upload-1', 2, 'etag-2', 2, '${timestamp}', 'test');
+    `)).toThrow(/invalid_recording_upload_part/);
+  });
+
+  it("blocks Song Trash during a live Recording upload and permits it after abort", () => {
+    const output = runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO recording_upload_sessions (
+        id, song_id, client_mutation_id, request_fingerprint,
+        original_filename, byte_size, part_size, part_count, object_key,
+        status, revision, expires_at, created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'recording.bin', 1, 8388608, 1, 'recordings/original/upload-1',
+        'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      UPDATE recording_upload_sessions SET status = 'aborted', revision = 2 WHERE id = 'upload-1';
+      UPDATE songs SET trashed_at = '${timestamp}', trashed_by = 'test' WHERE id = 'song-1';
+      SELECT CASE WHEN trashed_at IS NOT NULL THEN 'trashed' ELSE 'active' END FROM songs;
+    `);
+    expect(output).toBe("trashed\n");
+
+    expect(() => runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO recording_upload_sessions (
+        id, song_id, client_mutation_id, request_fingerprint,
+        original_filename, byte_size, part_size, part_count, object_key,
+        status, revision, expires_at, created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'recording.bin', 1, 8388608, 1, 'recordings/original/upload-1',
+        'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      UPDATE songs SET trashed_at = '${timestamp}', trashed_by = 'test' WHERE id = 'song-1';
+    `)).toThrow(/song_has_active_recording_upload/);
+  });
+
+  it("binds duplicate and finalized uploads to the exact original fingerprint", () => {
+    const output = runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO recording_upload_sessions (
+        id, song_id, client_mutation_id, request_fingerprint,
+        original_filename, byte_size, part_size, part_count, object_key,
+        status, revision, expires_at, created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'recording.bin', 1, 8388608, 1, 'recordings/original/upload-1',
+        'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      UPDATE recording_upload_sessions
+      SET r2_upload_id = 'multipart-1', status = 'open', revision = 2
+      WHERE id = 'upload-1';
+      UPDATE recording_upload_sessions SET status = 'completing', revision = 3 WHERE id = 'upload-1';
+      UPDATE recording_upload_sessions
+      SET status = 'stored', sha256 = '${"b".repeat(64)}', revision = 4
+      WHERE id = 'upload-1';
+      INSERT INTO media_objects (
+        id, object_key, original_filename, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'media-existing', 'recordings/existing/original', 'existing.bin', 1,
+        '${"b".repeat(64)}', 'original_audio', '${timestamp}', 'test'
+      );
+      INSERT INTO recordings (
+        id, song_id, original_media_id, description, normalized_description,
+        processing_state, created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'recording-existing', 'song-1', 'media-existing', 'Existing', 'existing',
+        'ready', '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      UPDATE recording_upload_sessions
+      SET status = 'duplicate', duplicate_media_id = 'media-existing', revision = 5
+      WHERE id = 'upload-1';
+      SELECT status || '|' || duplicate_media_id FROM recording_upload_sessions WHERE id = 'upload-1';
+    `);
+    expect(output).toBe("duplicate|media-existing\n");
+
+    expect(() => runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO recording_upload_sessions (
+        id, song_id, client_mutation_id, request_fingerprint,
+        original_filename, byte_size, part_size, part_count, object_key,
+        status, revision, expires_at, created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'recording.bin', 1, 8388608, 1, 'recordings/original/upload-1',
+        'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      UPDATE recording_upload_sessions
+      SET r2_upload_id = 'multipart-1', status = 'open', revision = 2
+      WHERE id = 'upload-1';
+      UPDATE recording_upload_sessions SET status = 'completing', revision = 3 WHERE id = 'upload-1';
+      UPDATE recording_upload_sessions
+      SET status = 'stored', sha256 = '${"b".repeat(64)}', revision = 4
+      WHERE id = 'upload-1';
+      INSERT INTO media_objects (
+        id, object_key, original_filename, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'media-wrong', 'recordings/wrong/original', 'wrong.bin', 1,
+        '${"c".repeat(64)}', 'original_audio', '${timestamp}', 'test'
+      );
+      UPDATE recording_upload_sessions
+      SET status = 'duplicate', duplicate_media_id = 'media-wrong', revision = 5
+      WHERE id = 'upload-1';
+    `)).toThrow(/invalid_recording_upload_duplicate/);
+
+    const finalized = runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO recording_upload_sessions (
+        id, song_id, client_mutation_id, request_fingerprint,
+        original_filename, byte_size, part_size, part_count, object_key,
+        status, revision, expires_at, created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'recording.bin', 1, 8388608, 1, 'recordings/original/upload-1',
+        'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      UPDATE recording_upload_sessions
+      SET r2_upload_id = 'multipart-1', status = 'open', revision = 2
+      WHERE id = 'upload-1';
+      UPDATE recording_upload_sessions SET status = 'completing', revision = 3 WHERE id = 'upload-1';
+      UPDATE recording_upload_sessions
+      SET status = 'stored', sha256 = '${"b".repeat(64)}', revision = 4
+      WHERE id = 'upload-1';
+      INSERT INTO media_objects (
+        id, object_key, original_filename, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'media-1', 'recordings/original/upload-1', 'recording.bin', 1,
+        '${"b".repeat(64)}', 'original_audio', '${timestamp}', 'test'
+      );
+      INSERT INTO recordings (
+        id, song_id, original_media_id, description, normalized_description,
+        processing_state, created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'recording-1', 'song-1', 'media-1', 'Recording', 'recording',
+        'processing', '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      INSERT INTO audio_processing_jobs (
+        id, recording_id, source_media_id, source_sha256, source_byte_size,
+        policy_id, status, created_at, updated_at
+      ) VALUES (
+        'job-1', 'recording-1', 'media-1', '${"b".repeat(64)}', 1,
+        'mp3-v1-libmp3lame-q2', 'pending', '${timestamp}', '${timestamp}'
+      );
+      UPDATE recording_upload_sessions
+      SET status = 'finalized', recording_id = 'recording-1', revision = 5
+      WHERE id = 'upload-1';
+      SELECT status || '|' || recording_id FROM recording_upload_sessions WHERE id = 'upload-1';
+    `);
+    expect(finalized).toBe("finalized|recording-1\n");
   });
 
   it("creates a durable pending audio job only for its active fingerprinted original", () => {
@@ -124,6 +366,10 @@ describe("initial database schema", () => {
       SET status = 'running', attempt_count = 1,
           lease_token_hash = '${"b".repeat(64)}', lease_expires_at = '2026-07-12T00:05:00.000Z'
       WHERE id = 'job-1';
+      UPDATE recordings
+      SET playback_media_id = original_media_id,
+          processing_state = 'ready', processing_error = NULL
+      WHERE id = 'recording-1';
       UPDATE audio_processing_jobs
       SET status = 'succeeded', lease_token_hash = NULL, lease_expires_at = NULL,
           playback_kind = 'original'
