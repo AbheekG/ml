@@ -21,7 +21,7 @@ Use one TypeScript Cloudflare Worker project that serves both the PWA static ass
 - private R2 for scans, original audio, and playback derivatives;
 - Cloudflare Access for allowlisted identity at the deployed boundary.
 
-Audio decode validation and conversion are deliberately outside the 128 MB Worker runtime. Use the provider-neutral Python/FFmpeg core described in [audio-processing.md](audio-processing.md): run existing-media preparation locally, and later wrap the same core in a scale-to-zero Google Cloud Run service for rare new uploads. Keep the Cloudflare Worker on the Free plan unless later evidence justifies changing it. Cloud project/billing setup remains an explicit owner action.
+Audio decode validation and conversion are deliberately outside the 128 MB Worker runtime. Use the provider-neutral Python/FFmpeg core described in [audio-processing.md](audio-processing.md): run existing-media preparation locally, and later execute the same core once per single-task scheduled Cloud Run Job for rare new uploads, as proposed in [audio-processing-invocation.md](audio-processing-invocation.md). Do not add an HTTP server for this boundary. Keep the Cloudflare Worker on the Free plan unless later evidence justifies changing it. Cloud project/billing setup remains an explicit owner action.
 
 Existing prepared derivatives cross the cloud boundary through a reviewed deterministic plan and a dry-run-by-default executor. R2 upload and D1 finalization remain separate owner-approved commands. Upload is resumable and content-verified; D1 finalization requires the schema migration to exist, re-verifies the complete R2 set, and uses guarded live-state preconditions in one rollback-safe import. The executor does not deploy, apply migrations, or combine these external approvals.
 
@@ -54,7 +54,12 @@ directory with exact length/hash enforcement, uploads only a reverified selected
 derivative, and sends bounded idempotent result/failure callbacks. A result
 delivery that may already have committed never becomes a contradictory failure
 callback. No HTTP server/trigger, container, scheduler, real secret, Cloud Run
-resource, or other hosted invocation mechanism has been selected or created.
+resource, or other hosted invocation mechanism has been created. The proposed
+local boundary selects a scheduled single-task Cloud Run Job, but first requires
+a database-enforced global running-job gate, bounded lease-loss recovery, a
+45-minute processor deadline and generated-output ceiling, aggregate-only
+entrypoint behavior, and local container/resource verification. Every cloud
+action remains separately owner-approved.
 
 Proposed application tooling:
 

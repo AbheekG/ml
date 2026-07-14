@@ -56,7 +56,7 @@ The conversion core is a small Python module that invokes FFmpeg without contain
 - A dry-run-by-default executor consumes only that exact plan. Its R2 phase compares any existing deterministic object by size and SHA-256, uploads only a missing object, verifies the stored bytes, and atomically checkpoints each completed object in ignored private state. A rerun reuses verified objects and refuses conflicting bytes.
 - The separately authorized D1 phase requires the reviewed plan hash, complete upload state, a fresh verification of every planned R2 object, and the already-applied derivative-provenance migration. It submits one guarded import whose live row/revision preconditions and final relationship reconciliation fail the whole database transaction if the catalog has diverged. It never applies schema migrations automatically.
 - R2 and D1 cannot share one cross-service transaction. If upload succeeds but D1 is rejected, the new objects remain private and unreferenced; the saved state and idempotent guards make review and retry safe without deleting or replacing source media.
-- A provider-neutral local HTTP adapter now handles one claimed job per call around the same conversion core. Choosing its server/trigger and deploying it on a later scale-to-zero service remain separate work.
+- A provider-neutral local HTTP adapter now handles one claimed job per call around the same conversion core. The proposed invocation boundary uses a single-task scheduled Cloud Run Job with no HTTP server; its local prerequisites and still-unapproved cloud gates are defined in [audio-processing-invocation.md](audio-processing-invocation.md).
 - The Cloudflare Worker now implements the local control-plane half: separate processor authentication, FIFO pending-job claim, one-hour leases, expired-lease recovery, operation-scoped transfer authorization, immutable derivative attempts, independent R2 byte verification, privacy-safe failure state, explicit editor retry, and atomic finalization.
 - The hosted service receives no permanent public media URL and should not require broad R2 credentials.
 
@@ -74,7 +74,7 @@ capabilities must name different paths, and the eventual HTTP transfer client
 must reject or revalidate every redirect against the same allowlist rather than
 following an allowlisted URL to an arbitrary host.
 
-Cloud Run project creation, billing activation, secrets, and deployment remain separate owner-approved external actions after local conversion behavior is tested.
+Cloud Run project creation, billing activation, secrets, scheduling, and deployment remain separate owner-approved external actions after the local concurrency, deadline, output-bound, entrypoint, and container behavior is tested.
 
 ## Worker processing control plane
 
@@ -103,13 +103,16 @@ one D1 batch whose final job guard rolls every catalog change back unless the
 Recording, playback media, and provenance graph is complete. A response lost
 after commit is reconciled from the succeeded job and returns idempotently.
 
-The local processor adapter deliberately does not choose how the scale-to-zero
-service is invoked. It never retries claim, so one invocation cannot strand one
+The local processor adapter remains independent of the proposed scale-to-zero
+Job invocation. It never retries claim, so one invocation cannot strand one
 lease and then claim a second job after an ambiguous response. Source and
 derivative transfers plus result/failure callbacks reject redirects; exact
 source length/hash and selected derivative length/hash are checked again before
 use. Result and failure delivery retries are bounded and idempotent, and a result
 delivery that may already have committed is never followed by a failure
-callback. No processor token/origin is configured in staging, and no HTTP
-server, Cloud Run service, scheduler, credentials, infrastructure, or deployment
-is part of this slice.
+callback. Before hosting, the Worker must globally prevent concurrent running
+jobs and bound repeated lease-expiry recovery, while the adapter must enforce a
+soft deadline and generated-output limit below the platform timeout. No
+processor token/origin is configured in staging, and no HTTP server, Cloud Run
+Job, scheduler, credentials, infrastructure, or deployment is part of this
+local design.

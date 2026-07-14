@@ -88,3 +88,6 @@ payload parsed here), `resultUrl`, `failureUrl`, and the lease expiry. The local
 adapter authenticates claim/result/failure with the separately supplied token and
 uses only the strict operation-scoped URLs. No command-line secret interface,
 HTTP server, container, cloud credentials, scheduling, or deployment is included.
+The separately reviewable proposed run-once Job boundary and its required local
+safeguards are documented in
+[`docs/audio-processing-invocation.md`](../../docs/audio-processing-invocation.md).
