@@ -43,7 +43,7 @@ Before a derivative can become the playback source:
 4. verify MP3 codec/container, positive duration, expected channel/sample-rate bounds, and duration agreement with the original;
 5. calculate SHA-256 and byte size;
 6. apply the 20% saving rule when the source was already a canonical oversized MP3;
-7. publish the accepted derivative with provenance that binds its hash to the original hash and conversion-policy version, then mark the Recording ready.
+7. publish the accepted derivative with provenance that binds its hash and byte size to the original hash/size and conversion-policy version, then mark the Recording ready. Local preparation uses the adjacent JSON sidecar; catalog integration records the same binding in `audio_derivatives`.
 
 Failures retain the original and remain retryable. Partial or rejected outputs are not catalog media.
 
@@ -52,6 +52,7 @@ Failures retain the original and remain retryable. Partial or rejected outputs a
 The conversion core is a small Python module that invokes FFmpeg without containing storage- or cloud-specific logic.
 
 - A dry-run/idempotent local adapter prepares existing imported derivatives into a new output area and reports aggregate reconciliation without modifying `appsheet/`.
+- A separate planner re-hashes the prepared set and proposes deterministic private object keys, original fingerprint backfills, derivative/provenance rows, and Recording playback references. It cannot upload or mutate D1/R2; those remain separately reviewed actions.
 - A later HTTP adapter handles rare new uploads on a scale-to-zero Google Cloud Run service.
 - The Cloudflare Worker remains responsible for authorization, D1/R2 state, expiring job-scoped transfer authorization, retry orchestration, and atomic finalization.
 - The hosted service receives no permanent public media URL and should not require broad R2 credentials.

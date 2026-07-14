@@ -117,3 +117,11 @@ npm run media:upload -- --write
 ```
 
 Progress is stored under ignored `data/import-output/`; private filenames are not printed. Unlinked files are preserved locally and excluded from upload.
+
+After the ignored audio batch has produced and reverified local playback derivatives, reconcile a proposed catalog/R2 integration without changing D1, R2, or any source file:
+
+```bash
+npm run media:plan-audio
+```
+
+Add `-- --write-plan` only to save the detailed proposed operations under ignored `data/import-output/`. This command never applies the plan or contacts cloud services. Review its aggregate counts before separately authorizing any future upload or database write.

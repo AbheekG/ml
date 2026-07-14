@@ -24,6 +24,7 @@ Scan ── optional Notebook
 - `scans` references exactly one private media object and exposes optional Notebook/Page metadata. Imported Source, Version, Date, ScanText, and Notes remain preserved in hidden `legacy_*` columns but are not part of the initial editor model.
 - `recordings` stores one required, normalized-unique per-Song description, optional recorded date and contributors, processing state, an original media object, and an optional playback object. Imported Version and the four populated Notes are combined losslessly for display and also remain in hidden `legacy_*` columns.
 - `media_objects` stores private R2 object metadata and recovery state; binary data does not enter D1.
+- `audio_derivatives` immutably binds each playback-audio media object to its original-audio source, conversion-policy ID, and the verified source/derivative hashes and byte sizes.
 - `people`, `song_credits`, and `recording_credits` model contributors using stable contribution codes (`lyrics`, `music`, `vocals`, and later instrument/production codes) with friendly display labels.
 - `languages`, `tags`, and `notebooks` are controlled lookup records.
 - join tables model Song languages and tags without comma-separated IDs.
@@ -60,5 +61,6 @@ Scan ── optional Notebook
 - The exact preferred-source, quality, validation, and oversized-MP3 rules are defined in [audio-processing.md](audio-processing.md).
 - File signatures and decodability are checked from content rather than trusting filename extensions.
 - SHA-256 is recorded for upload verification and duplicate detection. Equal content does not automatically merge distinct historical records.
+- A Recording may point directly to its original media or to a playback derivative whose `audio_derivatives` provenance row names that same original. Database guards reject unrelated playback objects and later hash/size changes that would invalidate recorded provenance.
 - New Scan creation currently accepts verified JPEG, PNG, or WebP files up to 25 MB, stores the original privately, and rejects an existing Scan fingerprint before uploading. If D1 finalization fails after R2 storage, the uncommitted object is removed. Readability-sized image derivatives and replacement are separate later work.
 - Files present on disk but absent from the workbook are quarantined for review and are not silently uploaded or deleted.

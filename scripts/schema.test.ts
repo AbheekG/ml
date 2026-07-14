@@ -7,7 +7,8 @@ import { createSeedSql } from "./load-local-db";
 const initialMigration = readFileSync(resolve("migrations/0001_initial.sql"), "utf8");
 const editingMigration = readFileSync(resolve("migrations/0002_editing_foundation.sql"), "utf8");
 const songWritesMigration = readFileSync(resolve("migrations/0003_song_writes.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}`;
+const audioDerivativesMigration = readFileSync(resolve("migrations/0004_audio_derivatives.sql"), "utf8");
+const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}`;
 const timestamp = "2026-07-12T00:00:00.000Z";
 
 function runSql(sql: string): string {
@@ -21,7 +22,7 @@ function runSql(sql: string): string {
 function migrateLegacy(beforeMigration: string, afterMigration: string): string {
   return execFileSync("sqlite3", [":memory:"], {
     encoding: "utf8",
-    input: `${initialMigration}\n${beforeMigration}\n${editingMigration}\n${songWritesMigration}\n${afterMigration}`,
+    input: `${initialMigration}\n${beforeMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${afterMigration}`,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -354,6 +355,15 @@ describe("initial database schema", () => {
       ) VALUES
         ('original-1', 'recordings/original.wav', 'original.wav', 'audio/wav', 4321, 'original-hash', 'original_audio', '${timestamp}', 'test'),
         ('playback-1', 'recordings/playback.mp3', 'playback.mp3', 'audio/mpeg', 1234, 'playback-hash', 'playback_audio', '${timestamp}', 'test');
+      UPDATE media_objects SET sha256 = '${"a".repeat(64)}' WHERE id = 'original-1';
+      UPDATE media_objects SET sha256 = '${"b".repeat(64)}' WHERE id = 'playback-1';
+      INSERT INTO audio_derivatives (
+        playback_media_id, source_media_id, policy_id,
+        source_sha256, source_byte_size, derivative_sha256, derivative_byte_size
+      ) VALUES (
+        'playback-1', 'original-1', 'test-policy',
+        '${"a".repeat(64)}', 4321, '${"b".repeat(64)}', 1234
+      );
       INSERT INTO recordings (
         id, song_id, original_media_id, playback_media_id,
         description, normalized_description, recorded_on,
@@ -391,6 +401,118 @@ describe("initial database schema", () => {
     `);
 
     expect(output).toBe("Old verse|2020-02-29|3|recordings/original.wav|active|recordings/playback.mp3|active|vocals|Singer\n");
+  });
+
+  it("binds a playback derivative to its verified source and policy", () => {
+    const output = runSql(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES
+        ('original-1', 'recordings/original.wav', 'original.wav', 'audio/wav', 4321, '${"a".repeat(64)}', 'original_audio', '${timestamp}', 'test'),
+        ('playback-1', 'recordings/playback.mp3', 'playback.mp3', 'audio/mpeg', 1234, '${"b".repeat(64)}', 'playback_audio', '${timestamp}', 'test');
+      INSERT INTO audio_derivatives (
+        playback_media_id, source_media_id, policy_id,
+        source_sha256, source_byte_size, derivative_sha256, derivative_byte_size
+      ) VALUES (
+        'playback-1', 'original-1', 'test-policy',
+        '${"a".repeat(64)}', 4321, '${"b".repeat(64)}', 1234
+      );
+      SELECT source_media_id || '|' || policy_id FROM audio_derivatives;
+    `);
+
+    expect(output).toBe("original-1|test-policy\n");
+  });
+
+  it("rejects mismatched or mutable derivative provenance", () => {
+    expect(() => runSql(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES
+        ('original-1', 'recordings/original.wav', 'original.wav', 4321, '${"a".repeat(64)}', 'original_audio', '${timestamp}', 'test'),
+        ('playback-1', 'recordings/playback.mp3', 'playback.mp3', 1234, '${"b".repeat(64)}', 'playback_audio', '${timestamp}', 'test');
+      INSERT INTO audio_derivatives (
+        playback_media_id, source_media_id, policy_id,
+        source_sha256, source_byte_size, derivative_sha256, derivative_byte_size
+      ) VALUES (
+        'playback-1', 'original-1', 'test-policy',
+        '${"c".repeat(64)}', 4321, '${"b".repeat(64)}', 1234
+      );
+    `)).toThrow(/invalid_audio_derivative_provenance/);
+
+    expect(() => runSql(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES
+        ('original-1', 'recordings/original.wav', 'original.wav', 4321, '${"a".repeat(64)}', 'original_audio', '${timestamp}', 'test'),
+        ('playback-1', 'recordings/playback.mp3', 'playback.mp3', 1234, '${"b".repeat(64)}', 'playback_audio', '${timestamp}', 'test');
+      INSERT INTO audio_derivatives (
+        playback_media_id, source_media_id, policy_id,
+        source_sha256, source_byte_size, derivative_sha256, derivative_byte_size
+      ) VALUES (
+        'playback-1', 'original-1', 'test-policy',
+        '${"a".repeat(64)}', 4321, '${"b".repeat(64)}', 1234
+      );
+      UPDATE media_objects SET byte_size = 4322 WHERE id = 'original-1';
+    `)).toThrow(/media_is_bound_to_derivative_provenance/);
+  });
+
+  it("rejects a Recording playback source without matching provenance", () => {
+    expect(() => runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES
+        ('original-1', 'recordings/original.wav', 'original.wav', 4321, '${"a".repeat(64)}', 'original_audio', '${timestamp}', 'test'),
+        ('playback-1', 'recordings/playback.mp3', 'playback.mp3', 1234, '${"b".repeat(64)}', 'playback_audio', '${timestamp}', 'test');
+      INSERT INTO recordings (
+        id, song_id, original_media_id, playback_media_id,
+        description, normalized_description,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'recording-1', 'song-1', 'original-1', 'playback-1',
+        'Test recording', 'test recording',
+        '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+    `)).toThrow(/invalid_recording_audio_relationship/);
+  });
+
+  it("retains derivative provenance while a Recording uses it", () => {
+    expect(() => runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES
+        ('original-1', 'recordings/original.wav', 'original.wav', 4321, '${"a".repeat(64)}', 'original_audio', '${timestamp}', 'test'),
+        ('playback-1', 'recordings/playback.mp3', 'playback.mp3', 1234, '${"b".repeat(64)}', 'playback_audio', '${timestamp}', 'test');
+      INSERT INTO audio_derivatives (
+        playback_media_id, source_media_id, policy_id,
+        source_sha256, source_byte_size, derivative_sha256, derivative_byte_size
+      ) VALUES (
+        'playback-1', 'original-1', 'test-policy',
+        '${"a".repeat(64)}', 4321, '${"b".repeat(64)}', 1234
+      );
+      INSERT INTO recordings (
+        id, song_id, original_media_id, playback_media_id,
+        description, normalized_description,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'recording-1', 'song-1', 'original-1', 'playback-1',
+        'Test recording', 'test recording',
+        '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      DELETE FROM audio_derivatives WHERE playback_media_id = 'playback-1';
+    `)).toThrow(/audio_derivative_is_in_use/);
   });
 
   it("rejects restoring typed lyrics when identical active content now exists", () => {

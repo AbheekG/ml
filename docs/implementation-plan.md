@@ -70,6 +70,7 @@ Deliverable: repeatable local database creation from `appsheet/data.xlsx` with n
    - use browser media-capability checks only to select or verify already prepared sources, not to trigger device-specific conversion;
    - support HTTP range requests for seeking and efficient mobile streaming;
    - verify uploads with byte size and SHA-256 before marking media available.
+   - retain immutable source/policy/hash/size provenance for every playback derivative and reject a Recording reference to an unrelated derivative;
    - show scans in an in-app near-fullscreen lightbox with a small close control, zoom, and optional fullscreen mode instead of opening a bare browser tab;
    - generate readability-preserving scan derivatives sized for pages no larger than A4, using a broadly supported efficient image format;
    - retain scan originals until derivative quality is visually accepted and the owner explicitly approves any later archival or deletion policy.
