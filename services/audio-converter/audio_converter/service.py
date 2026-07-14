@@ -207,17 +207,21 @@ def prepare(
     source_decision = decide(source_info, policy)
     original_summary = summarize(source, source_info)
 
+    if output is not None:
+        output = output.resolve(strict=False)
+        if output == source:
+            raise PreparationError("output_must_not_replace_original")
+
     if source_decision.kind is DecisionKind.USE_ORIGINAL:
+        if output is not None and (
+            output.exists() or manifest_path(output).exists()
+        ):
+            raise PreparationError("unneeded_output_for_original")
         return PreparationResult(
             status="original_is_playback",
             decision=source_decision,
             original=original_summary,
         )
-
-    if output is not None:
-        output = output.resolve(strict=False)
-        if output == source:
-            raise PreparationError("output_must_not_replace_original")
 
     if output is not None and output.exists():
         if not output.is_file():

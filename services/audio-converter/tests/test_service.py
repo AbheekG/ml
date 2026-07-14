@@ -129,6 +129,27 @@ class PreparationTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertEqual(tools.transcodes, 0)
 
+    def test_unneeded_existing_output_for_valid_mp3_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.mp3"
+            output = root / "output.mp3"
+            source.write_bytes(b"original")
+            output.write_bytes(b"stale")
+            source_info = info(
+                codec="mp3",
+                containers=("mp3",),
+                byte_size=8,
+                bit_rate=192_000,
+            )
+            tools = FakeTools(source, source_info, source_info)
+
+            with self.assertRaisesRegex(
+                PreparationError,
+                "unneeded_output_for_original",
+            ):
+                prepare(tools, source, output=output, execute=False)
+
     def test_execute_atomically_publishes_verified_derivative(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

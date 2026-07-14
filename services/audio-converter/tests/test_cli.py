@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from audio_converter.cli import PROJECT_ROOT, _validate_output
+from audio_converter.safety import PROJECT_ROOT, validate_output_path
 from audio_converter.service import PreparationError
 
 
@@ -14,7 +14,7 @@ class CliSafetyTests(unittest.TestCase):
             PreparationError,
             "output_inside_protected_legacy_root",
         ):
-            _validate_output(output)
+            validate_output_path(output)
 
     def test_output_inside_woodchime_is_rejected(self) -> None:
         output = PROJECT_ROOT / "woodchime" / "output.mp3"
@@ -22,17 +22,17 @@ class CliSafetyTests(unittest.TestCase):
             PreparationError,
             "output_inside_protected_legacy_root",
         ):
-            _validate_output(output)
+            validate_output_path(output)
 
     def test_output_requires_mp3_extension(self) -> None:
         with self.assertRaisesRegex(
             PreparationError,
             "output_must_have_mp3_extension",
         ):
-            _validate_output(Path("/tmp/output.wav"))
+            validate_output_path(Path("/tmp/output.wav"))
 
     def test_separate_mp3_output_is_allowed(self) -> None:
-        _validate_output(Path("/tmp/output.mp3"))
+        validate_output_path(Path("/tmp/output.mp3"))
 
 
 if __name__ == "__main__":

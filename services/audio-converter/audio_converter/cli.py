@@ -2,38 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
+from .safety import is_opaque_label, validate_output_path
 from .service import PreparationError, prepare
 from .tools import FFmpegTools, MediaToolError
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-PROTECTED_OUTPUT_ROOTS = (
-    PROJECT_ROOT / "appsheet",
-    PROJECT_ROOT / "woodchime",
-)
-OPAQUE_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-
-
-def _is_within(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return False
-    return True
-
-
-def _validate_output(output: Path | None) -> None:
-    if output is None:
-        return
-    resolved = output.resolve(strict=False)
-    if resolved.suffix.casefold() != ".mp3":
-        raise PreparationError("output_must_have_mp3_extension")
-    if any(_is_within(resolved, root.resolve()) for root in PROTECTED_OUTPUT_ROOTS):
-        raise PreparationError("output_inside_protected_legacy_root")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -56,12 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(arguments: list[str] | None = None) -> int:
     parser = build_parser()
     options = parser.parse_args(arguments)
-    if not OPAQUE_LABEL_PATTERN.fullmatch(options.label):
+    if not is_opaque_label(options.label):
         parser.error("--label must be an opaque identifier using letters, digits, ._- only")
 
     tools = FFmpegTools(ffmpeg=options.ffmpeg, ffprobe=options.ffprobe)
     try:
-        _validate_output(options.output)
+        validate_output_path(options.output)
         tools.require_available()
         result = prepare(
             tools,
