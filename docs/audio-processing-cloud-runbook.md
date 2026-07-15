@@ -11,9 +11,11 @@ matching Worker secrets. The exact digest-pinned bounded Cloud Run Job is Ready,
 matches the reviewed specification, and has zero IAM bindings. Its first
 execution failed safely on `claim_redirect_rejected` because Cloudflare Access
 intercepted the request before the Worker. Local Service Auth support and both
-fresh `linux/amd64` proofs now pass, but no Access token/policy, Google Access
-secret, new image/scan, Job update, or retry has occurred. No Scheduler job
-exists.
+fresh `linux/amd64` proofs now pass. A dedicated service token and attached
+Service Auth policy admit the standard two headers, and the exact credential
+JSON is retained only as automatically replicated Google secret version 1 with
+one secret-level runtime accessor. No new image/scan, Job update, or retry has
+occurred. No Scheduler job exists.
 
 Use this together with [audio-processing.md](audio-processing.md),
 [audio-processing-invocation.md](audio-processing-invocation.md), and
@@ -338,6 +340,15 @@ remove the transient file. Do not use a Bypass policy, Access single-header
 mode, or ordinary environment-secret configuration. Before the Job command,
 set `ACCESS_SECRET_VERSION` to that exact numeric enabled version; never use
 `latest`.
+
+This credential phase completed under separate owner approval on 2026-07-15.
+A request carrying only the Access headers reached the processor route and
+received the expected Worker `401` for its deliberately absent processor bearer,
+proving Access admission without claiming work. Google stored an exact
+byte-matched version 1 with automatic replication and only the existing runtime
+identity as secret-level accessor. The transient local JSON was removed. The
+runtime remains keyless with zero project-wide roles; the Job, Scheduler, D1,
+R2, catalog, and registry remained unchanged.
 
 ## Phase 5 — push a reviewed digest and create a dormant Job
 

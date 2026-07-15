@@ -55,9 +55,10 @@ The responsibilities remain deliberately separate:
   account receives Cloud Run Invoker on this one Job, not project-wide editor
   access. Scheduler calls the Google API with OAuth; it never knows the audio
   processor token.
-- The Cloud Run Job runtime uses a separate service account. Its only initial
-  Google API permission is Secret Manager Secret Accessor on the one processor
-  token secret. It has no D1, R2, Cloud Storage, or catalog credential.
+- The Cloud Run Job runtime uses a separate service account. Its only Google API
+  permissions are secret-level Secret Manager Secret Accessor bindings on the
+  processor token and Access credential secrets. It has no D1, R2, Cloud
+  Storage, catalog credential, project-wide role, or user-managed key.
 - The high-entropy processor token is stored as a version-pinned Secret Manager
   file and read at process startup. The matching value remains a Cloudflare
   Worker secret. It is never a command-line argument, ordinary environment
@@ -268,6 +269,18 @@ completed with 1,073,741,824 peak temporary bytes and 1,224,548,352 conservative
 peak bytes below 2 GiB, while the 213,095,696-byte non-root runtime loaded both
 read-only dummy credential files and kept their values out of its routine
 representation. Nothing was pushed or changed in staging.
+
+The matching Service Auth credential boundary is now configured under separate
+owner approval. The dedicated Cloudflare service token is the sole Include
+selector of an attached Service Auth policy; the existing human Allow policy
+remains separate, and no Bypass or single-header mode was added. A request with
+only the standard Access headers reached the processor route and received its
+expected Worker `401` for the deliberately missing processor bearer, proving
+machine admission without claiming work. The exact strict JSON is Google secret
+version 1 with automatic replication, one secret-level runtime accessor, and an
+independent byte match. The transient local file was removed. The existing Job
+still uses the old digest/config, has exactly its one prior failed execution,
+and was not retried; Scheduler and D1 processing rows remain absent.
 
 ## Aggregate-only observability
 

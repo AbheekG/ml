@@ -56,9 +56,9 @@ Worker routes, disables redirects, streams the source into a private temporary
 directory with exact length/hash enforcement, uploads only a reverified selected
 derivative, and sends bounded idempotent result/failure callbacks. A result
 delivery that may already have committed never becomes a contradictory failure
-callback. No HTTP server is added. The credential boundary and dormant Cloud Run
-Job now exist in protected staging, but the first no-work smoke proved the
-deployed adapter still needs Cloudflare Access Service Auth credentials. The
+callback. No HTTP server is added. The dormant Cloud Run Job and both credential
+boundaries now exist in protected staging, but the first no-work smoke proved
+the deployed adapter digest does not yet send Cloudflare Service Auth headers. The
 local source now strictly loads one file-only Access client ID/secret pair,
 sends the standard two Access headers on claim and every same-origin capability
 request, retains the separate Worker bearer token, and rejects any additional
@@ -79,10 +79,13 @@ staging checks are separately reviewed in
 [audio-processing-cloud-runbook.md](audio-processing-cloud-runbook.md). Every
 remaining processor cloud action remains separately owner-approved and unexecuted.
 
-The local Service Auth checkpoint passes all 90 audio tests, 31 application
+The Service Auth checkpoint passes all 90 audio tests, 31 application
 test files / 250 tests, all three TypeScript projects, production build ID
 `e74405e5e982`, the full bounded `linux/amd64` verification fixture, and the
-non-root dual-file runtime configuration/redaction smoke. No cloud state changed.
+non-root dual-file runtime configuration/redaction smoke. Its dedicated
+Cloudflare token/policy and exact version-pinned Google file secret now exist;
+an Access-only request reached the processor route without claiming work. The
+existing image, Job, Scheduler, D1, R2, and application data did not change.
 
 The imported-Scan fingerprint inventory and deterministic local planner are now
 implemented. The planner streams and hashes all catalog-linked Scan sources,
@@ -164,9 +167,11 @@ first Bookworm image was pushed only for vulnerability review and is blocked
 from deployment. Its hardened Debian 13/FFmpeg 7.1 replacement was pushed by
 exact owner-reviewed commit tag, resolved to the proved local digest, scanned,
 and passed the reviewed package/reachability gate for a future digest-pinned
-Job. One automatically replicated processor secret has one enabled version and
-only a secret-level runtime accessor; the matching token and exact transfer
-origin are Worker secrets. The exact reviewed digest is configured as a dormant
+Job. The automatically replicated processor and Access credential secrets each
+have one enabled version and only a secret-level runtime accessor; the matching
+processor token and exact transfer origin are Worker secrets, while an attached
+Cloudflare Service Auth policy selects only the dedicated service token. The
+exact reviewed digest is configured as a dormant
 Ready Cloud Run Job with the bounded resource and environment contract; it has
 one failed execution and no invoker binding. The execution loaded configuration
 and then failed closed on `claim_redirect_rejected` because Cloudflare Access
