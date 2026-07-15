@@ -182,6 +182,26 @@ fixture must verify successful processing and cleanup within 2 GiB before cloud
 creation. Increase memory only from measured evidence. Do not depend on the
 Preview ephemeral-disk feature for the initial deployment.
 
+The local container definition now pins the immutable multi-platform digest for
+`python:3.13.14-slim-bookworm` and Debian bookworm-security FFmpeg
+`7:5.1.9-0+deb12u1`. The final image contains only the processor package, uses
+fixed UID/GID `10001:10001`, and starts the run-once entrypoint directly. A
+separate verification target carries only generated resource fixtures; it is not
+part of the final runtime stage.
+
+The full fixture passed on the local host with FFmpeg 8.1.2 on 2026-07-15. Its
+dense storage phase held 512 MiB source and output stand-ins simultaneously
+(1,073,741,824 bytes), and its processing phase created and strict-decoded an
+11,185,197-byte derivative from a 512 MiB source. The conservative peak after
+adding process RSS was 1,123,958,784 bytes, below 2 GiB, and the private fixture
+directory was removed. The generated-output kill path remains independently
+subprocess-tested.
+No Docker-compatible runtime was installed, so building and executing the pinned
+Linux image, confirming libmp3lame inside it, enforcing its cgroup limits, and
+proving mounted secret/temporary-volume permissions as the non-root user remain
+required local or staging smoke checks. This unavailable check is not reported
+as passed.
+
 ## Aggregate-only observability
 
 The entrypoint may emit one structured outcome containing only:
@@ -252,7 +272,10 @@ The smallest safe sequence after this design is accepted is:
 3. minimal run-once entrypoint with strict configuration loading, file-only
    processor secret, aggregate logging, and exit-code tests: implemented
    locally;
-4. add and locally test a pinned, non-root FFmpeg container and resource fixture;
+4. pinned non-root FFmpeg container and resource fixture: implemented; static
+   policy tests and the full host resource/cleanup fixture pass, while the image
+   build/run checks remain unavailable because no Docker-compatible runtime is
+   installed;
 5. separately review exact cloud commands, identities, costs, secret rotation,
    rollback, and staging verification; and
 6. only with explicit owner approval, create/configure the remaining runtime

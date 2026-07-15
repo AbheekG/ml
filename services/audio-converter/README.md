@@ -115,3 +115,54 @@ Bounded timeout, retry, source/derivative/generated-byte, soft-deadline, and
 minimum-lease settings may be overridden only through the documented
 `AUDIO_PROCESSOR_` names enforced in `hosted_entrypoint.py`. An
 `AUDIO_PROCESSOR_TOKEN` environment value and unknown prefixed names are rejected.
+
+## Container and resource fixture
+
+The final `runtime` image is based on the immutable multi-platform digest for
+`python:3.13.14-slim-bookworm` and installs Debian bookworm-security FFmpeg
+`7:5.1.9-0+deb12u1` exactly. It copies only the Python package, defines no secret,
+runs the hosted entrypoint as fixed UID/GID `10001:10001`, and has a private
+working directory. Updating either pin is a deliberate reviewed change; do not
+silently substitute a moving tag or unversioned FFmpeg package.
+
+Build and inspect the production target from this directory when a Docker-compatible
+runtime is available:
+
+```sh
+docker build --target runtime --tag music-library-audio-converter:local .
+docker image inspect \
+  --format '{{.Config.User}} {{.Size}}' \
+  music-library-audio-converter:local
+docker run --rm \
+  --entrypoint sh \
+  music-library-audio-converter:local \
+  -c 'test "$(id -u):$(id -g)" = "10001:10001" && ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libmp3lame && ffprobe -version >/dev/null'
+```
+
+The separate `verification` target contains generated fixtures, not private
+catalog media. It first writes dense 512 MiB source and output stand-ins together
+to exercise the worst-case declared temporary footprint, then exercises the
+complete decode/transcode/strict-decode path at the 512 MiB source ceiling. It
+watches temporary bytes, measures a conservative process-RSS-plus-temporary peak
+against 2 GiB, and verifies private directory cleanup. It prints one aggregate
+JSON record with no paths, hashes, or catalog identifiers:
+
+```sh
+docker build --target verification --tag music-library-audio-converter:verify .
+docker run --rm \
+  --read-only \
+  --cpus 1 \
+  --memory 2g \
+  --tmpfs /var/lib/music-audio:rw,noexec,nosuid,nodev,size=1207959552,uid=10001,gid=10001,mode=0700 \
+  music-library-audio-converter:verify
+```
+
+On 2026-07-15 the full fixture passed on the local host's FFmpeg 8.1.2 in
+10.329 seconds: 1,073,741,824 bytes in the simultaneous storage-ceiling phase,
+536,870,912 bytes in the processed source, an 11,185,197-byte derivative, and a
+conservative 1,123,958,784-byte peak after adding process RSS. Cleanup completed.
+This is useful local resource evidence, but it
+does not substitute for running the pinned Linux image: no Docker, Podman, or
+Colima runtime was installed, so the image build, non-root process check,
+pinned FFmpeg/libmp3lame check, mounted-secret readability check, and
+container-cgroup measurement remain explicitly unavailable.

@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!audio_converter/
+!audio_converter/**
+!scripts/
+!scripts/verify_runtime_fixture.py
