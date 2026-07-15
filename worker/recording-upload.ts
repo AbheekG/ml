@@ -36,7 +36,7 @@ const recordingUploadReplacementSchema = z.object({
     .max(10_000, "Recording description is too long")
     .refine((value) => value.trim().length > 0, "Recording description must not be blank")
     .optional(),
-}).strict();
+});
 
 export type RecordingUploadCreateInput = {
   clientMutationId: string;
