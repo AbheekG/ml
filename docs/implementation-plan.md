@@ -149,10 +149,12 @@ and the isolated local CLI configuration defaults Cloud Run to `asia-south1`.
 The reviewed runtime/scanning APIs, two keyless service accounts without
 project-wide roles, and one regional scanning-enabled repository exist. The
 first Bookworm image was pushed only for vulnerability review and is blocked
-from deployment; its hardened Debian 13/FFmpeg 7.1 replacement remains local.
-No processor secret, Worker processor configuration, Cloud Run Job, Scheduler
-trigger, execution, or hosted deployment has been configured. A separate
-Google production project has not been created.
+from deployment. Its hardened Debian 13/FFmpeg 7.1 replacement was pushed by
+exact owner-reviewed commit tag, resolved to the proved local digest, scanned,
+and passed the reviewed package/reachability gate for a future digest-pinned
+Job. No processor secret, Worker processor configuration, Cloud Run Job,
+Scheduler trigger, execution, or hosted deployment has been configured. A
+separate Google production project has not been created.
 
 Never point development code at production data by default.
 

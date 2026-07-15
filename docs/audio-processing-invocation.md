@@ -209,11 +209,21 @@ derivative; conservative peak memory was 1,226,285,056 bytes, within the
 2,147,483,648-byte limit, and cleanup completed in 275,752 ms. The hardened
 213,059,213-byte runtime image reports `amd64`, runs as `10001:10001`, contains
 exact Debian 13 FFmpeg `7.1.5-0+deb13u1`, libmp3lame, and ffprobe, and loaded
-strict configuration from a read-only mounted dummy secret. It remains local
-pending a separately approved registry scan; the earlier Bookworm digest is
-blocked from deployment by its scan findings. The first approved Cloud Run
-no-work execution must still prove readability of the platform's actual
-root-owned secret volume.
+strict configuration from a read-only mounted dummy secret. That local image
+remains the proof evidence, while the exact owner-reviewed commit image is
+retained in the staging registry at its immutable OCI digest. Automatic
+analysis completed on both the tagged index and `linux/amd64` runtime manifest.
+The hardened image had
+191 occurrences: 3 critical, 8 high, 11 medium, 73 low, 86 minimal, and 10
+unrated. Debian marks the exact Mesa critical package fixed; the remaining
+critical/high findings are architecture-inapplicable or confined to absent
+Archive::Tar, local privileged filesystem utilities, XML, TIFF, or video paths
+outside this authenticated audio-only execution contract. The earlier Bookworm
+digest remains blocked. This review admits the hardened digest only to the next
+separately authorized deployment gate; it is not a standing exception for a
+future digest or changed processing path. The first approved Cloud Run no-work
+execution must still prove readability of the platform's actual root-owned
+secret volume.
 
 ## Aggregate-only observability
 

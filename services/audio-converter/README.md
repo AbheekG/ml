@@ -167,5 +167,12 @@ at a conservative 1,226,285,056-byte peak, and completed cleanup in 275,752 ms.
 The 213,059,213-byte runtime target reports `amd64`, runs as `10001:10001`,
 contains exact FFmpeg `7.1.5-0+deb13u1`, libmp3lame, and ffprobe, and reads
 strict configuration from a read-only dummy-secret mount. This hardened image
-remains local and has not been pushed or scanned; an earlier Bookworm digest was
-retained in staging only as a rejected vulnerability-review artifact.
+was pushed only after owner review under its unique commit tag, resolved back to
+the proved local OCI digest, and passed the reviewed automatic-scan/reachability
+gate for a separately authorized digest-pinned Job. Its scan completed on the
+OCI index and `linux/amd64` runtime manifest with 191 occurrences: 3 critical,
+8 high, 11 medium, 73 low, 86 minimal, and 10 unrated. The headline findings
+are fixed in the exact Debian package or outside the non-root audio-only path;
+this is a path-specific review, not permission to ignore findings after a pin or
+contract change. The earlier Bookworm digest remains a rejected staging-only
+artifact.

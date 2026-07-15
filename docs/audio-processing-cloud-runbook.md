@@ -24,8 +24,11 @@ Stop before cloud creation unless all of these are true:
    `10001:10001`, libmp3lame availability, mounted dummy-secret readability,
    bounded tmpfs writes, cleanup, and a 2 GiB cgroup pass. Both pinned
    `linux/amd64` targets and the full local fixture passed on 2026-07-15; the
-   first approved Cloud Run no-work execution must still prove the platform's
-   actual root-owned secret-volume behavior.
+   exact hardened commit image subsequently matched its independently resolved
+   registry digest and passed the reviewed automatic-scan/reachability gate;
+   every future digest requires a new review. The first approved Cloud Run
+   no-work execution must still prove the platform's actual root-owned
+   secret-volume behavior.
 3. The owner has rechecked current pricing, the existing billing budget alerts,
    shared billing-account allowance use, and whether to approve the paid image
    vulnerability scan described below.
