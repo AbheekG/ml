@@ -231,7 +231,15 @@ with only the keyless runtime identity granted secret-level accessor; that
 identity still has no project-wide role or user-managed key. The same token and
 exact protected transfer origin are Worker secrets. The transient local token
 file was removed, and no value was printed or retained in Git. No Cloud Run Job,
-Scheduler trigger, or processor execution exists yet.
+Scheduler trigger, or processor execution existed at that checkpoint.
+
+The dormant Cloud Run Job was then created under separate owner approval and is
+Ready. Its independently described specification matches the reviewed contract:
+the exact hardened digest, gen2, runtime identity, one task and parallelism one,
+zero retries, 50-minute timeout, 1 CPU, 2 GiB memory, 1,152 MiB in-memory volume,
+secret version 1 at the file path, and the exact 12 bounded environment values.
+It has no execution history or Job IAM binding, and no Scheduler job exists. The
+first manual no-work execution remains a separate gate.
 
 ## Aggregate-only observability
 

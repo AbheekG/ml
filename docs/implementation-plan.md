@@ -46,8 +46,8 @@ readiness, and job success. Safe failures are durable and editor-retryable. The
 versioned processor token and exact transfer origin are now configured across
 the least-privilege Google secret and protected Worker boundary. The control
 plane is deployed to protected staging with migrations `0005`–`0008`, but
-remains fail-closed because no processor Job exists. It has not processed a real
-upload.
+remains fail-closed because its processor Job has never executed. It has not
+processed a real upload.
 
 The provider-neutral processor-side HTTP adapter is also implemented locally as
 a one-job library boundary around the existing Python/FFmpeg `prepare()` core.
@@ -156,9 +156,11 @@ exact owner-reviewed commit tag, resolved to the proved local digest, scanned,
 and passed the reviewed package/reachability gate for a future digest-pinned
 Job. One automatically replicated processor secret has one enabled version and
 only a secret-level runtime accessor; the matching token and exact transfer
-origin are Worker secrets. No Cloud Run Job, Scheduler trigger, execution, or
-hosted processor deployment has been configured. A separate Google production
-project has not been created.
+origin are Worker secrets. The exact reviewed digest is configured as a dormant
+Ready Cloud Run Job with the bounded resource and environment contract; it has
+zero executions and no invoker binding. No Scheduler trigger or hosted processor
+execution has been configured. A separate Google production project has not
+been created.
 
 Never point development code at production data by default.
 

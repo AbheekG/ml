@@ -7,7 +7,9 @@ resume requires fresh explicit owner approval. Production is out of scope.
 
 Protected staging has separately completed the reviewed prerequisite, image
 scan, and credential-boundary phases through Secret Manager version 1 and the
-matching Worker secrets. No Cloud Run Job, execution, or Scheduler job exists.
+matching Worker secrets. The exact digest-pinned bounded Cloud Run Job is Ready,
+matches the reviewed specification, and has zero executions and zero IAM
+bindings. No Scheduler job exists.
 
 Use this together with [audio-processing.md](audio-processing.md),
 [audio-processing-invocation.md](audio-processing-invocation.md), and
