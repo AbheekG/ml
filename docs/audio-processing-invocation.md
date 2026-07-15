@@ -225,6 +225,14 @@ future digest or changed processing path. The first approved Cloud Run no-work
 execution must still prove readability of the platform's actual root-owned
 secret volume.
 
+The credential boundary was subsequently configured under separate owner
+approval. Secret Manager contains one automatically replicated enabled version,
+with only the keyless runtime identity granted secret-level accessor; that
+identity still has no project-wide role or user-managed key. The same token and
+exact protected transfer origin are Worker secrets. The transient local token
+file was removed, and no value was printed or retained in Git. No Cloud Run Job,
+Scheduler trigger, or processor execution exists yet.
+
 ## Aggregate-only observability
 
 The entrypoint may emit one structured outcome containing only:

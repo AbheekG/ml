@@ -5,6 +5,10 @@ command in it. Every API enablement, migration, Worker secret/deployment, Google
 identity/secret/repository/image/Job/Scheduler change, paid scan, and schedule
 resume requires fresh explicit owner approval. Production is out of scope.
 
+Protected staging has separately completed the reviewed prerequisite, image
+scan, and credential-boundary phases through Secret Manager version 1 and the
+matching Worker secrets. No Cloud Run Job, execution, or Scheduler job exists.
+
 Use this together with [audio-processing.md](audio-processing.md),
 [audio-processing-invocation.md](audio-processing-invocation.md), and
 [recording-upload.md](recording-upload.md). Never copy command output containing

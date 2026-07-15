@@ -42,10 +42,12 @@ lease plus operation-bound same-origin transfer capabilities, stream the exact
 private source, and immutably upload one derivative attempt. The Worker accepts
 only a strict policy/job/source-bound result, independently re-hashes stored
 source and derivative bytes, and atomically records provenance, playback
-readiness, and job success. Safe failures are durable and editor-retryable. No
-processor secret/origin has been configured. The control plane is deployed to
-protected staging with migrations `0005`–`0008`, but remains fail-closed and has
-not processed a real upload.
+readiness, and job success. Safe failures are durable and editor-retryable. The
+versioned processor token and exact transfer origin are now configured across
+the least-privilege Google secret and protected Worker boundary. The control
+plane is deployed to protected staging with migrations `0005`–`0008`, but
+remains fail-closed because no processor Job exists. It has not processed a real
+upload.
 
 The provider-neutral processor-side HTTP adapter is also implemented locally as
 a one-job library boundary around the existing Python/FFmpeg `prepare()` core.
@@ -152,9 +154,11 @@ first Bookworm image was pushed only for vulnerability review and is blocked
 from deployment. Its hardened Debian 13/FFmpeg 7.1 replacement was pushed by
 exact owner-reviewed commit tag, resolved to the proved local digest, scanned,
 and passed the reviewed package/reachability gate for a future digest-pinned
-Job. No processor secret, Worker processor configuration, Cloud Run Job,
-Scheduler trigger, execution, or hosted deployment has been configured. A
-separate Google production project has not been created.
+Job. One automatically replicated processor secret has one enabled version and
+only a secret-level runtime accessor; the matching token and exact transfer
+origin are Worker secrets. No Cloud Run Job, Scheduler trigger, execution, or
+hosted processor deployment has been configured. A separate Google production
+project has not been created.
 
 Never point development code at production data by default.
 
