@@ -196,11 +196,17 @@ dense storage phase held 512 MiB source and output stand-ins simultaneously
 adding process RSS was 1,123,958,784 bytes, below 2 GiB, and the private fixture
 directory was removed. The generated-output kill path remains independently
 subprocess-tested.
-No Docker-compatible runtime was installed, so building and executing the pinned
-Linux image, confirming libmp3lame inside it, enforcing its cgroup limits, and
-proving mounted secret/temporary-volume permissions as the non-root user remain
-required local or staging smoke checks. This unavailable check is not reported
-as passed.
+The pinned `linux/amd64` verification and runtime targets were subsequently
+built and executed locally on 2026-07-15 in an isolated Colima/Docker runtime.
+The full container fixture ran read-only with one CPU, a 2 GiB memory cgroup,
+and a 1,152 MiB UID/GID-scoped tmpfs. It reproduced 1,073,741,824 simultaneous
+temporary bytes, a 536,870,912-byte source, and an 11,185,197-byte verified
+derivative; conservative peak memory was 1,218,105,344 bytes, within the
+2,147,483,648-byte limit, and cleanup completed. The final 216,506,925-byte
+runtime image reports `amd64`, runs as `10001:10001`, contains FFmpeg
+`5.1.9-0+deb12u1`, libmp3lame, and ffprobe, and loaded strict configuration from
+a read-only mounted dummy secret. The first approved Cloud Run no-work execution
+must still prove readability of the platform's actual root-owned secret volume.
 
 ## Aggregate-only observability
 
@@ -273,8 +279,8 @@ or conversion quality, discard originals, expose media, or bypass processing.
 The smallest safe sequence after this design is accepted is:
 
 1. database-backed single-running-job invariant plus bounded expired-lease
-   recovery: implemented and tested locally in migration `0008`; the migration
-   has not been applied remotely;
+   recovery: implemented and tested locally in migration `0008`; migrations
+   `0005`–`0008` are applied and aggregate-verified in protected staging;
 2. processor soft deadline, 55-minute lease-remaining check,
    streaming/generated-output bounds, and deadline tests: implemented locally
    without adding a server or container;
@@ -282,9 +288,9 @@ The smallest safe sequence after this design is accepted is:
    processor secret, aggregate logging, and exit-code tests: implemented
    locally;
 4. pinned non-root FFmpeg container and resource fixture: implemented; static
-   policy tests and the full host resource/cleanup fixture pass, while the image
-   build/run checks remain unavailable because no Docker-compatible runtime is
-   installed;
+   policy tests, the full host resource/cleanup fixture, both pinned
+   `linux/amd64` builds, the full 2 GiB cgroup/tmpfs fixture, in-image codec
+   checks, non-root execution, cleanup, and read-only dummy-secret smoke pass;
 5. separately review exact cloud commands, identities, costs, secret rotation,
    rollback, and staging verification: prepared in
    [audio-processing-cloud-runbook.md](audio-processing-cloud-runbook.md), with

@@ -43,8 +43,9 @@ private source, and immutably upload one derivative attempt. The Worker accepts
 only a strict policy/job/source-bound result, independently re-hashes stored
 source and derivative bytes, and atomically records provenance, playback
 readiness, and job success. Safe failures are durable and editor-retryable. No
-processor secret/origin has been configured and none of this local slice has
-been deployed to staging.
+processor secret/origin has been configured. The control plane is deployed to
+protected staging with migrations `0005`–`0008`, but remains fail-closed and has
+not processed a real upload.
 
 The provider-neutral processor-side HTTP adapter is also implemented locally as
 a one-job library boundary around the existing Python/FFmpeg `prepare()` core.
@@ -63,12 +64,13 @@ run-once entrypoint also loads strict file-secret configuration, emits one
 aggregate-only outcome, and maps success, durable failure, and ambiguous
 reconciliation to tested exit codes. The digest- and FFmpeg-version-pinned
 non-root image plus a generated worst-case storage/real conversion fixture are
-now implemented; static policy tests and the full host fixture pass, but the
-image cannot be built or run until a Docker-compatible runtime is available.
+implemented. Static policy tests, the full host fixture, both pinned
+`linux/amd64` image builds, the full non-root 2 GiB cgroup/tmpfs fixture, the
+in-image FFmpeg/libmp3lame checks, and the read-only dummy-secret smoke pass.
 Exact paused-first cloud commands, cost assumptions, rotation, rollback, and
 staging checks are separately reviewed in
 [audio-processing-cloud-runbook.md](audio-processing-cloud-runbook.md). Every
-cloud action remains separately owner-approved and unexecuted.
+remaining processor cloud action remains separately owner-approved and unexecuted.
 
 The imported-Scan fingerprint inventory and deterministic local planner are now
 implemented. The planner streams and hashes all catalog-linked Scan sources,
@@ -196,9 +198,9 @@ Before implementing write forms, confirm the field-level business rules in [edit
    - calculate SHA-256 before creation and reject duplicate content with a link to the existing record;
    - preserve recording originals and generate canonical playback derivatives;
    - make upload finalization atomic so failed validation or conversion cannot create orphan records;
-   - current local status: the online-only Add Recording form and resumable multipart
-     orchestration are implemented and automated tests pass; protected-staging and
-     real-device/manual upload checks remain unavailable until separately deployed;
+   - current staging status: the online-only Add Recording form and resumable multipart
+     orchestration are deployed, automated tests pass, and the protected screen is
+     manually accepted without a real file/upload; real upload and device checks remain;
      the Song view also exposes the revision-guarded editor retry for failed audio
      preparation without disclosing its job ID or internal failure code;
 4. Add actor/timestamp audit metadata.
@@ -222,7 +224,8 @@ Deliverable: safe online maintenance by the primary editor.
 - compact repeatable credit rows are now implemented locally for Song editing,
   Recording editing, and new Recording upload: an Add contributor action,
   searchable existing-Person input, controlled Role dropdown, duplicate-pair
-  prevention, and per-row remove control; real-device/manual acceptance remains;
+  prevention, and per-row remove control; protected-staging interaction is
+  manually accepted, while real-device accessibility remains;
 - one-tap system sharing for an individual scan or recording by sharing authenticated file bytes rather than exposing a public media URL, with capability-aware fallback behavior;
 - copy for an individual typed-lyric block plus capability-gated system text
   sharing are now implemented locally for all readers and remain available while

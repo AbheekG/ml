@@ -16,13 +16,16 @@ object key, hash, filename, or private media path into tracked notes or logs.
 Stop before cloud creation unless all of these are true:
 
 1. Git is clean at an owner-reviewed commit, all local suites and both fresh and
-   existing-catalog migration chains pass, and migration `0008` remains unapplied
-   remotely until its separately approved D1 phase.
+   existing-catalog migration chains pass, and any remote migration application
+   has its separately approved and recorded D1 reconciliation. Protected staging
+   completed that reconciliation through migration `0008` on 2026-07-15.
 2. The pinned Linux `runtime` and `verification` image targets have actually
    built and run. The checks below and in the converter README must prove UID/GID
    `10001:10001`, libmp3lame availability, mounted dummy-secret readability,
-   bounded tmpfs writes, cleanup, and a 2 GiB cgroup pass. The present host has no
-   Docker-compatible runtime, so this gate is currently open.
+   bounded tmpfs writes, cleanup, and a 2 GiB cgroup pass. Both pinned
+   `linux/amd64` targets and the full local fixture passed on 2026-07-15; the
+   first approved Cloud Run no-work execution must still prove the platform's
+   actual root-owned secret-volume behavior.
 3. The owner has rechecked current pricing, the existing billing budget alerts,
    shared billing-account allowance use, and whether to approve the paid image
    vulnerability scan described below.
@@ -141,9 +144,14 @@ pass/fail facts in the ignored handoff. Do not push an image yet.
 ## Phase 2 — D1 and Worker staging prerequisite
 
 This phase is a Cloudflare mutation and needs separate approval. First inspect
-the remote migration list. The accepted staging database was last known to have
-`0004`; the command must show exactly the expected pending chain, normally
-`0005` through `0008`. Stop on any divergence.
+the remote migration list. At the separately approved protected-staging
+application on 2026-07-15, it showed exactly `0005` through `0008`; all four
+migrations applied, their aggregate reconciliation passed, and the reviewed
+Worker was deployed as version `dc349f79-e1b6-4d5a-979f-208795fe820d`. The
+pre/post Time Travel bookmarks and counts are retained in the ignored handoff.
+The commands below remain the procedure for a fresh environment or reviewed
+recovery, not authorization to rerun the completed staging phase. Stop on any
+divergence.
 
 ```sh
 npx wrangler d1 migrations list music-library-staging-apac --remote
@@ -167,8 +175,10 @@ npx wrangler d1 execute music-library-staging-apac --remote --command \
   "SELECT (SELECT COUNT(*) FROM recording_upload_sessions) AS upload_sessions, (SELECT COUNT(*) FROM audio_processing_jobs) AS jobs, (SELECT COUNT(*) FROM audio_processing_jobs WHERE status = 'running') AS running_jobs, (SELECT COUNT(*) FROM pragma_foreign_key_check) AS foreign_key_errors; SELECT COUNT(*) AS single_running_indexes FROM sqlite_master WHERE type = 'index' AND name = 'audio_processing_jobs_single_running_idx'; SELECT COUNT(*) AS expired_recovery_triggers FROM sqlite_master WHERE type = 'trigger' AND name = 'validate_audio_processing_job_expired_recovery';"
 ```
 
-Deploy the reviewed Worker commit only after those counts pass. The processor
-routes fail closed until both processor settings are configured:
+Deploy the reviewed Worker commit only after those counts pass. Protected
+staging completed this deployment with no processor settings; the processor
+routes therefore remain fail-closed. Do not redeploy from this runbook without
+fresh authorization:
 
 ```sh
 npm run build
