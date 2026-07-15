@@ -186,6 +186,8 @@ Before implementing write forms, confirm the field-level business rules in [edit
    - current local status: the online-only Add Recording form and resumable multipart
      orchestration are implemented and automated tests pass; protected-staging and
      real-device/manual upload checks remain unavailable until separately deployed;
+     the Song view also exposes the revision-guarded editor retry for failed audio
+     preparation without disclosing its job ID or internal failure code;
 4. Add actor/timestamp audit metadata.
 5. Enforce no-orphan foreign keys and no-cascade Song deletion.
 6. Refuse Song deletion while any Lyric text, Scan, or Recording exists and link the editor to those dependencies.

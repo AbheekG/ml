@@ -351,6 +351,13 @@ function apiErrorMessage(code: string): string {
     recording_parent_trashed: "Restore the parent Song before restoring this Recording.",
     recording_media_unavailable: "The Recording files are not in the expected recovery state.",
     recording_processing_active: "Wait for this Recording’s audio processing to finish before moving it to Trash.",
+    invalid_audio_processing_retry: "Reload the Recording before retrying audio preparation.",
+    audio_processing_job_not_found: "This Recording has no audio preparation job to retry.",
+    audio_processing_already_succeeded: "This Recording’s audio is already ready.",
+    audio_processing_already_active: "This Recording’s audio preparation is already active.",
+    audio_processing_retry_conflict: "This Recording changed after you opened it. Reload and try again.",
+    audio_processing_retry_failed: "Audio preparation could not be retried safely.",
+    audio_processing_retry_incomplete: "The retry could not be reconciled. Reload before trying again.",
     duplicate_lookup_name: "That name already exists in this list.",
     lookup_edit_conflict: "This name changed after you opened it. Reload the list and try again.",
     lookup_not_found: "This list item is no longer available.",
@@ -628,6 +635,20 @@ export async function updateRecording(
       body: JSON.stringify(payload),
     },
   );
+  return response.recording;
+}
+
+export async function retryRecordingProcessing(
+  recordingId: string,
+  revision: number,
+): Promise<{ id: string; revision: number; processingState: "processing" }> {
+  const response = await apiJson<{
+    recording: { id: string; revision: number; processingState: "processing" };
+  }>(`/api/recordings/${encodeURIComponent(recordingId)}/retry-processing`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ revision }),
+  });
   return response.recording;
 }
 

@@ -19,6 +19,7 @@ import {
   readCachedSong,
   refreshOfflineLibrary,
   refreshSong,
+  retryRecordingProcessing,
   restoreLyric,
   restoreRecording,
   restoreScan,
@@ -256,6 +257,8 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [viewerScanId, setViewerScanId] = useState<string | null>(null);
+  const [retryingRecordingId, setRetryingRecordingId] = useState<string | null>(null);
+  const [processingRetryError, setProcessingRetryError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOnline) setViewerScanId(null);
@@ -303,6 +306,42 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
     );
   }
 
+  async function retryFailedRecording(
+    recording: SongDetail["recordings"][number],
+  ): Promise<void> {
+    if (
+      !isOnline
+      || canEdit !== true
+      || recording.processingState !== "failed"
+      || retryingRecordingId !== null
+    ) return;
+    setRetryingRecordingId(recording.id);
+    setProcessingRetryError(null);
+    try {
+      const retried = await retryRecordingProcessing(recording.id, recording.revision);
+      setSong((current) => current && ({
+        ...current,
+        recordings: current.recordings.map((item) => item.id === retried.id
+          ? { ...item, revision: retried.revision, processingState: retried.processingState }
+          : item),
+      }));
+      const refreshed = await refreshSong(songId).catch(() => null);
+      if (refreshed) setSong(refreshed);
+    } catch (retryError) {
+      const refreshed = await refreshSong(songId).catch(() => null);
+      if (refreshed) {
+        setSong(refreshed);
+        const current = refreshed.recordings.find((item) => item.id === recording.id);
+        if (current && current.processingState !== "failed") return;
+      }
+      setProcessingRetryError(retryError instanceof Error
+        ? retryError.message
+        : "Audio preparation could not be retried.");
+    } finally {
+      setRetryingRecordingId(null);
+    }
+  }
+
   return (
     <main className="page-shell detail-page" id="main-content">
       <Link className="back-link" to="/songs">← All songs</Link>
@@ -335,6 +374,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
           {song.recordings.length > 0 && (
             <section className="detail-card" aria-labelledby="recordings-title">
               <h2 id="recordings-title">Recordings <span>{song.recordings.length}</span></h2>
+              {processingRetryError && <p className="catalog-message error-message" role="alert">{processingRetryError}</p>}
               <ul className="media-list">
                 {song.recordings.map((recording) => (
                   <li key={recording.id}>
@@ -352,6 +392,16 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                     </div>
                     {isOnline && canEdit === true && (
                       <div className="media-item-actions">
+                        {recording.processingState === "failed" && (
+                          <button
+                            className="media-action"
+                            type="button"
+                            disabled={retryingRecordingId !== null}
+                            onClick={() => { void retryFailedRecording(recording); }}
+                          >
+                            {retryingRecordingId === recording.id ? "Retrying…" : "Retry preparation"}
+                          </button>
+                        )}
                         <Link className="media-action" to={`/songs/${encodeURIComponent(song.id)}/recordings/${encodeURIComponent(recording.id)}/edit`}>Edit</Link>
                       </div>
                     )}
