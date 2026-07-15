@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { ScanViewer } from "./ScanViewer";
 import { CatalogControls } from "./CatalogControls";
 import { RecordingUploadPage } from "./RecordingUploadPage";
 import { CreditRows } from "./CreditRows";
+import { pauseOtherAudioPlayers } from "./audio-playback";
 import {
   ApiError,
   createLookup,
@@ -258,6 +259,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [viewerScanId, setViewerScanId] = useState<string | null>(null);
+  const recordingPlayers = useRef(new Map<string, HTMLAudioElement>());
   const [retryingRecordingId, setRetryingRecordingId] = useState<string | null>(null);
   const [processingRetryError, setProcessingRetryError] = useState<string | null>(null);
 
@@ -388,6 +390,13 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                             controls
                             preload="metadata"
                             src={`/api/media/${encodeURIComponent(recording.playbackMediaId ?? recording.originalMediaId)}`}
+                            ref={(player) => {
+                              if (player) recordingPlayers.current.set(recording.id, player);
+                              else recordingPlayers.current.delete(recording.id);
+                            }}
+                            onPlay={(event) => {
+                              pauseOtherAudioPlayers(event.currentTarget, recordingPlayers.current.values());
+                            }}
                           />
                         : <span>{recording.processingState === "processing" ? "Preparing audio…" : "Audio needs attention"}</span>}
                     </div>

@@ -39,7 +39,7 @@ The private staging application is operational:
 - exact and phonetic title/alias matches outrank literal metadata and lyric-only matches; bounded Indic-roman normalization, typos, later title words, and locally joined/split words work entirely from the offline cache;
 - song detail displays metadata, typed lyrics, scan records, and recording records;
 - the complete catalog, metadata, and typed lyrics are atomically cached in IndexedDB, while the production app shell and hashed assets are precached by a service worker;
-- private scans open in an in-app zoom/pan viewer and recordings stream with seeking;
+- private scans open in an in-app zoom/pan viewer and recordings stream with seeking; starting one Recording pauses any other Recording playing on that Song without changing its verified stored source;
 - type checks, importer/schema/API tests, production builds, and local end-to-end API smoke tests pass.
 
 - a reconciled forward migration enforces normalized active Song titles, statuses, controlled lookup keys, simplified typed lyrics, Recording descriptions, and Trash safety;
