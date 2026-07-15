@@ -75,8 +75,9 @@ source URL into a derivative/result URL fails authentication. Only the lease
 hash is retained in D1. Derivative upload uses a deterministic attempt-specific
 private key with create-only semantics: a lost response can be retried without
 overwriting the first stored bytes, and a new lease receives a new attempt key.
-The hosted HTTP adapter, invocation/scheduling choice, secrets, deployment, and
-browser orchestration remain separate later work.
+The hosted HTTP adapter and local browser orchestration are implemented. Hosted
+secrets, runtime resources, scheduling, deployment, and manual staging acceptance
+remain separate owner-gated work.
 
 ## Upload-session API shape
 
@@ -92,10 +93,17 @@ The server-side transport exposes editor-only, online-only operations to:
    processing Recording, credits, and pending processing job;
 6. abort an incomplete session without deleting any finalized media.
 
-The browser form and multipart orchestration remain unimplemented. A client retry
-supplies only the current session revision and, when resolving a description
-conflict, an explicit replacement description. It never supplies an ETag,
-object key, multipart ID, claimed fingerprint, media ID, Recording ID, or job ID.
+The local online-only browser form validates the 512 MiB file boundary, locks the
+selected file and metadata after the first intentional attempt, uploads sequential
+8 MiB `Blob` slices, and reconciles lost responses from server-held completed-part
+state while the original `File` remains selected. It shows aggregate progress,
+stops on duplicate content, preserves a verified `stored` session for an explicit
+description override, and offers revision-bound abort only before storage
+completion. It has no offline queue and has not been deployed or manually tested.
+A client retry supplies only the current session revision and, when resolving a
+description conflict, an explicit replacement description. It never supplies an
+ETag, object key, multipart ID, claimed fingerprint, media ID, Recording ID, or
+job ID.
 
 Filenames, titles, signed capabilities, hashes, and private object keys must not
 enter routine logs. The client cannot select the parent Song or object key after

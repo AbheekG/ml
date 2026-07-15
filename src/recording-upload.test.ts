@@ -120,7 +120,7 @@ describe("Recording browser upload orchestration", () => {
       creditPersonIds: ["person-1"],
     });
     expect(progress).toContain("uploading:2/2");
-    expect(progress.at(-1)).toBe("finalizing:0/2");
+    expect(progress.at(-1)).toBe("finalizing:2/2");
   });
 
   it("reconciles a lost part response from status without re-uploading it", async () => {

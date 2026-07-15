@@ -183,6 +183,9 @@ Before implementing write forms, confirm the field-level business rules in [edit
    - calculate SHA-256 before creation and reject duplicate content with a link to the existing record;
    - preserve recording originals and generate canonical playback derivatives;
    - make upload finalization atomic so failed validation or conversion cannot create orphan records;
+   - current local status: the online-only Add Recording form and resumable multipart
+     orchestration are implemented and automated tests pass; protected-staging and
+     real-device/manual upload checks remain unavailable until separately deployed;
 4. Add actor/timestamp audit metadata.
 5. Enforce no-orphan foreign keys and no-cascade Song deletion.
 6. Refuse Song deletion while any Lyric text, Scan, or Recording exists and link the editor to those dependencies.

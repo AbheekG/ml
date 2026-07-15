@@ -371,7 +371,8 @@ root-owned mounted secret file. Reject logs containing any catalog identifier,
 URL, hash, path, token, response body, or exception representation.
 
 Next use one owner-intended new Recording—not a disposable existing catalog row—
-after the browser creation/upload UI is ready. Verify, in order:
+after the local browser creation/upload UI has been reviewed, deployed to protected
+staging, and manually accepted for this test. Verify, in order:
 
 1. upload/edit controls disable offline and no offline write queue appears;
 2. original bytes remain private, immutable, fingerprinted, and non-playable

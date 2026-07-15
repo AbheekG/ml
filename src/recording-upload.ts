@@ -434,7 +434,7 @@ async function completeUpload(
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      return parseUploadPayload(await requestJson(
+      const completed = parseUploadPayload(await requestJson(
         fetcher,
         `/api/recording-uploads/${encodeURIComponent(session.id)}/complete`,
         {
@@ -444,6 +444,9 @@ async function completeUpload(
           signal,
         },
       ));
+      return completed.completedParts.length === 0 && session.completedParts.length > 0
+        ? { ...completed, completedParts: session.completedParts }
+        : completed;
     } catch (error) {
       if (signal?.aborted) throw error;
       lastError = error;

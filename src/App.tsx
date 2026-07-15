@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { ScanViewer } from "./ScanViewer";
 import { CatalogControls } from "./CatalogControls";
+import { RecordingUploadPage } from "./RecordingUploadPage";
 import {
   ApiError,
   createLookup,
@@ -359,6 +360,9 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
               </ul>
               <p className="media-note">Some legacy formats may need a playback conversion.</p>
             </section>
+          )}
+          {isOnline && canEdit === true && (
+            <Link className="secondary-action action-link add-child-action" to={`/songs/${encodeURIComponent(song.id)}/recordings/new`}>Add Recording</Link>
           )}
 
           {song.scans.length > 0 && (
@@ -1739,6 +1743,7 @@ export function App() {
         <Route path="/songs/:songId/lyrics/:lyricId/edit" element={<LyricEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/scans/new" element={<ScanEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/scans/:scanId/edit" element={<ScanEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs/:songId/recordings/new" element={<RecordingUploadPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/recordings/:recordingId/edit" element={<RecordingEditorPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId" element={<SongDetailPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/trash" element={<TrashPage isOnline={isOnline} canEdit={canEdit} />} />
