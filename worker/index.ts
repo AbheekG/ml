@@ -61,6 +61,7 @@ import {
   expectedRecordingPartBytes,
   parseRecordingUploadCreate,
   parseRecordingUploadFinalization,
+  parseRecordingUploadReplacement,
   parseRecordingUploadRevision,
   recordingUploadRequestFingerprint,
   sha256RecordingStream,
@@ -2430,6 +2431,243 @@ app.post("/api/recording-uploads/:sessionId/finalize", requireRole("editor"), as
   );
 });
 
+app.post("/api/songs/:songId/recording-uploads/:sessionId/replace", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseRecordingUploadReplacement(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_recording_upload", fields: parsed.fields }, 400);
+  }
+
+  const actor = context.get("appUser").identity;
+  const sessionId = context.req.param("sessionId");
+  const targetRecordingId = parsed.data.targetRecordingId;
+
+  let session = await loadRecordingUploadSession(context.env.DB, sessionId, actor);
+  if (!session) return context.json({ error: "recording_upload_not_found" }, 404);
+
+  if (session.status !== "stored") {
+    if (session.status === "duplicate" || session.status === "finalized") {
+      const duplicate = await loadRecordingUploadDuplicate(context.env.DB, session);
+      return context.json({ upload: publicRecordingUploadSession(session, [], duplicate) });
+    }
+    return context.json({ error: "recording_upload_conflict" }, 409);
+  }
+
+  const timestamp = new Date().toISOString();
+  const finalDescription = parsed.data.description ?? session.description;
+  const normalizedDescription = finalDescription?.normalize("NFKC").trim().replace(/\s+/gu, " ") ?? null;
+
+  const currentRecording = await context.env.DB.prepare(`
+    SELECT id, original_media_id, playback_media_id, revision
+    FROM recordings
+    WHERE id = ? AND song_id = ? AND trashed_at IS NULL
+  `).bind(targetRecordingId, session.songId).first<{
+    id: string;
+    original_media_id: string;
+    playback_media_id: string | null;
+    revision: number;
+  }>();
+
+  if (!currentRecording) return context.json({ error: "recording_not_found" }, 404);
+  if (currentRecording.revision !== parsed.data.targetRecordingRevision) {
+    return context.json({ error: "recording_conflict" }, 409);
+  }
+
+  const mediaId = crypto.randomUUID();
+  const historyId = crypto.randomUUID();
+
+  let results: D1Result[];
+  try {
+    results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        WITH duplicate AS (
+          SELECT media_objects.id
+          FROM media_objects
+          LEFT JOIN recordings ON recordings.original_media_id = media_objects.id
+          WHERE media_objects.kind = 'original_audio'
+            AND media_objects.sha256 = ?
+            AND media_objects.byte_size = ?
+          ORDER BY recordings.id IS NULL, recordings.trashed_at IS NOT NULL, recordings.id
+          LIMIT 1
+        )
+        UPDATE recording_upload_sessions
+        SET status = 'duplicate',
+            duplicate_media_id = (SELECT id FROM duplicate),
+            revision = revision + 1,
+            updated_at = ?,
+            updated_by = ?
+        WHERE id = ? AND created_by = ? AND status = 'stored' AND revision = ?
+          AND EXISTS (SELECT 1 FROM duplicate)
+      `).bind(
+        session.sha256, session.byteSize, timestamp, actor,
+        session.id, actor, parsed.data.sessionRevision,
+      ),
+      context.env.DB.prepare(`
+        INSERT INTO media_objects (
+          id, object_key, original_filename, mime_type, byte_size, sha256,
+          kind, state, created_at, created_by
+        )
+        SELECT ?, object_key, original_filename, NULL, byte_size, sha256,
+               'original_audio', 'active', ?, ?
+        FROM recording_upload_sessions
+        WHERE id = ? AND created_by = ? AND status = 'stored' AND revision = ?
+          AND sha256 = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM media_objects
+            WHERE kind = 'original_audio'
+              AND sha256 = recording_upload_sessions.sha256
+              AND byte_size = recording_upload_sessions.byte_size
+          )
+      `).bind(
+        mediaId, timestamp, actor,
+        session.id, actor, parsed.data.sessionRevision, session.sha256,
+      ),
+      context.env.DB.prepare(`
+        INSERT INTO recording_media_history (
+          id, recording_id, original_media_id, playback_media_id,
+          replaced_at, replaced_by, revision_at_replacement
+        )
+        SELECT ?, id, original_media_id, playback_media_id, ?, ?, revision
+        FROM recordings
+        WHERE id = ? AND song_id = ? AND revision = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM recording_upload_sessions
+            WHERE id = ? AND created_by = ? AND status = 'stored' AND revision = ?
+          )
+      `).bind(
+        historyId, timestamp, actor,
+        targetRecordingId, session.songId, parsed.data.targetRecordingRevision,
+        session.id, actor, parsed.data.sessionRevision,
+      ),
+      context.env.DB.prepare(`
+        UPDATE recordings
+        SET original_media_id = ?,
+            playback_media_id = NULL,
+            description = ?,
+            normalized_description = ?,
+            recorded_on = (SELECT recorded_on FROM recording_upload_sessions WHERE id = ?),
+            processing_state = 'processing',
+            processing_error = NULL,
+            revision = revision + 1,
+            updated_at = ?,
+            updated_by = ?
+        WHERE id = ? AND song_id = ? AND revision = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM recording_upload_sessions
+            WHERE id = ? AND created_by = ? AND status = 'stored' AND revision = ?
+          )
+      `).bind(
+        mediaId, finalDescription, normalizedDescription, session.id,
+        timestamp, actor,
+        targetRecordingId, session.songId, parsed.data.targetRecordingRevision,
+        session.id, actor, parsed.data.sessionRevision,
+      ),
+      context.env.DB.prepare(`DELETE FROM recording_credits WHERE recording_id = ?`).bind(targetRecordingId),
+      context.env.DB.prepare(`
+        INSERT INTO recording_credits (
+          id, recording_id, person_id, role, sort_order
+        )
+        SELECT ? || '-' || printf('%03d', recording_upload_credits.sort_order),
+               ?, recording_upload_credits.person_id,
+               recording_upload_credits.role, recording_upload_credits.sort_order
+        FROM recording_upload_credits
+        JOIN recording_upload_sessions
+          ON recording_upload_sessions.id = recording_upload_credits.session_id
+        WHERE recording_upload_credits.session_id = ?
+          AND recording_upload_sessions.created_by = ?
+          AND recording_upload_sessions.status = 'stored'
+          AND recording_upload_sessions.revision = ?
+        ORDER BY recording_upload_credits.sort_order, recording_upload_credits.person_id
+      `).bind(
+        targetRecordingId, targetRecordingId, session.id, actor, parsed.data.sessionRevision,
+      ),
+      context.env.DB.prepare(`
+        INSERT INTO audio_processing_jobs (
+          id, recording_id, source_media_id, source_sha256, source_byte_size,
+          policy_id, status, attempt_count, created_at, updated_at
+        )
+        SELECT ?, ?, ?, recording_upload_sessions.sha256,
+               recording_upload_sessions.byte_size, ?, 'pending', 0, ?, ?
+        FROM recording_upload_sessions
+        JOIN recordings ON recordings.id = ?
+          AND recordings.song_id = recording_upload_sessions.song_id
+          AND recordings.original_media_id = ?
+          AND recordings.processing_state = 'processing'
+          AND recordings.processing_error IS NULL
+          AND recordings.trashed_at IS NULL
+        WHERE recording_upload_sessions.id = ?
+          AND recording_upload_sessions.created_by = ?
+          AND recording_upload_sessions.status = 'stored'
+          AND recording_upload_sessions.revision = ?
+      `).bind(
+        crypto.randomUUID(), targetRecordingId, mediaId,
+        'mp3-v1-libmp3lame-q2', timestamp, timestamp,
+        targetRecordingId, mediaId, session.id, actor, parsed.data.sessionRevision,
+      ),
+      context.env.DB.prepare(`
+        UPDATE recording_upload_sessions
+        SET status = 'finalized',
+            recording_id = ?,
+            revision = revision + 1,
+            updated_at = ?,
+            updated_by = ?
+        WHERE id = ? AND created_by = ? AND status = 'stored' AND revision = ?
+          AND EXISTS (
+            SELECT 1 FROM recordings
+            WHERE id = ? AND original_media_id = ? AND processing_state = 'processing'
+          )
+      `).bind(
+        targetRecordingId, timestamp, actor,
+        session.id, actor, parsed.data.sessionRevision,
+        targetRecordingId, mediaId,
+      ),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM recording_upload_sessions
+            WHERE id = ? AND created_by = ? AND status = 'finalized'
+          )
+      `).bind(timestamp, actor, session.songId, session.id, actor),
+    ]);
+  } catch (error: any) {
+    if (error.message?.includes("recording_conflict")) {
+      return context.json({ error: "recording_conflict" }, 409);
+    }
+    if (error.message?.includes("recording_upload_is_terminal")) {
+      const duplicate = await loadRecordingUploadDuplicate(context.env.DB, session);
+      return context.json({ upload: publicRecordingUploadSession(session, [], duplicate) });
+    }
+    const mapped = recordingWriteError(error);
+    return context.json({
+      error: mapped.status === 409 ? mapped.error : "recording_upload_finalization_failed",
+    }, mapped.status === 409 ? 409 : 500);
+  }
+
+  const current = await loadRecordingUploadSession(context.env.DB, session.id, actor);
+  if (!current) return context.json({ error: "recording_upload_not_found" }, 404);
+  session = current;
+  if (session.status === "duplicate") {
+    const duplicate = await loadRecordingUploadDuplicate(context.env.DB, session);
+    return context.json({ upload: publicRecordingUploadSession(session, [], duplicate) });
+  }
+  if (session.status !== "finalized") {
+    return context.json({ error: "recording_upload_conflict" }, 409);
+  }
+  const recording = await loadFinalizedRecording(context.env.DB, session);
+  if (!recording) return context.json({ error: "recording_upload_finalization_incomplete" }, 500);
+  return context.json(
+    { upload: publicRecordingUploadSession(session), recording },
+    results[7].meta.changes === 1 ? 201 : 200,
+  );
+});
+
 app.post("/api/recording-uploads/:sessionId/abort", requireRole("editor"), async (context) => {
   let body: unknown;
   try {
@@ -3356,6 +3594,131 @@ app.post("/api/songs/:songId/lyrics/:lyricId/trash", requireRole("editor"), asyn
     const response = lyricWriteError(error);
     return context.json({ error: response.error }, response.status);
   }
+});
+app.post("/api/songs/:songId/scans/:scanId/media", requireRole("editor"), async (context) => {
+  let form: FormData;
+  try {
+    form = await context.req.formData();
+  } catch {
+    return context.json({ error: "invalid_scan_upload" }, 400);
+  }
+
+  const fileValue = form.get("file");
+  if (!(fileValue instanceof File)) {
+    return context.json({ error: "scan_file_required", fields: { file: ["Choose an image file"] } }, 400);
+  }
+  if (fileValue.size === 0) {
+    return context.json({ error: "empty_scan_file", fields: { file: ["The selected file is empty"] } }, 400);
+  }
+  if (fileValue.size > MAX_SCAN_UPLOAD_BYTES) {
+    return context.json({ error: "scan_file_too_large", fields: { file: ["The maximum Scan size is 25 MB"] } }, 413);
+  }
+
+  const parsed = parseScanRevision({
+    revision: typeof form.get("revision") === "string" ? parseInt(form.get("revision") as string, 10) : undefined,
+  });
+  if (!parsed.success) {
+    return context.json({ error: "invalid_scan", fields: parsed.fields }, 400);
+  }
+
+  const songId = context.req.param("songId");
+  const scanId = context.req.param("scanId");
+  const actor = context.get("appUser").identity;
+
+  const currentScan = await context.env.DB.prepare(`
+    SELECT scans.revision, scans.media_id, media_objects.sha256
+    FROM scans
+    JOIN songs ON songs.id = scans.song_id
+    JOIN media_objects ON media_objects.id = scans.media_id
+    WHERE scans.id = ? AND scans.song_id = ? AND scans.trashed_at IS NULL AND songs.trashed_at IS NULL
+  `).bind(scanId, songId).first<{ revision: number; media_id: string; sha256: string }>();
+
+  if (!currentScan) return context.json({ error: "scan_not_found" }, 404);
+  if (currentScan.revision !== parsed.data.revision) return context.json({ error: "scan_conflict" }, 409);
+
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await fileValue.arrayBuffer());
+  } catch {
+    return context.json({ error: "scan_file_unreadable" }, 400);
+  }
+  const imageType = inspectScanImage(bytes);
+  if (!imageType) {
+    return context.json({
+      error: "unsupported_scan_file",
+      fields: { file: ["Use a JPEG, PNG, or WebP image with a recognized file signature"] },
+    }, 415);
+  }
+
+  const fingerprint = await sha256Hex(bytes);
+  if (fingerprint === currentScan.sha256) {
+    return context.json({ error: "duplicate_scan_file", fields: { file: ["This file is identical to the current scan media"] } }, 409);
+  }
+
+  const mediaId = crypto.randomUUID();
+  const historyId = crypto.randomUUID();
+  const objectKey = `scans/${mediaId}.${imageType.extension}`;
+  const filename = safeUploadFilename(fileValue.name, imageType.extension);
+  const timestamp = new Date().toISOString();
+
+  try {
+    await context.env.MEDIA.put(objectKey, bytes, {
+      httpMetadata: {
+        contentType: imageType.mimeType,
+        contentDisposition: "inline",
+      },
+    });
+  } catch {
+    return context.json({ error: "scan_storage_failed" }, 503);
+  }
+
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        INSERT INTO media_objects (
+          id, object_key, original_filename, mime_type, byte_size, sha256,
+          kind, state, created_at, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, 'scan', 'active', ?, ?)
+      `).bind(
+        mediaId, objectKey, filename, imageType.mimeType, bytes.byteLength, fingerprint,
+        timestamp, actor,
+      ),
+      context.env.DB.prepare(`
+        INSERT INTO scan_media_history (
+          id, scan_id, media_id, replaced_at, replaced_by, revision_at_replacement
+        )
+        SELECT ?, id, media_id, ?, ?, revision
+        FROM scans
+        WHERE id = ? AND song_id = ? AND revision = ? AND trashed_at IS NULL
+      `).bind(historyId, timestamp, actor, scanId, songId, parsed.data.revision),
+      context.env.DB.prepare(`
+        UPDATE scans
+        SET media_id = ?, revision = revision + 1, updated_at = ?, updated_by = ?
+        WHERE id = ? AND song_id = ? AND revision = ? AND trashed_at IS NULL
+          AND EXISTS (SELECT 1 FROM songs WHERE id = ? AND trashed_at IS NULL)
+      `).bind(mediaId, timestamp, actor, scanId, songId, parsed.data.revision, songId),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (SELECT 1 FROM scans WHERE id = ? AND song_id = songs.id)
+      `).bind(timestamp, actor, songId, scanId),
+    ]);
+    if (results[2].meta.changes === 0) {
+      await context.env.DB.prepare(`DELETE FROM media_objects WHERE id = ?`).bind(mediaId).run();
+      await context.env.MEDIA.delete(objectKey);
+      return context.json({ error: "scan_conflict" }, 409);
+    }
+  } catch (error) {
+    await context.env.DB.prepare(`DELETE FROM media_objects WHERE id = ?`).bind(mediaId).run();
+    await context.env.MEDIA.delete(objectKey);
+    const mapped = scanWriteError(error);
+    return context.json({ error: mapped.error }, mapped.status);
+  }
+
+  const updated = await loadScanState(context.env.DB, songId, scanId);
+  if (!updated) return context.json({ error: "scan_not_found" }, 404);
+  return context.json({ scan: { id: scanId, revision: updated.revision } });
 });
 
 app.post("/api/songs/:songId/scans/:scanId/trash", requireRole("editor"), async (context) => {

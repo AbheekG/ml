@@ -74,6 +74,7 @@ export type RecordingUploadOptions = {
   resumeUpload?: RecordingUploadSession;
   descriptionOverride?: string;
   onProgress?: (progress: RecordingUploadProgress) => void;
+  replaceTarget?: { recordingId: string; revision: number };
 };
 
 type ErrorPayload = {
@@ -472,7 +473,9 @@ async function finalizeUpload(
     try {
       return parseFinalizedPayload(await requestJson(
         fetcher,
-        `/api/recording-uploads/${encodeURIComponent(session.id)}/finalize`,
+        options.replaceTarget
+          ? `/api/songs/${encodeURIComponent(session.songId)}/recording-uploads/${encodeURIComponent(session.id)}/replace`
+          : `/api/recording-uploads/${encodeURIComponent(session.id)}/finalize`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -481,6 +484,13 @@ async function finalizeUpload(
             ...(options.descriptionOverride === undefined
               ? {}
               : { description: options.descriptionOverride }),
+            ...(options.replaceTarget
+              ? {
+                  targetRecordingId: options.replaceTarget.recordingId,
+                  targetRecordingRevision: options.replaceTarget.revision,
+                  sessionRevision: session.revision,
+                }
+              : {}),
           }),
           signal: options.signal,
         },
@@ -500,11 +510,22 @@ async function finalizeUpload(
       if (session.status === "finalized") {
         const payload = await requestJson(
           fetcher,
-          `/api/recording-uploads/${encodeURIComponent(session.id)}/finalize`,
+          options.replaceTarget
+            ? `/api/songs/${encodeURIComponent(session.songId)}/recording-uploads/${encodeURIComponent(session.id)}/replace`
+            : `/api/recording-uploads/${encodeURIComponent(session.id)}/finalize`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ revision: session.revision }),
+            body: JSON.stringify({
+              revision: session.revision,
+              ...(options.replaceTarget
+                ? {
+                    targetRecordingId: options.replaceTarget.recordingId,
+                    targetRecordingRevision: options.replaceTarget.revision,
+                    sessionRevision: session.revision,
+                  }
+                : {}),
+            }),
             signal: options.signal,
           },
         );

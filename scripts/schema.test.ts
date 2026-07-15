@@ -12,7 +12,8 @@ const audioProcessingJobsMigration = readFileSync(resolve("migrations/0005_audio
 const recordingUploadSessionsMigration = readFileSync(resolve("migrations/0006_recording_upload_sessions.sql"), "utf8");
 const audioProcessingControlMigration = readFileSync(resolve("migrations/0007_audio_processing_control.sql"), "utf8");
 const audioProcessingConcurrencyMigration = readFileSync(resolve("migrations/0008_audio_processing_concurrency.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}`;
+const mediaReplacementsMigration = readFileSync(resolve("migrations/0009_media_replacements.sql"), "utf8");
+const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}`;
 const timestamp = "2026-07-12T00:00:00.000Z";
 
 function runSql(sql: string): string {
@@ -1020,5 +1021,83 @@ describe("initial database schema", () => {
       SET trashed_at = NULL, trashed_by = NULL
       WHERE id = 'lyrics-1';
     `)).toThrow(/UNIQUE constraint failed/);
+  });
+
+  it("allows replacing a Scan media and tracking its history", () => {
+    const output = runSql(`
+      INSERT INTO notebooks (id, display_name, normalized_name, sort_order)
+      VALUES ('notebook-1', 'Blue notebook', 'blue notebook', 1);
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'media-1', 'scans/test.jpg', 'page.jpg', 'image/jpeg', 1234, 'hash-1', 'scan',
+        '${timestamp}', 'test'
+      );
+      INSERT INTO scans (
+        id, song_id, media_id, notebook_id, page_label,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'scan-1', 'song-1', 'media-1', 'notebook-1', '1',
+        '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'media-2', 'scans/test2.jpg', 'page2.jpg', 'image/jpeg', 2345, 'hash-2', 'scan',
+        '${timestamp}', 'test'
+      );
+      INSERT INTO scan_media_history (
+        id, scan_id, media_id, replaced_at, replaced_by, revision_at_replacement
+      ) VALUES (
+        'history-1', 'scan-1', 'media-1', '${timestamp}', 'test', 1
+      );
+      UPDATE scans SET media_id = 'media-2', revision = 2 WHERE id = 'scan-1';
+      SELECT count(*) FROM scan_media_history;
+    `);
+    expect(output).toBe("1\n");
+  });
+
+  it("allows replacing a Recording media and tracking its history", () => {
+    const output = runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'media-1', 'recordings/test.mp3', 'test.mp3', 'audio/mpeg', 1234, 'hash-1', 'original_audio',
+        '${timestamp}', 'test'
+      );
+      INSERT INTO recordings (
+        id, song_id, original_media_id, playback_media_id, description, normalized_description, processing_state,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'recording-1', 'song-1', 'media-1', 'media-1', 'Test recording', 'test recording', 'ready',
+        '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'media-2', 'recordings/test2.mp3', 'test2.mp3', 'audio/mpeg', 2345, 'hash-2', 'original_audio',
+        '${timestamp}', 'test'
+      );
+      INSERT INTO recording_media_history (
+        id, recording_id, original_media_id, playback_media_id, replaced_at, replaced_by, revision_at_replacement
+      ) VALUES (
+        'history-1', 'recording-1', 'media-1', 'media-1', '${timestamp}', 'test', 1
+      );
+      UPDATE recordings SET original_media_id = 'media-2', playback_media_id = NULL, revision = 2, processing_state = 'processing' WHERE id = 'recording-1';
+      SELECT count(*) FROM recording_media_history;
+    `);
+    expect(output).toBe("1\n");
   });
 });

@@ -28,6 +28,16 @@ const recordingUploadFinalizationSchema = z.object({
     .optional(),
 }).strict();
 
+const recordingUploadReplacementSchema = z.object({
+  targetRecordingId: z.string(),
+  targetRecordingRevision: z.number().int().positive(),
+  sessionRevision: z.number().int().positive(),
+  description: z.string()
+    .max(10_000, "Recording description is too long")
+    .refine((value) => value.trim().length > 0, "Recording description must not be blank")
+    .optional(),
+}).strict();
+
 export type RecordingUploadCreateInput = {
   clientMutationId: string;
   filename: string;
@@ -49,6 +59,10 @@ export type RecordingUploadRevisionParseResult =
 
 export type RecordingUploadFinalizationParseResult =
   | { success: true; data: { revision: number; description?: string } }
+  | { success: false; fields: Record<string, string[]> };
+
+export type RecordingUploadReplacementParseResult =
+  | { success: true; data: { targetRecordingId: string; targetRecordingRevision: number; sessionRevision: number; description?: string } }
   | { success: false; fields: Record<string, string[]> };
 
 function safeOriginalFilename(value: string): string {
@@ -115,6 +129,31 @@ export function parseRecordingUploadFinalization(
     success: true,
     data: {
       revision: result.data.revision,
+      ...(result.data.description === undefined
+        ? {}
+        : { description: result.data.description.trim() }),
+    },
+  };
+}
+
+export function parseRecordingUploadReplacement(
+  value: unknown,
+): RecordingUploadReplacementParseResult {
+  const result = recordingUploadReplacementSchema.safeParse(value);
+  if (!result.success) {
+    const fields: Record<string, string[]> = {};
+    for (const issue of result.error.issues) {
+      const field = String(issue.path[0] ?? "form");
+      (fields[field] ??= []).push(issue.message);
+    }
+    return { success: false, fields };
+  }
+  return {
+    success: true,
+    data: {
+      targetRecordingId: result.data.targetRecordingId,
+      targetRecordingRevision: result.data.targetRecordingRevision,
+      sessionRevision: result.data.sessionRevision,
       ...(result.data.description === undefined
         ? {}
         : { description: result.data.description.trim() }),

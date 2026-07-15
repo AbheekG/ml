@@ -583,6 +583,25 @@ export async function updateScan(
   return response.scan;
 }
 
+export async function replaceScanMedia(
+  songId: string,
+  scanId: string,
+  payload: { file: File; revision: number },
+): Promise<{ id: string; revision: number }> {
+  const form = new FormData();
+  form.append("file", payload.file);
+  form.append("revision", String(payload.revision));
+  const response = await apiJson<{ scan: { id: string; revision: number } }>(
+    `/api/songs/${encodeURIComponent(songId)}/scans/${encodeURIComponent(scanId)}/media`,
+    {
+      method: "POST",
+      body: form,
+    },
+  );
+  return response.scan;
+}
+
+
 export async function trashScan(
   songId: string,
   scanId: string,

@@ -22,6 +22,7 @@ import {
   readCachedSong,
   refreshOfflineLibrary,
   refreshSong,
+  replaceScanMedia,
   retryRecordingProcessing,
   restoreLyric,
   restoreRecording,
@@ -676,7 +677,7 @@ function ScanEditorPage({
   isOnline,
   canEdit,
 }: {
-  mode: "create" | "edit";
+  mode: "create" | "edit" | "replace";
   isOnline: boolean;
   canEdit: boolean | null;
 }) {
@@ -726,7 +727,7 @@ function ScanEditorPage({
         if (cancelled) return;
         setOptions(editorOptions);
         setSongTitle(song.titleLatin);
-        if (mode === "edit") {
+        if (mode === "edit" || mode === "replace") {
           const scan = song.scans.find((item) => item.id === scanId);
           if (!scan) {
             setError("This Scan is no longer available.");
@@ -750,8 +751,8 @@ function ScanEditorPage({
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!isOnline || canEdit !== true || isSaving || isTrashing) return;
-    if (mode === "edit" && revision === null) return;
-    if (mode === "create" && !file) {
+    if ((mode === "edit" || mode === "replace") && revision === null) return;
+    if ((mode === "create" || mode === "replace") && !file) {
       setFieldErrors({ file: ["Choose an image file"] });
       return;
     }
@@ -765,6 +766,11 @@ function ScanEditorPage({
           file: file!,
           notebookId: notebookId || null,
           pageLabel: notebookId ? pageLabel || null : null,
+        });
+      } else if (mode === "replace") {
+        await replaceScanMedia(songId, scanId, {
+          file: file!,
+          revision: revision!,
         });
       } else {
         await updateScan(songId, scanId, {
@@ -826,8 +832,8 @@ function ScanEditorPage({
       <Link className="back-link" to={songUrl}>← Cancel</Link>
       <header className="editor-heading">
         <p className="eyebrow">{songTitle || "Song"}</p>
-        <h1>{mode === "create" ? "Add Scan" : "Edit Scan"}</h1>
-        <p className="lede">{mode === "create" ? "Upload a private image, then optionally identify its Notebook and Page." : "Choose a Notebook and optional Page, or leave both empty for an external Scan."}</p>
+        <h1>{mode === "create" ? "Add Scan" : mode === "replace" ? "Replace Scan Image" : "Edit Scan"}</h1>
+        <p className="lede">{mode === "create" ? "Upload a private image, then optionally identify its Notebook and Page." : mode === "replace" ? "Upload a new private image to replace the current file. The previous image is preserved in history." : "Choose a Notebook and optional Page, or leave both empty for an external Scan."}</p>
       </header>
       {error && <p className="catalog-message error-message" role="alert">{error}</p>}
       {duplicateScan && (
@@ -845,7 +851,7 @@ function ScanEditorPage({
       )}
       <form className="song-form" onSubmit={(event) => { void submit(event); }}>
         <section className="form-card">
-          {mode === "create" ? (
+          {mode === "create" || mode === "replace" ? (
             <div className="form-field">
               <span>Scan image <strong aria-hidden="true">*</strong></span>
               {file ? (
@@ -897,33 +903,40 @@ function ScanEditorPage({
             </div>
           ) : (
             <div className="form-file-summary">
-              <span>Private file</span>
-              <strong>{filename}</strong>
+              <div>
+                <span>Private file</span>
+                <strong>{filename}</strong>
+              </div>
+              <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(songId)}/scans/${encodeURIComponent(scanId)}/replace`}>Replace image</Link>
             </div>
           )}
-          <label className="form-field">
-            <span>Notebook</span>
-            <select value={notebookId} onChange={(event) => {
-              const value = event.target.value;
-              setNotebookId(value);
-              if (!value) setPageLabel("");
-            }}>
-              <option value="">No Notebook — external Scan</option>
-              {options?.notebooks.map((notebook) => <option key={notebook.id} value={notebook.id}>{notebook.displayName}</option>)}
-            </select>
-            {fieldErrors.notebookId?.map((message) => <em key={message}>{message}</em>)}
-          </label>
-          {notebookId && (
-            <label className="form-field compact-field">
-              <span>Page</span>
-              <input maxLength={100} value={pageLabel} onChange={(event) => setPageLabel(event.target.value)} placeholder="For example: 12A or cover" />
-              {fieldErrors.pageLabel?.map((message) => <em key={message}>{message}</em>)}
-            </label>
+          {mode !== "replace" && (
+            <>
+              <label className="form-field">
+                <span>Notebook</span>
+                <select value={notebookId} onChange={(event) => {
+                  const value = event.target.value;
+                  setNotebookId(value);
+                  if (!value) setPageLabel("");
+                }}>
+                  <option value="">No Notebook — external Scan</option>
+                  {options?.notebooks.map((notebook) => <option key={notebook.id} value={notebook.id}>{notebook.displayName}</option>)}
+                </select>
+                {fieldErrors.notebookId?.map((message) => <em key={message}>{message}</em>)}
+              </label>
+              {notebookId && (
+                <label className="form-field compact-field">
+                  <span>Page</span>
+                  <input maxLength={100} value={pageLabel} onChange={(event) => setPageLabel(event.target.value)} placeholder="For example: 12A or cover" />
+                  {fieldErrors.pageLabel?.map((message) => <em key={message}>{message}</em>)}
+                </label>
+              )}
+            </>
           )}
         </section>
         <div className="form-actions">
           <Link className="secondary-action action-link" to={songUrl}>Cancel</Link>
-          <button className="primary-action" type="submit" disabled={isSaving || isTrashing || (mode === "create" && !file)}>{isSaving ? mode === "create" ? "Uploading…" : "Saving…" : mode === "create" ? "Add Scan" : "Save changes"}</button>
+          <button className="primary-action" type="submit" disabled={isSaving || isTrashing || ((mode === "create" || mode === "replace") && !file)}>{isSaving ? (mode === "create" || mode === "replace") ? "Uploading…" : "Saving…" : (mode === "create" || mode === "replace") ? "Save Image" : "Save changes"}</button>
         </div>
       </form>
       {mode === "edit" && <section className="danger-zone" aria-labelledby="remove-scan-title">
@@ -1053,8 +1066,11 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
       <form className="song-form" onSubmit={(event) => { void submit(event); }}>
         <section className="form-card">
           <div className="form-file-summary">
-            <span>Private original file</span>
-            <strong>{filename}</strong>
+            <div>
+              <span>Private original file</span>
+              <strong>{filename}</strong>
+            </div>
+            <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(songId)}/recordings/${encodeURIComponent(recordingId)}/replace`}>Replace audio</Link>
           </div>
           <label className="form-field">
             <span>Recording description <strong aria-hidden="true">*</strong></span>
@@ -1872,8 +1888,10 @@ export function App() {
         <Route path="/songs/:songId/lyrics/new" element={<LyricEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/lyrics/:lyricId/edit" element={<LyricEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/scans/new" element={<ScanEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs/:songId/scans/:scanId/replace" element={<ScanEditorPage mode="replace" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/scans/:scanId/edit" element={<ScanEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
-        <Route path="/songs/:songId/recordings/new" element={<RecordingUploadPage isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs/:songId/recordings/new" element={<RecordingUploadPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs/:songId/recordings/:recordingId/replace" element={<RecordingUploadPage mode="replace" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/recordings/:recordingId/edit" element={<RecordingEditorPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId" element={<SongDetailPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/trash" element={<TrashPage isOnline={isOnline} canEdit={canEdit} />} />

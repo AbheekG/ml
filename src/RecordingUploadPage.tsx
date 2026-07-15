@@ -26,13 +26,15 @@ import {
 } from "./recording-upload-view";
 
 export function RecordingUploadPage({
+  mode = "create",
   isOnline,
   canEdit,
 }: {
+  mode?: "create" | "replace";
   isOnline: boolean;
   canEdit: boolean | null;
 }) {
-  const { songId = "" } = useParams();
+  const { songId = "", recordingId } = useParams();
   const navigate = useNavigate();
   const [options, setOptions] = useState<RecordingEditorOptions | null>(null);
   const [songTitle, setSongTitle] = useState("");
@@ -54,6 +56,7 @@ export function RecordingUploadPage({
   const [notice, setNotice] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [replaceTarget, setReplaceTarget] = useState<{ recordingId: string; revision: number } | null>(null);
   const activeRequest = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -71,6 +74,14 @@ export function RecordingUploadPage({
         if (!cancelled) {
           setOptions(editorOptions);
           setSongTitle(song.titleLatin);
+          if (mode === "replace") {
+            const recording = song.recordings.find((r) => r.id === recordingId);
+            if (!recording) throw new Error("This Recording is no longer available.");
+            setDescription(recording.description);
+            setRecordedOn(recording.recordedOn || "");
+            setVocalistIds(recording.credits.filter((c) => c.role === "vocals").map((c) => c.personId));
+            setReplaceTarget({ recordingId: recording.id, revision: recording.revision });
+          }
           setError(null);
         }
       } catch (loadError) {
@@ -147,6 +158,7 @@ export function RecordingUploadPage({
         ...(descriptionConflict
           ? { descriptionOverride: descriptionOverride.trim() }
           : {}),
+        ...(replaceTarget ? { replaceTarget } : {}),
         onProgress: (nextProgress) => {
           setProgress(nextProgress);
           if (nextProgress.upload) setUpload(nextProgress.upload);
@@ -242,8 +254,12 @@ export function RecordingUploadPage({
       {!attempt && <Link className="back-link" to={songUrl}>← Cancel</Link>}
       <header className="editor-heading">
         <p className="eyebrow">{songTitle || "Song"}</p>
-        <h1>Add Recording</h1>
-        <p className="lede">Upload one private original. Playback stays unavailable until the stored bytes have been verified and any required derivative is ready.</p>
+        <h1>{mode === "replace" ? "Replace Recording Audio" : "Add Recording"}</h1>
+        <p className="lede">
+          {mode === "replace"
+            ? "Upload a new private original to replace the current audio. The previous audio is preserved in history."
+            : "Upload one private original. Playback stays unavailable until the stored bytes have been verified and any required derivative is ready."}
+        </p>
       </header>
 
       {error && <p className="catalog-message error-message" role="alert">{error}</p>}
