@@ -50,6 +50,7 @@ class ContainerConfigurationTests(unittest.TestCase):
     def test_image_does_not_define_or_copy_a_processor_secret(self) -> None:
         self.assertNotRegex(self.contents, r"(?m)^(?:ARG|ENV) .*TOKEN")
         self.assertNotIn("AUDIO_PROCESSOR_TOKEN", self.contents)
+        self.assertNotIn("AUDIO_PROCESSOR_ACCESS", self.contents)
         dockerignore = (SERVICE_ROOT / ".dockerignore").read_text(encoding="utf-8")
         self.assertEqual(
             [line for line in dockerignore.splitlines() if line.startswith("!")],

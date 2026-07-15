@@ -58,9 +58,12 @@ derivative, and sends bounded idempotent result/failure callbacks. A result
 delivery that may already have committed never becomes a contradictory failure
 callback. No HTTP server is added. The credential boundary and dormant Cloud Run
 Job now exist in protected staging, but the first no-work smoke proved the
-adapter still needs Cloudflare Access Service Auth credentials on claim and all
-capability requests. The accepted design remains a scheduled single-task Cloud
-Run Job. Its database-enforced
+deployed adapter still needs Cloudflare Access Service Auth credentials. The
+local source now strictly loads one file-only Access client ID/secret pair,
+sends the standard two Access headers on claim and every same-origin capability
+request, retains the separate Worker bearer token, and rejects any additional
+transfer origin to prevent credential disclosure. The accepted design remains
+a scheduled single-task Cloud Run Job. Its database-enforced
 global running-job gate, three-attempt bounded lease-loss recovery, 45-minute
 monotonic processor deadline, 55-minute lease-remaining floor, and streaming
 generated-output ceiling are now implemented and tested locally. A minimal
@@ -75,6 +78,11 @@ Exact paused-first cloud commands, cost assumptions, rotation, rollback, and
 staging checks are separately reviewed in
 [audio-processing-cloud-runbook.md](audio-processing-cloud-runbook.md). Every
 remaining processor cloud action remains separately owner-approved and unexecuted.
+
+The local Service Auth checkpoint passes all 90 audio tests, 31 application
+test files / 250 tests, all three TypeScript projects, production build ID
+`e74405e5e982`, the full bounded `linux/amd64` verification fixture, and the
+non-root dual-file runtime configuration/redaction smoke. No cloud state changed.
 
 The imported-Scan fingerprint inventory and deterministic local planner are now
 implemented. The planner streams and hashes all catalog-linked Scan sources,

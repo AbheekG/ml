@@ -27,6 +27,7 @@ _REQUIRED_ENVIRONMENT = {
     "AUDIO_PROCESSOR_WORKER_ORIGIN",
     "AUDIO_PROCESSOR_ALLOWED_TRANSFER_ORIGINS_JSON",
     "AUDIO_PROCESSOR_TOKEN_FILE",
+    "AUDIO_PROCESSOR_ACCESS_CREDENTIALS_FILE",
     "AUDIO_PROCESSOR_TEMPORARY_ROOT",
 }
 _OPTIONAL_ENVIRONMENT = {
@@ -97,6 +98,52 @@ def _read_processor_token(environment: Mapping[str, str]) -> str:
     return token
 
 
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate_json_key")
+        result[key] = value
+    return result
+
+
+def _read_access_credentials(
+    environment: Mapping[str, str],
+) -> tuple[str, str]:
+    raw_path = _required_value(
+        environment,
+        "AUDIO_PROCESSOR_ACCESS_CREDENTIALS_FILE",
+    )
+    path = Path(raw_path)
+    if not path.is_absolute():
+        raise HostedAdapterError("invalid_access_credentials_file")
+    try:
+        resolved = path.resolve(strict=True)
+        if not resolved.is_file():
+            raise HostedAdapterError("invalid_access_credentials_file")
+        with resolved.open("rb") as source:
+            raw_credentials = source.read(4097)
+        if not raw_credentials or len(raw_credentials) > 4096:
+            raise HostedAdapterError("invalid_access_credentials_file")
+        credentials = json.loads(
+            raw_credentials.decode("ascii"),
+            object_pairs_hook=_unique_json_object,
+            parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+        )
+    except HostedAdapterError:
+        raise
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        raise HostedAdapterError("invalid_access_credentials_file") from None
+    if (
+        not isinstance(credentials, dict)
+        or set(credentials) != {"clientId", "clientSecret"}
+        or not isinstance(credentials["clientId"], str)
+        or not isinstance(credentials["clientSecret"], str)
+    ):
+        raise HostedAdapterError("invalid_access_credentials_file")
+    return credentials["clientId"], credentials["clientSecret"]
+
+
 def _parse_origins(environment: Mapping[str, str]) -> frozenset[str]:
     raw = _required_value(
         environment,
@@ -122,6 +169,11 @@ def load_hosted_entrypoint_config(
 ) -> HostedAdapterConfig:
     if "AUDIO_PROCESSOR_TOKEN" in environment:
         raise HostedAdapterError("processor_token_environment_forbidden")
+    if (
+        "AUDIO_PROCESSOR_ACCESS_CLIENT_ID" in environment
+        or "AUDIO_PROCESSOR_ACCESS_CLIENT_SECRET" in environment
+    ):
+        raise HostedAdapterError("access_credentials_environment_forbidden")
     unknown = {
         name
         for name in environment
@@ -137,12 +189,15 @@ def load_hosted_entrypoint_config(
     if not temporary_root.is_absolute():
         raise HostedAdapterError("invalid_temporary_root")
 
+    access_client_id, access_client_secret = _read_access_credentials(environment)
     values: dict[str, object] = {
         "worker_base_url": _required_value(
             environment,
             "AUDIO_PROCESSOR_WORKER_ORIGIN",
         ),
         "processor_token": _read_processor_token(environment),
+        "access_client_id": access_client_id,
+        "access_client_secret": access_client_secret,
         "allowed_transfer_origins": _parse_origins(environment),
         "temporary_root": temporary_root,
     }

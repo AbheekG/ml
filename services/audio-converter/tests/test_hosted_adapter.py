@@ -37,6 +37,8 @@ from audio_converter.tools import MediaToolError
 WORKER_ORIGIN = "https://worker.invalid"
 OTHER_ORIGIN = "https://other.invalid"
 PROCESSOR_TOKEN = "processor-secret-with-at-least-32-characters"
+ACCESS_CLIENT_ID = "service-token-client-id.access"
+ACCESS_CLIENT_SECRET = "service-token-client-secret-with-at-least-32-characters"
 JOB_ID = "job_opaque-123"
 SOURCE_URL = f"{WORKER_ORIGIN}/api/processing/jobs/{JOB_ID}/source?token=source-capability"
 DERIVATIVE_URL = (
@@ -248,6 +250,8 @@ def config(root: Path, **overrides: object) -> HostedAdapterConfig:
     values: dict[str, object] = {
         "worker_base_url": WORKER_ORIGIN,
         "processor_token": PROCESSOR_TOKEN,
+        "access_client_id": ACCESS_CLIENT_ID,
+        "access_client_secret": ACCESS_CLIENT_SECRET,
         "allowed_transfer_origins": frozenset({WORKER_ORIGIN}),
         "temporary_root": root,
         "retry_delay_seconds": 0,
@@ -263,6 +267,14 @@ def fixed_clock() -> datetime:
 def failure_code(request: RequestRecord) -> str:
     assert request.body is not None
     return str(json.loads(request.body)["errorCode"])
+
+
+def assert_access_headers(test: unittest.TestCase, request: RequestRecord) -> None:
+    test.assertEqual(request.headers["CF-Access-Client-Id"], ACCESS_CLIENT_ID)
+    test.assertEqual(
+        request.headers["CF-Access-Client-Secret"],
+        ACCESS_CLIENT_SECRET,
+    )
 
 
 class HostedAdapterTests(unittest.TestCase):
@@ -293,6 +305,8 @@ class HostedAdapterTests(unittest.TestCase):
             self.assertEqual(client.requests[0].headers["Authorization"], f"Bearer {PROCESSOR_TOKEN}")
             self.assertNotIn("Authorization", client.requests[1].headers)
             self.assertEqual(client.requests[2].headers["Authorization"], f"Bearer {PROCESSOR_TOKEN}")
+            for request in client.requests:
+                assert_access_headers(self, request)
             result = json.loads(client.requests[2].body or b"")
             self.assertEqual(result["playbackKind"], "original")
             self.assertNotIn("sourceDownloadUrl", result)
@@ -324,6 +338,8 @@ class HostedAdapterTests(unittest.TestCase):
             self.assertEqual(upload.headers["Content-Length"], str(len(b"verified-mp3")))
             self.assertEqual(upload.headers["Content-Type"], "audio/mpeg")
             self.assertNotIn("Authorization", upload.headers)
+            for request in client.requests:
+                assert_access_headers(self, request)
             result = json.loads(client.requests[3].body or b"")
             self.assertEqual(result["derivative"]["sha256"], hashlib.sha256(b"verified-mp3").hexdigest())
             self.assertEqual(list(root.iterdir()), [])
@@ -414,6 +430,15 @@ class HostedAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw_root:
             with self.assertRaisesRegex(HostedAdapterError, "invalid_processor_token"):
                 config(Path(raw_root), processor_token="too-short")
+            with self.assertRaisesRegex(HostedAdapterError, "invalid_access_client_id"):
+                config(Path(raw_root), access_client_id="client id with spaces")
+            with self.assertRaisesRegex(HostedAdapterError, "invalid_access_client_secret"):
+                config(Path(raw_root), access_client_secret="too-short")
+            with self.assertRaisesRegex(HostedAdapterError, "access_origin_mismatch"):
+                config(
+                    Path(raw_root),
+                    allowed_transfer_origins={WORKER_ORIGIN, OTHER_ORIGIN},
+                )
 
             untrusted_claim = claim_response(
                 sourceDownloadUrl=(
@@ -735,6 +760,8 @@ class HostedAdapterTests(unittest.TestCase):
             self.assertEqual(outcome.error_code, "conversion_failed")
             self.assertEqual([request.url for request in client.requests].count(FAILURE_URL), 2)
             self.assertEqual(failure_code(client.requests[-1]), "conversion_failed")
+            for request in client.requests:
+                assert_access_headers(self, request)
             self.assertEqual(list(root.iterdir()), [])
 
     def test_failure_delivery_exhaustion_is_bounded(self) -> None:
@@ -960,6 +987,8 @@ class HostedAdapterTests(unittest.TestCase):
             routine_text = f"{adapter_config!r} {outcome!r}"
             for private_value in (
                 PROCESSOR_TOKEN,
+                ACCESS_CLIENT_ID,
+                ACCESS_CLIENT_SECRET,
                 "source-capability",
                 "derivative-capability",
                 "result-capability",

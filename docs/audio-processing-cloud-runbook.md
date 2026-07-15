@@ -10,7 +10,10 @@ scan, and credential-boundary phases through Secret Manager version 1 and the
 matching Worker secrets. The exact digest-pinned bounded Cloud Run Job is Ready,
 matches the reviewed specification, and has zero IAM bindings. Its first
 execution failed safely on `claim_redirect_rejected` because Cloudflare Access
-intercepted the request before the Worker. No Scheduler job exists.
+intercepted the request before the Worker. Local Service Auth support and both
+fresh `linux/amd64` proofs now pass, but no Access token/policy, Google Access
+secret, new image/scan, Job update, or retry has occurred. No Scheduler job
+exists.
 
 Use this together with [audio-processing.md](audio-processing.md),
 [audio-processing-invocation.md](audio-processing-invocation.md), and
@@ -33,9 +36,10 @@ Stop before cloud creation unless all of these are true:
    `linux/amd64` targets and the full local fixture passed on 2026-07-15; the
    exact hardened commit image subsequently matched its independently resolved
    registry digest and passed the reviewed automatic-scan/reachability gate;
-   every future digest requires a new review. The first approved Cloud Run
-   no-work execution must still prove the platform's actual root-owned
-   secret-volume behavior.
+   every future digest requires a new review. The first failed Cloud Run smoke
+   proved the existing processor-token file is readable; the next approved
+   no-work execution must also prove readability of the new root-owned Access
+   credential file.
 3. The owner has rechecked current pricing, the existing billing budget alerts,
    shared billing-account allowance use, and whether to approve the paid image
    vulnerability scan described below.
@@ -50,8 +54,8 @@ Stop before cloud creation unless all of these are true:
    Never use a staging catalog record as a disposable processing fixture.
 
 Cloud Run Jobs always use the second-generation execution environment. Its
-secret volume is root-owned, so the non-root file-read smoke is mandatory; do
-not switch the processor to root to make the test pass. The bounded in-memory
+secret volume is root-owned, so each new non-root file mount needs a read smoke;
+do not switch the processor to root to make the test pass. The bounded in-memory
 mount must also be writable by the non-root process during the first approved
 real Recording pass. A permissions failure is a stop condition, not permission
 to fall back to a plain secret environment variable or unbounded filesystem.
@@ -73,6 +77,7 @@ export IMAGE=processor
 export RUN_JOB=music-audio-processor
 export SCHEDULER_JOB=music-audio-processor-quarter-hour
 export SECRET=music-audio-processor-token
+export ACCESS_SECRET=music-audio-access-service-credentials
 export WORKER_ORIGIN=https://replace-with-protected-staging-origin.example
 
 export PROJECT_NUMBER="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
@@ -134,20 +139,29 @@ not contact the Worker and must print only `{"configuration":"valid"}`:
 ```sh
 umask 077
 DUMMY_TOKEN_FILE="$(mktemp)"
+DUMMY_ACCESS_FILE="$(mktemp)"
 openssl rand -base64 48 | tr -d '\n' > "${DUMMY_TOKEN_FILE}"
+DUMMY_ACCESS_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
+printf '{"clientId":"dummy-service-token.access","clientSecret":"%s"}' \
+  "${DUMMY_ACCESS_SECRET}" > "${DUMMY_ACCESS_FILE}"
+unset DUMMY_ACCESS_SECRET
 chmod 0444 "${DUMMY_TOKEN_FILE}"
+chmod 0444 "${DUMMY_ACCESS_FILE}"
 docker run --rm \
   --read-only \
   --mount "type=bind,source=${DUMMY_TOKEN_FILE},target=/var/run/secrets/audio-processor-token,readonly" \
+  --mount "type=bind,source=${DUMMY_ACCESS_FILE},target=/var/run/secrets/audio-access-credentials,readonly" \
   --env AUDIO_PROCESSOR_WORKER_ORIGIN=https://worker.example.invalid \
   --env 'AUDIO_PROCESSOR_ALLOWED_TRANSFER_ORIGINS_JSON=["https://worker.example.invalid"]' \
   --env AUDIO_PROCESSOR_TOKEN_FILE=/var/run/secrets/audio-processor-token \
+  --env AUDIO_PROCESSOR_ACCESS_CREDENTIALS_FILE=/var/run/secrets/audio-access-credentials \
   --env AUDIO_PROCESSOR_TEMPORARY_ROOT=/var/lib/music-audio \
   --entrypoint python \
   music-library-audio-converter:local \
   -c 'import json,os; from audio_converter.hosted_entrypoint import load_hosted_entrypoint_config; load_hosted_entrypoint_config(os.environ); print(json.dumps({"configuration":"valid"},separators=(",",":")))'
-rm -f "${DUMMY_TOKEN_FILE}"
+rm -f "${DUMMY_TOKEN_FILE}" "${DUMMY_ACCESS_FILE}"
 unset DUMMY_TOKEN_FILE
+unset DUMMY_ACCESS_FILE
 
 cd ../..
 ```
@@ -263,7 +277,7 @@ Cloud Run infrastructure pulls the image; add no extra repository grant unless a
 documented pull failure proves one is required. The future operator needs Writer
 only for the push and Service Account User only to attach the runtime identity.
 
-## Phase 4 — real processor secret
+## Phase 4 — real processor and Access secrets
 
 Quiesce processing first: no Scheduler exists or it is paused, no Cloud Run
 execution is active, and the aggregate D1 query reports zero running leases.
@@ -312,6 +326,19 @@ unset TOKEN_FILE
 Never use `latest` in the Job secret mount. Retain the prior disabled version
 during future rotations until the new no-work and real-job checks pass.
 
+Before retrying the Job, create a dedicated Cloudflare Access service token and
+admit only that token through a Service Auth policy on the existing Access
+application. Cloudflare displays the client secret only once. Under a separate
+owner-approved operation, capture the ID and secret directly into one ignored
+`0600` JSON file with exactly `clientId` and `clientSecret`; never print either
+value, export either value, or place either in a command argument. Create the
+automatically replicated `${ACCESS_SECRET}` from that file, pin its enabled
+version, grant only its secret-level accessor role to the runtime identity, and
+remove the transient file. Do not use a Bypass policy, Access single-header
+mode, or ordinary environment-secret configuration. Before the Job command,
+set `ACCESS_SECRET_VERSION` to that exact numeric enabled version; never use
+`latest`.
+
 ## Phase 5 — push a reviewed digest and create a dormant Job
 
 Return to the converter directory, retag the already-tested local runtime image,
@@ -346,8 +373,8 @@ gcloud run jobs create "${RUN_JOB}" \
   --cpu 1 \
   --memory 2Gi \
   --add-volume 'type=in-memory,mount-path=/var/lib/music-audio,size-limit=1152Mi' \
-  --set-secrets "/var/run/secrets/audio-processor-token=${SECRET}:${SECRET_VERSION}" \
-  --set-env-vars "^@^AUDIO_PROCESSOR_WORKER_ORIGIN=${WORKER_ORIGIN}@AUDIO_PROCESSOR_ALLOWED_TRANSFER_ORIGINS_JSON=[\"${WORKER_ORIGIN}\"]@AUDIO_PROCESSOR_TOKEN_FILE=/var/run/secrets/audio-processor-token@AUDIO_PROCESSOR_TEMPORARY_ROOT=/var/lib/music-audio@AUDIO_PROCESSOR_REQUEST_TIMEOUT_SECONDS=60@AUDIO_PROCESSOR_RETRY_ATTEMPTS=3@AUDIO_PROCESSOR_RETRY_DELAY_SECONDS=0.25@AUDIO_PROCESSOR_MAX_SOURCE_BYTES=536870912@AUDIO_PROCESSOR_MAX_DERIVATIVE_BYTES=536870912@AUDIO_PROCESSOR_MAX_GENERATED_OUTPUT_BYTES=536870912@AUDIO_PROCESSOR_SOFT_DEADLINE_SECONDS=2700@AUDIO_PROCESSOR_MINIMUM_LEASE_REMAINING_SECONDS=3300" \
+  --set-secrets "/var/run/secrets/audio-processor-token=${SECRET}:${SECRET_VERSION},/var/run/secrets/audio-access-credentials=${ACCESS_SECRET}:${ACCESS_SECRET_VERSION}" \
+  --set-env-vars "^@^AUDIO_PROCESSOR_WORKER_ORIGIN=${WORKER_ORIGIN}@AUDIO_PROCESSOR_ALLOWED_TRANSFER_ORIGINS_JSON=[\"${WORKER_ORIGIN}\"]@AUDIO_PROCESSOR_TOKEN_FILE=/var/run/secrets/audio-processor-token@AUDIO_PROCESSOR_ACCESS_CREDENTIALS_FILE=/var/run/secrets/audio-access-credentials@AUDIO_PROCESSOR_TEMPORARY_ROOT=/var/lib/music-audio@AUDIO_PROCESSOR_REQUEST_TIMEOUT_SECONDS=60@AUDIO_PROCESSOR_RETRY_ATTEMPTS=3@AUDIO_PROCESSOR_RETRY_DELAY_SECONDS=0.25@AUDIO_PROCESSOR_MAX_SOURCE_BYTES=536870912@AUDIO_PROCESSOR_MAX_DERIVATIVE_BYTES=536870912@AUDIO_PROCESSOR_MAX_GENERATED_OUTPUT_BYTES=536870912@AUDIO_PROCESSOR_SOFT_DEADLINE_SECONDS=2700@AUDIO_PROCESSOR_MINIMUM_LEASE_REMAINING_SECONDS=3300" \
   --labels environment=staging,component=audio-processor
 ```
 

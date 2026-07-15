@@ -248,11 +248,26 @@ secret version 1 at the file path, and the exact 12 bounded environment values.
 Its first manual no-work execution pulled and started the correct runtime, read
 secret version 1, loaded configuration, and then failed closed with the sole
 application error `claim_redirect_rejected`. Cloudflare Access intercepted the
-claim before the Worker because the adapter does not yet send Service Auth
-headers. Exactly one execution is failed; the Job remains Ready, has no IAM
-binding, and no Scheduler job exists. D1 retained zero jobs and zero foreign-key
-errors. Temporary-volume writability remains unproved because no job was
-claimed. Do not retry until Service Auth support and credentials are reviewed.
+claim before the Worker because that deployed digest does not send Service Auth
+headers. Local source now requires one strict file-only JSON Access credential,
+adds the standard two headers to claim/source/derivative/result/failure, retains
+the separate Worker bearer on claim/result/failure, redacts both Access values,
+and constrains every transfer to the exact Worker origin. Exactly one execution
+is failed; the Job remains Ready, has no IAM binding, and no Scheduler job
+exists. D1 retained zero jobs and zero foreign-key errors. Temporary-volume
+writability remains unproved because no job was claimed. Do not retry until the
+local checks, a newly scanned image, Service Auth policy/credential boundary,
+and updated Job are separately reviewed and approved.
+
+The local checks now pass: all 90 audio tests cover strict file parsing,
+environment-secret rejection, representation/log redaction, exact-origin
+confinement, and Access headers across claim/source/derivative/result/failure.
+The full application and TypeScript/build suites also pass. Fresh
+`linux/amd64` targets rebuilt successfully; the bounded verification fixture
+completed with 1,073,741,824 peak temporary bytes and 1,224,548,352 conservative
+peak bytes below 2 GiB, while the 213,095,696-byte non-root runtime loaded both
+read-only dummy credential files and kept their values out of its routine
+representation. Nothing was pushed or changed in staging.
 
 ## Aggregate-only observability
 

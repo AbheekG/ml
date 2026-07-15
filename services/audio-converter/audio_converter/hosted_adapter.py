@@ -63,6 +63,8 @@ class HostedTransportError(RuntimeError):
 class HostedAdapterConfig:
     worker_base_url: str
     processor_token: str = field(repr=False)
+    access_client_id: str = field(repr=False)
+    access_client_secret: str = field(repr=False)
     allowed_transfer_origins: frozenset[str]
     temporary_root: Path = field(repr=False)
     request_timeout_seconds: float = 60.0
@@ -91,6 +93,28 @@ class HostedAdapterConfig:
         ):
             raise HostedAdapterError("invalid_processor_token")
 
+        access_client_id = self.access_client_id
+        if (
+            not isinstance(access_client_id, str)
+            or not 1 <= len(access_client_id) <= 512
+            or any(
+                not 33 <= ord(character) <= 126
+                for character in access_client_id
+            )
+        ):
+            raise HostedAdapterError("invalid_access_client_id")
+
+        access_client_secret = self.access_client_secret
+        if (
+            not isinstance(access_client_secret, str)
+            or not 32 <= len(access_client_secret) <= 512
+            or any(
+                not 33 <= ord(character) <= 126
+                for character in access_client_secret
+            )
+        ):
+            raise HostedAdapterError("invalid_access_client_secret")
+
         try:
             raw_origins = frozenset(self.allowed_transfer_origins)
         except TypeError:
@@ -103,6 +127,8 @@ class HostedAdapterConfig:
         )
         if worker_origin not in origins:
             raise HostedAdapterError("worker_origin_not_allowlisted")
+        if origins != frozenset({worker_origin}):
+            raise HostedAdapterError("access_origin_mismatch")
         object.__setattr__(self, "allowed_transfer_origins", origins)
 
         try:
@@ -385,6 +411,13 @@ def _safe_request(
         raise HostedTransportError() from None
 
 
+def _access_headers(config: HostedAdapterConfig) -> dict[str, str]:
+    return {
+        "CF-Access-Client-Id": config.access_client_id,
+        "CF-Access-Client-Secret": config.access_client_secret,
+    }
+
+
 def _header(headers: Mapping[str, str], name: str) -> str | None:
     expected = name.casefold()
     for key, value in headers.items():
@@ -451,6 +484,7 @@ def _claim_one_job(
     # Claim has a leasing side effect. A lost response must not cause this
     # invocation to claim a second job, so this request deliberately has no retry.
     headers = {
+        **_access_headers(config),
         "Accept": "application/json",
         "Accept-Encoding": "identity",
         "Authorization": f"Bearer {config.processor_token}",
@@ -556,6 +590,7 @@ def _download_source(
             "GET",
             claim.processing_request.source_download_url,
             headers={
+                **_access_headers(config),
                 "Accept": "application/octet-stream",
                 "Accept-Encoding": "identity",
                 "Cache-Control": "no-store",
@@ -662,6 +697,7 @@ def _upload_derivative(
         raise _JobFailure("derivative_too_large")
 
     headers = {
+        **_access_headers(config),
         "Accept": "application/json",
         "Accept-Encoding": "identity",
         "Cache-Control": "no-store",
@@ -797,6 +833,7 @@ def _deliver_callback(
     budget: _ProcessingBudget | None = None,
 ) -> None:
     headers = {
+        **_access_headers(config),
         "Accept": "application/json",
         "Accept-Encoding": "identity",
         "Authorization": f"Bearer {config.processor_token}",

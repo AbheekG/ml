@@ -89,9 +89,11 @@ paths must differ. The implemented client rejects redirects for every operation.
 The application Worker implements the complementary local-only claim and
 callback boundary. A claim wrapper contains `processingRequest` (the exact
 payload parsed here), `resultUrl`, `failureUrl`, and the lease expiry. The local
-adapter authenticates claim/result/failure with the separately supplied token and
-uses only the strict operation-scoped URLs. No command-line secret interface,
-HTTP server, container, cloud credentials, scheduling, or deployment is included.
+adapter authenticates every request to the protected hostname with Cloudflare
+Access Service Auth headers, authenticates claim/result/failure separately with
+the Worker processor bearer token, and uses only the strict operation-scoped
+same-origin URLs. No command-line secret interface, HTTP server, cloud
+credentials, scheduling, or deployment is included.
 The separately reviewable proposed run-once Job boundary and its required local
 safeguards are documented in
 [`docs/audio-processing-invocation.md`](../../docs/audio-processing-invocation.md).
@@ -109,13 +111,20 @@ The entrypoint accepts no command-line secret. It requires these settings:
 - `AUDIO_PROCESSOR_WORKER_ORIGIN`;
 - `AUDIO_PROCESSOR_ALLOWED_TRANSFER_ORIGINS_JSON`, a nonempty JSON string array;
 - `AUDIO_PROCESSOR_TOKEN_FILE`, an absolute path to a printable 32–512 byte
-  secret file with no trailing newline; and
+  secret file with no trailing newline;
+- `AUDIO_PROCESSOR_ACCESS_CREDENTIALS_FILE`, an absolute path to an ASCII JSON
+  file with exactly `clientId` and `clientSecret`; the ID is 1–512 printable
+  bytes and the secret is 32–512 printable bytes, both without whitespace; and
 - `AUDIO_PROCESSOR_TEMPORARY_ROOT`, an existing absolute private directory.
 
 Bounded timeout, retry, source/derivative/generated-byte, soft-deadline, and
 minimum-lease settings may be overridden only through the documented
 `AUDIO_PROCESSOR_` names enforced in `hosted_entrypoint.py`. An
-`AUDIO_PROCESSOR_TOKEN` environment value and unknown prefixed names are rejected.
+`AUDIO_PROCESSOR_TOKEN`, Access client ID/secret environment value, and unknown
+prefixed name are rejected. The transfer-origin allowlist must be the exact
+singleton Worker origin so the Access credential can never be sent to another
+host. Secret values and their file paths are excluded from routine
+representations and aggregate output.
 
 ## Container and resource fixture
 
@@ -176,3 +185,15 @@ are fixed in the exact Debian package or outside the non-root audio-only path;
 this is a path-specific review, not permission to ignore findings after a pin or
 contract change. The earlier Bookworm digest remains a rejected staging-only
 artifact.
+
+After the first Cloud Run execution exposed the Access boundary, the local
+Service Auth source was rebuilt and re-proved without pushing it. All 90 audio
+tests pass. The fresh `linux/amd64` verification target again held
+1,073,741,824 simultaneous temporary bytes, processed a 536,870,912-byte source
+to an 11,185,196-byte derivative, stayed below 2 GiB at a conservative
+1,224,548,352-byte peak, and cleaned up completely. The fresh 213,095,696-byte
+runtime image is `amd64`, runs as `10001:10001`, exposes the exact pinned
+FFmpeg/libmp3lame path, and loads the processor token plus strict Access JSON
+from separate read-only dummy mounts while redacting all three credential
+values. This uncommitted local image is proof only; any future pushed digest
+requires a new scan and review.

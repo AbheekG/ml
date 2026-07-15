@@ -22,17 +22,31 @@ from audio_converter.hosted_entrypoint import (
 
 WORKER_ORIGIN = "https://worker.invalid"
 TOKEN = "entrypoint-secret-with-at-least-32-characters"
+ACCESS_CLIENT_ID = "entrypoint-service-token.access"
+ACCESS_CLIENT_SECRET = "entrypoint-access-secret-with-at-least-32-characters"
 
 
 def environment(root: Path, **overrides: str) -> dict[str, str]:
     token_file = root / "processor-token"
     token_file.write_text(TOKEN, encoding="ascii")
+    access_credentials_file = root / "access-credentials"
+    access_credentials_file.write_text(
+        json.dumps(
+            {
+                "clientId": ACCESS_CLIENT_ID,
+                "clientSecret": ACCESS_CLIENT_SECRET,
+            },
+            separators=(",", ":"),
+        ),
+        encoding="ascii",
+    )
     values = {
         "AUDIO_PROCESSOR_WORKER_ORIGIN": WORKER_ORIGIN,
         "AUDIO_PROCESSOR_ALLOWED_TRANSFER_ORIGINS_JSON": json.dumps([
             WORKER_ORIGIN,
         ]),
         "AUDIO_PROCESSOR_TOKEN_FILE": str(token_file),
+        "AUDIO_PROCESSOR_ACCESS_CREDENTIALS_FILE": str(access_credentials_file),
         "AUDIO_PROCESSOR_TEMPORARY_ROOT": str(root),
     }
     values.update(overrides)
@@ -63,6 +77,8 @@ class HostedEntrypointTests(unittest.TestCase):
 
             self.assertEqual(config.worker_base_url, WORKER_ORIGIN)
             self.assertEqual(config.processor_token, TOKEN)
+            self.assertEqual(config.access_client_id, ACCESS_CLIENT_ID)
+            self.assertEqual(config.access_client_secret, ACCESS_CLIENT_SECRET)
             self.assertEqual(config.allowed_transfer_origins, {WORKER_ORIGIN})
             self.assertEqual(config.request_timeout_seconds, 45)
             self.assertEqual(config.retry_attempts, 2)
@@ -78,6 +94,8 @@ class HostedEntrypointTests(unittest.TestCase):
             root = Path(raw_root)
             cases = (
                 {"AUDIO_PROCESSOR_TOKEN": TOKEN},
+                {"AUDIO_PROCESSOR_ACCESS_CLIENT_ID": ACCESS_CLIENT_ID},
+                {"AUDIO_PROCESSOR_ACCESS_CLIENT_SECRET": ACCESS_CLIENT_SECRET},
                 {"AUDIO_PROCESSOR_TYPO": "value"},
                 {"AUDIO_PROCESSOR_RETRY_ATTEMPTS": "2.0"},
                 {"AUDIO_PROCESSOR_REQUEST_TIMEOUT_SECONDS": "nan"},
@@ -100,8 +118,39 @@ class HostedEntrypointTests(unittest.TestCase):
             with self.assertRaisesRegex(HostedAdapterError, "invalid_processor_token_file"):
                 load_hosted_entrypoint_config(values)
 
+            values = environment(root)
             values["AUDIO_PROCESSOR_TOKEN_FILE"] = str(root / "missing")
             with self.assertRaisesRegex(HostedAdapterError, "invalid_processor_token_file"):
+                load_hosted_entrypoint_config(values)
+
+    def test_rejects_malformed_or_missing_access_credentials_file(self) -> None:
+        malformed_values = (
+            b'{"clientId":"one","clientId":"two","clientSecret":"secret"}',
+            b'{"clientId":"one"}',
+            b'{"clientId":"one","clientSecret":"secret","extra":true}',
+            b'{"clientId":1,"clientSecret":"secret"}',
+            b'not-json',
+            b'\xff',
+        )
+        for contents in malformed_values:
+            with self.subTest(contents=contents[:20]):
+                with tempfile.TemporaryDirectory() as raw_root:
+                    root = Path(raw_root)
+                    values = environment(root)
+                    Path(values["AUDIO_PROCESSOR_ACCESS_CREDENTIALS_FILE"]).write_bytes(
+                        contents
+                    )
+                    with self.assertRaises(HostedAdapterError):
+                        load_hosted_entrypoint_config(values)
+
+        with tempfile.TemporaryDirectory() as raw_root:
+            root = Path(raw_root)
+            values = environment(root)
+            values["AUDIO_PROCESSOR_ACCESS_CREDENTIALS_FILE"] = str(root / "missing")
+            with self.assertRaisesRegex(
+                HostedAdapterError,
+                "invalid_access_credentials_file",
+            ):
                 load_hosted_entrypoint_config(values)
 
     def test_no_work_and_success_emit_one_aggregate_record_and_exit_zero(self) -> None:
@@ -123,6 +172,11 @@ class HostedEntrypointTests(unittest.TestCase):
                         nonlocal calls
                         calls += 1
                         self.assertEqual(config.processor_token, TOKEN)
+                        self.assertEqual(config.access_client_id, ACCESS_CLIENT_ID)
+                        self.assertEqual(
+                            config.access_client_secret,
+                            ACCESS_CLIENT_SECRET,
+                        )
                         return outcome
 
                     timestamps = iter((10.0, 10.125))
@@ -212,6 +266,8 @@ class HostedEntrypointTests(unittest.TestCase):
             )
             combined = invalid_output.getvalue() + unexpected_output.getvalue()
             self.assertNotIn(TOKEN, combined)
+            self.assertNotIn(ACCESS_CLIENT_ID, combined)
+            self.assertNotIn(ACCESS_CLIENT_SECRET, combined)
             self.assertNotIn(private_value, combined)
             self.assertNotIn(str(root), combined)
 
