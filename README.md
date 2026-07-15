@@ -130,6 +130,19 @@ npm run media:plan-audio
 
 Add `-- --write-plan` only to save the detailed proposed operations under ignored `data/import-output/`. This command never applies the plan or contacts cloud services. Review its aggregate counts before separately authorizing any future upload or database write.
 
+Imported Scan fingerprints have a separate local, dry-run-by-default planner:
+
+```bash
+npm run media:plan-scan-fingerprints
+```
+
+It streams every workbook-referenced Scan from the read-only AppSheet tree,
+reconciles the exact catalog relationship and byte size, verifies any existing
+hash, and reports aggregate backfill and duplicate-content counts. Add
+`-- --write-plan` only to store the deterministic detailed plan under ignored
+`data/import-output/`. The planner never changes legacy files, the catalog,
+the database, or cloud state; equal hashes are reported and never auto-merged.
+
 After a plan has been reviewed, preview its execution locally. This re-hashes every
 planned derivative and reports only aggregate counts; it does not contact R2 or D1:
 

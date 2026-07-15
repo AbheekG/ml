@@ -20,6 +20,7 @@
     "db:load-local": "tsx scripts/load-local-db.ts",
     "media:upload": "tsx scripts/upload-r2.ts",
     "media:plan-audio": "tsx scripts/plan-audio-integration.ts",
+    "media:plan-scan-fingerprints": "tsx scripts/plan-scan-fingerprint-backfill.ts",
     "media:integrate-audio": "tsx scripts/audio-integration-executor.ts"
   },
   "dependencies": {

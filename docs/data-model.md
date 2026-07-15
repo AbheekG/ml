@@ -68,4 +68,11 @@ Scan ── optional Notebook
 - SHA-256 is recorded for upload verification and duplicate detection. Equal content does not automatically merge distinct historical records.
 - A Recording may point directly to its original media or to a playback derivative whose `audio_derivatives` provenance row names that same original. Database guards reject unrelated playback objects and later hash/size changes that would invalidate recorded provenance.
 - New Scan creation currently accepts verified JPEG, PNG, or WebP files up to 25 MB, stores the original privately, and rejects an existing Scan fingerprint before uploading. If D1 finalization fails after R2 storage, the uncommitted object is removed. Readability-sized image derivatives and replacement are separate later work.
+- Imported Scan fingerprints are prepared by a local, dry-run-by-default planner
+  that reconciles every Scan/media relationship, verifies the catalog byte size,
+  hashes source bytes without loading whole files into memory, and writes details
+  only under ignored private paths when explicitly requested. It reports equal
+  hashes for review but never merges distinct historical records. Applying the
+  guarded database backfill remains a separate local implementation step; no
+  remote migration or catalog mutation is part of planning.
 - Files present on disk but absent from the workbook are quarantined for review and are not silently uploaded or deleted.

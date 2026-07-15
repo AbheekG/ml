@@ -70,6 +70,15 @@ staging checks are separately reviewed in
 [audio-processing-cloud-runbook.md](audio-processing-cloud-runbook.md). Every
 cloud action remains separately owner-approved and unexecuted.
 
+The imported-Scan fingerprint inventory and deterministic local planner are now
+implemented. The planner streams and hashes all catalog-linked Scan sources,
+requires one-to-one catalog relationships and unchanged byte sizes, verifies
+pre-existing hashes, reports duplicate-content groups without merging them, and
+keeps detailed identifiers under ignored private output only. A guarded local
+database executor, migration-chain verification, and owner-reviewed remote
+application remain later steps; no legacy, D1, R2, or staging state is changed by
+the planner.
+
 Proposed application tooling:
 
 - React + TypeScript + Vite for the interface;
