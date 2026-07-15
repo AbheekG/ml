@@ -62,6 +62,13 @@ The responsibilities remain deliberately separate:
   file and read at process startup. The matching value remains a Cloudflare
   Worker secret. It is never a command-line argument, ordinary environment
   variable, image layer, tracked file, or log field.
+- The protected Worker hostname also requires Cloudflare Access machine
+  admission before the Worker's processor bearer check. Use a Service Auth
+  policy and standard `CF-Access-Client-Id` / `CF-Access-Client-Secret` headers
+  on claim and every capability request. Do not use a persistent Bypass policy,
+  and do not reuse `Authorization` for Access because that header carries the
+  separate processor bearer token. Keep the Access credential file-only and
+  redacted under the same strict configuration rules.
 - The Worker origin and identical transfer-origin allowlist are non-secret
   configuration. All actual media access still uses the existing short-lived,
   operation-bound Worker capabilities.
@@ -238,8 +245,14 @@ Ready. Its independently described specification matches the reviewed contract:
 the exact hardened digest, gen2, runtime identity, one task and parallelism one,
 zero retries, 50-minute timeout, 1 CPU, 2 GiB memory, 1,152 MiB in-memory volume,
 secret version 1 at the file path, and the exact 12 bounded environment values.
-It has no execution history or Job IAM binding, and no Scheduler job exists. The
-first manual no-work execution remains a separate gate.
+Its first manual no-work execution pulled and started the correct runtime, read
+secret version 1, loaded configuration, and then failed closed with the sole
+application error `claim_redirect_rejected`. Cloudflare Access intercepted the
+claim before the Worker because the adapter does not yet send Service Auth
+headers. Exactly one execution is failed; the Job remains Ready, has no IAM
+binding, and no Scheduler job exists. D1 retained zero jobs and zero foreign-key
+errors. Temporary-volume writability remains unproved because no job was
+claimed. Do not retry until Service Auth support and credentials are reviewed.
 
 ## Aggregate-only observability
 

@@ -46,8 +46,8 @@ readiness, and job success. Safe failures are durable and editor-retryable. The
 versioned processor token and exact transfer origin are now configured across
 the least-privilege Google secret and protected Worker boundary. The control
 plane is deployed to protected staging with migrations `0005`–`0008`, but
-remains fail-closed because its processor Job has never executed. It has not
-processed a real upload.
+remains fail-closed after its first processor execution rejected the Access
+login redirect before reaching the Worker. It has not processed a real upload.
 
 The provider-neutral processor-side HTTP adapter is also implemented locally as
 a one-job library boundary around the existing Python/FFmpeg `prepare()` core.
@@ -56,9 +56,11 @@ Worker routes, disables redirects, streams the source into a private temporary
 directory with exact length/hash enforcement, uploads only a reverified selected
 derivative, and sends bounded idempotent result/failure callbacks. A result
 delivery that may already have committed never becomes a contradictory failure
-callback. No HTTP server/trigger, scheduler, real secret, Cloud Run
-resource, or other hosted invocation mechanism has been created. The accepted
-local design selects a scheduled single-task Cloud Run Job. Its database-enforced
+callback. No HTTP server is added. The credential boundary and dormant Cloud Run
+Job now exist in protected staging, but the first no-work smoke proved the
+adapter still needs Cloudflare Access Service Auth credentials on claim and all
+capability requests. The accepted design remains a scheduled single-task Cloud
+Run Job. Its database-enforced
 global running-job gate, three-attempt bounded lease-loss recovery, 45-minute
 monotonic processor deadline, 55-minute lease-remaining floor, and streaming
 generated-output ceiling are now implemented and tested locally. A minimal
@@ -158,9 +160,11 @@ Job. One automatically replicated processor secret has one enabled version and
 only a secret-level runtime accessor; the matching token and exact transfer
 origin are Worker secrets. The exact reviewed digest is configured as a dormant
 Ready Cloud Run Job with the bounded resource and environment contract; it has
-zero executions and no invoker binding. No Scheduler trigger or hosted processor
-execution has been configured. A separate Google production project has not
-been created.
+one failed execution and no invoker binding. The execution loaded configuration
+and then failed closed on `claim_redirect_rejected` because Cloudflare Access
+intercepted the request before the Worker. D1 remained unchanged. No Scheduler
+trigger has been configured. A separate Google production project has not been
+created.
 
 Never point development code at production data by default.
 

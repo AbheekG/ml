@@ -8,8 +8,9 @@ resume requires fresh explicit owner approval. Production is out of scope.
 Protected staging has separately completed the reviewed prerequisite, image
 scan, and credential-boundary phases through Secret Manager version 1 and the
 matching Worker secrets. The exact digest-pinned bounded Cloud Run Job is Ready,
-matches the reviewed specification, and has zero executions and zero IAM
-bindings. No Scheduler job exists.
+matches the reviewed specification, and has zero IAM bindings. Its first
+execution failed safely on `claim_redirect_rejected` because Cloudflare Access
+intercepted the request before the Worker. No Scheduler job exists.
 
 Use this together with [audio-processing.md](audio-processing.md),
 [audio-processing-invocation.md](audio-processing-invocation.md), and
@@ -41,6 +42,10 @@ Stop before cloud creation unless all of these are true:
 4. The protected Worker origin is exact HTTPS with no path or trailing slash.
    The processor token exists only in an ignored `0600` file during setup, a
    version-pinned Google secret, and the Cloudflare Worker secret.
+   The hostname's Access application additionally requires a dedicated Service
+   Auth token and policy. The processor must send the standard two Access
+   headers on claim and every capability request while retaining its separate
+   Worker bearer header. Never substitute a persistent Bypass policy.
 5. The remote migration list and zero-job inventory match the expected state.
    Never use a staging catalog record as a disposable processing fixture.
 
@@ -518,7 +523,9 @@ Official facts and commands were rechecked against
 [Secret Manager pricing](https://cloud.google.com/secret-manager/pricing),
 [Artifact Registry pricing](https://cloud.google.com/artifact-registry/pricing),
 [Artifact Analysis pricing](https://cloud.google.com/artifact-analysis/pricing),
-and [Premium network pricing](https://cloud.google.com/vpc/pricing).
+[Premium network pricing](https://cloud.google.com/vpc/pricing),
+[Cloudflare Access service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/),
+and [Cloudflare Access Service Auth policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/).
 
 ## Rotation
 
