@@ -247,8 +247,17 @@ within Artifact Registry's current 0.5 GiB-month no-cost storage allowance when
 measurement shows that is practical. Bound ordinary logs and image revisions.
 Downloading an R2 original into Cloud Run is Google ingress; uploading a newly
 created derivative to the Worker is outbound internet transfer and is therefore
-the most likely per-upload Google charge after the current 1 GiB monthly network
-allowance. Direct-original results return only a small callback.
+the most likely per-upload Google charge after the current destination-dependent
+1 GiB monthly Premium Tier allowance. Direct-original results return only a
+small callback. Automatic Artifact Analysis scanning is a separate USD 0.26 per
+new image digest; enabling it is an explicit owner-approved security cost rather
+than something hidden in the zero-recurring-cost estimate.
+
+The 2,976 minimum idle minutes consume 74.4% of the 240,000 vCPU-second allowance
+and 79.36% of the 450,000 GiB-second allowance. Before any other shared-account
+use, the memory remainder fits roughly seventeen additional full 45-minute tasks
+at 2 GiB. Actual conversions should be rare and normally shorter, but this is not
+enough headroom for uncontrolled retries or frequent manual executions.
 
 Before enabling the schedule, the owner must review a current pricing-calculator
 estimate, configure a small billing budget with multiple alerts, and approve the
@@ -277,7 +286,9 @@ The smallest safe sequence after this design is accepted is:
    build/run checks remain unavailable because no Docker-compatible runtime is
    installed;
 5. separately review exact cloud commands, identities, costs, secret rotation,
-   rollback, and staging verification; and
+   rollback, and staging verification: prepared in
+   [audio-processing-cloud-runbook.md](audio-processing-cloud-runbook.md), with
+   every command still owner-gated and unexecuted; and
 6. only with explicit owner approval, create/configure the remaining runtime
    cloud resources and deploy to staging.
 

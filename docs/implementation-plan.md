@@ -53,7 +53,7 @@ Worker routes, disables redirects, streams the source into a private temporary
 directory with exact length/hash enforcement, uploads only a reverified selected
 derivative, and sends bounded idempotent result/failure callbacks. A result
 delivery that may already have committed never becomes a contradictory failure
-callback. No HTTP server/trigger, container, scheduler, real secret, Cloud Run
+callback. No HTTP server/trigger, scheduler, real secret, Cloud Run
 resource, or other hosted invocation mechanism has been created. The accepted
 local design selects a scheduled single-task Cloud Run Job. Its database-enforced
 global running-job gate, three-attempt bounded lease-loss recovery, 45-minute
@@ -61,9 +61,14 @@ monotonic processor deadline, 55-minute lease-remaining floor, and streaming
 generated-output ceiling are now implemented and tested locally. A minimal
 run-once entrypoint also loads strict file-secret configuration, emits one
 aggregate-only outcome, and maps success, durable failure, and ambiguous
-reconciliation to tested exit codes. The remaining local gate is pinned non-root
-container/resource verification. Every cloud action remains separately
-owner-approved.
+reconciliation to tested exit codes. The digest- and FFmpeg-version-pinned
+non-root image plus a generated worst-case storage/real conversion fixture are
+now implemented; static policy tests and the full host fixture pass, but the
+image cannot be built or run until a Docker-compatible runtime is available.
+Exact paused-first cloud commands, cost assumptions, rotation, rollback, and
+staging checks are separately reviewed in
+[audio-processing-cloud-runbook.md](audio-processing-cloud-runbook.md). Every
+cloud action remains separately owner-approved and unexecuted.
 
 Proposed application tooling:
 
