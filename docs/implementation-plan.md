@@ -224,7 +224,9 @@ Deliverable: safe online maintenance by the primary editor.
   searchable existing-Person input, controlled Role dropdown, duplicate-pair
   prevention, and per-row remove control; real-device/manual acceptance remains;
 - one-tap system sharing for an individual scan or recording by sharing authenticated file bytes rather than exposing a public media URL, with capability-aware fallback behavior;
-- copy for an individual typed-lyric block, plus system text sharing where supported;
+- copy for an individual typed-lyric block plus capability-gated system text
+  sharing are now implemented locally for all readers and remain available while
+  offline; real Safari/iOS and Chrome/Android clipboard/share-sheet checks remain;
 - favorites, playlists, set lists, or recently viewed only if actual use calls for them;
 - automated transcription/OCR only after the core library is trusted.
 

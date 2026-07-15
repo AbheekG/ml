@@ -5,6 +5,7 @@ import { CatalogControls } from "./CatalogControls";
 import { RecordingUploadPage } from "./RecordingUploadPage";
 import { CreditRows } from "./CreditRows";
 import { pauseOtherAudioPlayers } from "./audio-playback";
+import { copyTextBlock, shareTextBlock, supportsSystemTextShare } from "./text-sharing";
 import {
   ApiError,
   createLookup,
@@ -262,6 +263,12 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
   const recordingPlayers = useRef(new Map<string, HTMLAudioElement>());
   const [retryingRecordingId, setRetryingRecordingId] = useState<string | null>(null);
   const [processingRetryError, setProcessingRetryError] = useState<string | null>(null);
+  const [lyricAction, setLyricAction] = useState<{
+    lyricId: string;
+    busy: boolean;
+    message: string;
+    isError: boolean;
+  } | null>(null);
 
   useEffect(() => {
     if (!isOnline) setViewerScanId(null);
@@ -345,6 +352,38 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
     }
   }
 
+  async function copyLyrics(lyricId: string, content: string): Promise<void> {
+    setLyricAction({ lyricId, busy: true, message: "", isError: false });
+    try {
+      await copyTextBlock(content);
+      setLyricAction({ lyricId, busy: false, message: "Copied.", isError: false });
+    } catch {
+      setLyricAction({
+        lyricId,
+        busy: false,
+        message: "Copy is not available in this browser.",
+        isError: true,
+      });
+    }
+  }
+
+  async function shareLyrics(lyricId: string, content: string): Promise<void> {
+    setLyricAction({ lyricId, busy: true, message: "", isError: false });
+    try {
+      const outcome = await shareTextBlock(content);
+      setLyricAction(outcome === "cancelled"
+        ? null
+        : { lyricId, busy: false, message: "Shared.", isError: false });
+    } catch {
+      setLyricAction({
+        lyricId,
+        busy: false,
+        message: "Sharing is not available right now.",
+        isError: true,
+      });
+    }
+  }
+
   return (
     <main className="page-shell detail-page" id="main-content">
       <Link className="back-link" to="/songs">← All songs</Link>
@@ -364,8 +403,30 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
             <section className="detail-card lyrics-card" key={lyrics.id} aria-labelledby={`${lyrics.id}-title`}>
               <div className="card-heading">
                 <h2 id={`${lyrics.id}-title`}>Typed lyrics</h2>
-                {isOnline && canEdit === true && <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(song.id)}/lyrics/${encodeURIComponent(lyrics.id)}/edit`}>Edit</Link>}
+                <div className="lyric-actions">
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    disabled={lyricAction?.busy === true}
+                    onClick={() => { void copyLyrics(lyrics.id, lyrics.content); }}
+                  >Copy</button>
+                  {supportsSystemTextShare() && (
+                    <button
+                      className="secondary-action"
+                      type="button"
+                      disabled={lyricAction?.busy === true}
+                      onClick={() => { void shareLyrics(lyrics.id, lyrics.content); }}
+                    >Share</button>
+                  )}
+                  {isOnline && canEdit === true && <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(song.id)}/lyrics/${encodeURIComponent(lyrics.id)}/edit`}>Edit</Link>}
+                </div>
               </div>
+              {lyricAction?.lyricId === lyrics.id && lyricAction.message && (
+                <p
+                  className={`lyric-action-status${lyricAction.isError ? " error-message" : ""}`}
+                  role={lyricAction.isError ? "alert" : "status"}
+                >{lyricAction.message}</p>
+              )}
               <pre>{lyrics.content}</pre>
             </section>
           ))}

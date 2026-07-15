@@ -614,6 +614,29 @@ button:disabled {
   margin: 0;
 }
 
+.lyric-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.lyrics-card .card-heading {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.lyric-actions .secondary-action {
+  min-height: 2.5rem;
+  padding: 0.55rem 0.8rem;
+}
+
+.lyric-action-status {
+  margin: -0.25rem 0 0.8rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .add-child-action {
   justify-self: start;
 }
