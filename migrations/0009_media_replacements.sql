@@ -23,6 +23,7 @@ CREATE TABLE recording_media_history (
 
 CREATE INDEX recording_media_history_recording_idx ON recording_media_history(recording_id);
 
+-- Rebuild recording_upload_sessions to allow non-unique recording_id (v2)
 CREATE TABLE recording_upload_sessions_v2 (
   id TEXT PRIMARY KEY,
   song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE RESTRICT,
@@ -96,21 +97,62 @@ CREATE TABLE recording_upload_sessions_v2 (
 
 INSERT INTO recording_upload_sessions_v2 SELECT * FROM recording_upload_sessions;
 
-DROP TRIGGER prevent_recording_upload_duplicate_media_change;
-DROP TRIGGER prevent_finalized_recording_upload_media_change;
-DROP TRIGGER prevent_finalized_recording_upload_reparent;
-DROP TRIGGER prevent_song_trash_with_active_recording_upload;
-DROP TRIGGER prevent_song_delete_with_recording_upload;
-DROP TRIGGER validate_recording_upload_part_insert;
-DROP TRIGGER validate_recording_upload_part_update;
-DROP TRIGGER validate_recording_upload_credit_insert;
+-- Rebuild child tables to point to recording_upload_sessions_v2
+CREATE TABLE recording_upload_parts_v2 (
+  session_id TEXT NOT NULL REFERENCES recording_upload_sessions_v2(id) ON DELETE RESTRICT,
+  part_number INTEGER NOT NULL CHECK (part_number BETWEEN 1 AND 64),
+  etag TEXT NOT NULL CHECK (
+    length(etag) BETWEEN 1 AND 200
+    AND instr(etag, char(10)) = 0
+    AND instr(etag, char(13)) = 0
+  ),
+  byte_size INTEGER NOT NULL CHECK (byte_size > 0 AND byte_size <= 8388608),
+  uploaded_at TEXT NOT NULL,
+  uploaded_by TEXT NOT NULL,
+  PRIMARY KEY (session_id, part_number)
+);
 
+INSERT INTO recording_upload_parts_v2 SELECT * FROM recording_upload_parts;
+
+CREATE TABLE recording_upload_credits_v2 (
+  session_id TEXT NOT NULL REFERENCES recording_upload_sessions_v2(id) ON DELETE RESTRICT,
+  person_id TEXT NOT NULL REFERENCES people(id) ON DELETE RESTRICT,
+  role TEXT NOT NULL CHECK (role = 'vocals'),
+  sort_order INTEGER NOT NULL CHECK (sort_order >= 0),
+  PRIMARY KEY (session_id, person_id, role)
+);
+
+INSERT INTO recording_upload_credits_v2 SELECT * FROM recording_upload_credits;
+
+-- Drop old triggers
+DROP TRIGGER IF EXISTS prevent_recording_upload_duplicate_media_change;
+DROP TRIGGER IF EXISTS prevent_finalized_recording_upload_media_change;
+DROP TRIGGER IF EXISTS prevent_finalized_recording_upload_reparent;
+DROP TRIGGER IF EXISTS prevent_song_trash_with_active_recording_upload;
+DROP TRIGGER IF EXISTS prevent_song_delete_with_recording_upload;
+DROP TRIGGER IF EXISTS validate_recording_upload_part_insert;
+DROP TRIGGER IF EXISTS prevent_recording_upload_part_delete;
+DROP TRIGGER IF EXISTS validate_recording_upload_part_update;
+DROP TRIGGER IF EXISTS prevent_recording_upload_session_delete;
+DROP TRIGGER IF EXISTS validate_recording_upload_credit_insert;
+DROP TRIGGER IF EXISTS prevent_recording_upload_credit_change;
+DROP TRIGGER IF EXISTS prevent_recording_upload_credit_delete;
+
+-- Drop old tables
+DROP TABLE recording_upload_parts;
+DROP TABLE recording_upload_credits;
 DROP TABLE recording_upload_sessions;
-ALTER TABLE recording_upload_sessions_v2 RENAME TO recording_upload_sessions;
 
+-- Rename v2 tables back
+ALTER TABLE recording_upload_sessions_v2 RENAME TO recording_upload_sessions;
+ALTER TABLE recording_upload_parts_v2 RENAME TO recording_upload_parts;
+ALTER TABLE recording_upload_credits_v2 RENAME TO recording_upload_credits;
+
+-- Create indices
 CREATE INDEX recording_upload_sessions_song_status_idx
 ON recording_upload_sessions(song_id, status, updated_at);
 
+-- Create triggers
 CREATE TRIGGER validate_recording_upload_session_insert
 BEFORE INSERT ON recording_upload_sessions
 WHEN NEW.status <> 'creating'
@@ -320,6 +362,12 @@ BEGIN
   SELECT RAISE(ABORT, 'invalid_recording_upload_part');
 END;
 
+CREATE TRIGGER prevent_recording_upload_part_delete
+BEFORE DELETE ON recording_upload_parts
+BEGIN
+  SELECT RAISE(ABORT, 'recording_upload_part_is_retained');
+END;
+
 CREATE TRIGGER validate_recording_upload_part_update
 BEFORE UPDATE ON recording_upload_parts
 WHEN NEW.session_id <> OLD.session_id
@@ -346,6 +394,18 @@ WHEN NOT EXISTS (
 )
 BEGIN
   SELECT RAISE(ABORT, 'invalid_recording_upload_credit');
+END;
+
+CREATE TRIGGER prevent_recording_upload_credit_change
+BEFORE UPDATE ON recording_upload_credits
+BEGIN
+  SELECT RAISE(ABORT, 'recording_upload_credit_is_immutable');
+END;
+
+CREATE TRIGGER prevent_recording_upload_credit_delete
+BEFORE DELETE ON recording_upload_credits
+BEGIN
+  SELECT RAISE(ABORT, 'recording_upload_credit_is_retained');
 END;
 
 PRAGMA foreign_keys = ON;
