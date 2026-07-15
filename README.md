@@ -187,3 +187,28 @@ checks existing bytes before writing, verifies bytes after writing, and checkpoi
 progress under ignored `data/import-output/`. The D1 phase freshly verifies every
 planned R2 object, checks that migration `0004` is present, and then submits one
 guarded transactional import. It will not apply the migration automatically.
+
+For a machine-readable operational snapshot of staging processor health, use:
+
+```bash
+npm run ops:processor-snapshot
+```
+
+Add `-- --enforce` to return a non-zero exit code when any `critical` alert is
+present, suitable for CI/automation gates. This command is read-only: it queries
+Cloud Run Job/Scheduler state, recent aggregate processor logs, and D1 aggregate
+invariants without mutating cloud resources.
+
+By default, warning-level log alerts use a 24-hour lookback window so accepted
+older failures do not keep paging as active warnings. You can override this with
+`-- --alert-lookback-hours N` (for example `N=6` for tighter active monitoring).
+
+For a compact machine-readable payload (good for dashboards/CI summaries), add:
+
+```bash
+npm run ops:processor-snapshot -- --summary
+```
+
+Summary mode keeps enforce semantics unchanged and reports high-signal fields:
+scheduler state, run-job execution status/count, D1 aggregate invariants, full
+alerts, and per-severity alert counts.

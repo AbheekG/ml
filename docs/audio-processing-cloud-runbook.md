@@ -519,6 +519,56 @@ After resume, inspect the first two scheduled executions and aggregate D1 state.
 Pause immediately on repeated nonzero results, unexpected overlap, cost drift,
 private logging, or any permission/configuration anomaly.
 
+## Processor ops snapshot
+
+Use the repository's read-only snapshot tool to collect one machine-readable
+view of processor operations without hand-assembling multiple CLI commands:
+
+```sh
+npm run ops:processor-snapshot
+```
+
+For policy gates, use enforce mode:
+
+```sh
+npm run ops:processor-snapshot -- --enforce
+```
+
+For concise operator checkpoints and automation, use summary mode:
+
+```sh
+npm run ops:processor-snapshot -- --summary
+```
+
+`--summary` can be combined with `--enforce`; enforce still exits non-zero only
+when any `critical` alert is present.
+
+Warning-level log alerts are lookback-based by default (24 hours) so historical
+accepted failures remain visible but do not appear as active warnings forever.
+To tune this window:
+
+```sh
+npm run ops:processor-snapshot -- --alert-lookback-hours 6
+```
+
+Current severity policy in this command is:
+
+- `critical`: foreign-key errors or non-aggregate stdout payload shapes;
+- `warning`: pending/running D1 jobs, failed processor outcomes, or non-zero
+  container exit lines inside the configured lookback window;
+- `info`: scheduler paused (expected in cost-conservative staging posture).
+
+Historical failures/non-zero exits outside the lookback window are emitted as
+`info` (`*_historical`) to preserve context without inflating active warnings.
+
+The command only reads Cloud Run, Scheduler, Cloud Logging, and D1 aggregate
+state. It must not be used as authorization to resume Scheduler, execute Jobs,
+or mutate data.
+
+Its parser now tolerates benign leading/trailing non-JSON CLI text and still
+extracts the machine-readable payload, which reduces false failures from tool
+prefaces while preserving strict alert semantics.
+
 ## Cost expectation checked 2026-07-15
 
 These are allowances, not guarantees, and are shared by billing account:
