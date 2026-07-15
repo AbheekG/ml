@@ -72,6 +72,12 @@ class FFmpegToolsTests(unittest.TestCase):
         self.assertEqual(result.channels, 1)
         self.assertEqual(result.byte_size, len(b"fixture-bytes"))
         self.assertIn("mp4", result.container_names)
+        command = runner.commands[0]
+        self.assertEqual(
+            command[command.index("-protocol_whitelist") + 1],
+            "file,pipe",
+        )
+        self.assertEqual(command[command.index("-select_streams") + 1], "a")
 
     def test_probe_rejects_input_without_audio(self) -> None:
         payload = {
@@ -106,6 +112,10 @@ class FFmpegToolsTests(unittest.TestCase):
 
         command = runner.commands[0]
         self.assertEqual(command[command.index("-map") + 1], "0:3")
+        self.assertEqual(
+            command[command.index("-protocol_whitelist") + 1],
+            "file,pipe",
+        )
         self.assertIn("-xerror", command)
         self.assertEqual(command[-2:], ["null", "-"])
         self.assertEqual(result.duration_seconds, 12.5)
@@ -154,6 +164,10 @@ class FFmpegToolsTests(unittest.TestCase):
         self.assertEqual(command[command.index("-map") + 1], "0:2")
         self.assertEqual(command[command.index("-map_metadata") + 1], "-1")
         self.assertEqual(command[command.index("-write_xing") + 1], "1")
+        self.assertEqual(
+            command[command.index("-protocol_whitelist") + 1],
+            "file,pipe",
+        )
         self.assertIn("-vn", command)
         self.assertIn("-sn", command)
         self.assertIn("-dn", command)

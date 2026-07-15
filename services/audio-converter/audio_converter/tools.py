@@ -196,6 +196,10 @@ class FFmpegTools:
             self.ffprobe,
             "-v",
             "error",
+            "-protocol_whitelist",
+            "file,pipe",
+            "-select_streams",
+            "a",
             "-show_entries",
             (
                 "format=format_name,duration,bit_rate:"
@@ -294,6 +298,8 @@ class FFmpegTools:
             "-nostdin",
             "-v",
             "error",
+            "-protocol_whitelist",
+            "file,pipe",
         ]
         if strict:
             command.append("-xerror")
@@ -332,6 +338,8 @@ class FFmpegTools:
             "-nostdin",
             "-v",
             "error",
+            "-protocol_whitelist",
+            "file,pipe",
             "-i",
             str(source),
             "-map",

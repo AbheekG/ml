@@ -146,9 +146,13 @@ The Google audio-processing staging project is
 `music-library-audio-staging`. Billing is linked, a monthly notification-only
 budget is active with promotional credits excluded from its alert calculation,
 and the isolated local CLI configuration defaults Cloud Run to `asia-south1`.
-No processor secret, service account, runtime API/resource, container, Job,
-Scheduler trigger, or hosted deployment has been configured. A separate Google
-production project has not been created.
+The reviewed runtime/scanning APIs, two keyless service accounts without
+project-wide roles, and one regional scanning-enabled repository exist. The
+first Bookworm image was pushed only for vulnerability review and is blocked
+from deployment; its hardened Debian 13/FFmpeg 7.1 replacement remains local.
+No processor secret, Worker processor configuration, Cloud Run Job, Scheduler
+trigger, execution, or hosted deployment has been configured. A separate
+Google production project has not been created.
 
 Never point development code at production data by default.
 

@@ -167,6 +167,10 @@ generated-output byte ceiling while FFmpeg is writing.
 Exceeding either limit reports a bounded failure and removes the temporary
 directory. A size-limited in-memory volume prevents filesystem growth beyond the
 declared budget even if the process misbehaves.
+All FFmpeg and ffprobe inputs are restricted to local file and pipe protocols,
+and probing selects audio streams explicitly. An uploaded playlist or container
+therefore cannot make the media tools fetch a nested network resource, and an
+unselected video decoder is not invoked by the audio-only processing path.
 
 Initial Job sizing is:
 
@@ -183,8 +187,8 @@ creation. Increase memory only from measured evidence. Do not depend on the
 Preview ephemeral-disk feature for the initial deployment.
 
 The local container definition now pins the immutable multi-platform digest for
-`python:3.13.14-slim-bookworm` and Debian bookworm-security FFmpeg
-`7:5.1.9-0+deb12u1`. The final image contains only the processor package, uses
+`python:3.13.14-slim-trixie` and Debian trixie-security FFmpeg
+`7:7.1.5-0+deb13u1`. The final image contains only the processor package, uses
 fixed UID/GID `10001:10001`, and starts the run-once entrypoint directly. A
 separate verification target carries only generated resource fixtures; it is not
 part of the final runtime stage.
@@ -200,13 +204,16 @@ The pinned `linux/amd64` verification and runtime targets were subsequently
 built and executed locally on 2026-07-15 in an isolated Colima/Docker runtime.
 The full container fixture ran read-only with one CPU, a 2 GiB memory cgroup,
 and a 1,152 MiB UID/GID-scoped tmpfs. It reproduced 1,073,741,824 simultaneous
-temporary bytes, a 536,870,912-byte source, and an 11,185,197-byte verified
-derivative; conservative peak memory was 1,218,105,344 bytes, within the
-2,147,483,648-byte limit, and cleanup completed. The final 216,506,925-byte
-runtime image reports `amd64`, runs as `10001:10001`, contains FFmpeg
-`5.1.9-0+deb12u1`, libmp3lame, and ffprobe, and loaded strict configuration from
-a read-only mounted dummy secret. The first approved Cloud Run no-work execution
-must still prove readability of the platform's actual root-owned secret volume.
+temporary bytes, a 536,870,912-byte source, and an 11,185,196-byte verified
+derivative; conservative peak memory was 1,226,285,056 bytes, within the
+2,147,483,648-byte limit, and cleanup completed in 275,752 ms. The hardened
+213,059,213-byte runtime image reports `amd64`, runs as `10001:10001`, contains
+exact Debian 13 FFmpeg `7.1.5-0+deb13u1`, libmp3lame, and ffprobe, and loaded
+strict configuration from a read-only mounted dummy secret. It remains local
+pending a separately approved registry scan; the earlier Bookworm digest is
+blocked from deployment by its scan findings. The first approved Cloud Run
+no-work execution must still prove readability of the platform's actual
+root-owned secret volume.
 
 ## Aggregate-only observability
 

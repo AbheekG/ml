@@ -64,7 +64,8 @@ configuration requires the exact Worker origin, a separately provisioned random
 32-or-more-character printable processor token, a nonempty HTTPS transfer-origin
 allowlist, an existing temporary root, and bounded request/body/retry limits. It
 creates a private `0700` per-job directory and `0600` source, disables redirects,
-streams and verifies the exact source, runs `prepare()`, rechecks and streams only
+streams and verifies the exact source, restricts FFmpeg/ffprobe to local file and
+pipe protocols while probing audio streams only, runs `prepare()`, rechecks and streams only
 a selected derivative, sends exact-length callbacks, and removes the temporary
 directory before reporting success. A monotonic 45-minute soft deadline covers
 streaming, FFmpeg, hashing, upload, cleanup, and result delivery; claims require
@@ -119,8 +120,8 @@ minimum-lease settings may be overridden only through the documented
 ## Container and resource fixture
 
 The final `runtime` image is based on the immutable multi-platform digest for
-`python:3.13.14-slim-bookworm` and installs Debian bookworm-security FFmpeg
-`7:5.1.9-0+deb12u1` exactly. It copies only the Python package, defines no secret,
+`python:3.13.14-slim-trixie` and installs Debian trixie-security FFmpeg
+`7:7.1.5-0+deb13u1` exactly. It copies only the Python package, defines no secret,
 runs the hosted entrypoint as fixed UID/GID `10001:10001`, and has a private
 working directory. Updating either pin is a deliberate reviewed change; do not
 silently substitute a moving tag or unversioned FFmpeg package.
@@ -157,12 +158,14 @@ docker run --rm \
   music-library-audio-converter:verify
 ```
 
-On 2026-07-15 the full fixture passed on the local host's FFmpeg 8.1.2 in
-10.329 seconds: 1,073,741,824 bytes in the simultaneous storage-ceiling phase,
-536,870,912 bytes in the processed source, an 11,185,197-byte derivative, and a
-conservative 1,123,958,784-byte peak after adding process RSS. Cleanup completed.
-This is useful local resource evidence, but it
-does not substitute for running the pinned Linux image: no Docker, Podman, or
-Colima runtime was installed, so the image build, non-root process check,
-pinned FFmpeg/libmp3lame check, mounted-secret readability check, and
-container-cgroup measurement remain explicitly unavailable.
+On 2026-07-15 both current pinned `linux/amd64` targets built and ran in an
+isolated Colima/Docker profile. The full verification target ran read-only with
+one CPU, a 2 GiB memory cgroup, and the 1,152 MiB UID/GID-scoped tmpfs. It held
+1,073,741,824 simultaneous fixture bytes, processed a 536,870,912-byte source,
+created and strict-decoded an 11,185,196-byte derivative, stayed within limits
+at a conservative 1,226,285,056-byte peak, and completed cleanup in 275,752 ms.
+The 213,059,213-byte runtime target reports `amd64`, runs as `10001:10001`,
+contains exact FFmpeg `7.1.5-0+deb13u1`, libmp3lame, and ffprobe, and reads
+strict configuration from a read-only dummy-secret mount. This hardened image
+remains local and has not been pushed or scanned; an earlier Bookworm digest was
+retained in staging only as a rejected vulnerability-review artifact.

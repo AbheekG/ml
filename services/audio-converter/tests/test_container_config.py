@@ -18,7 +18,7 @@ class ContainerConfigurationTests(unittest.TestCase):
         self.assertRegex(
             self.contents,
             re.compile(
-                r"^FROM python:3\.13\.14-slim-bookworm@"
+                r"^FROM python:3\.13\.14-slim-trixie@"
                 r"sha256:[0-9a-f]{64} AS runtime-base$",
                 re.MULTILINE,
             ),
@@ -26,7 +26,7 @@ class ContainerConfigurationTests(unittest.TestCase):
         self.assertNotIn(":latest", self.contents)
 
     def test_ffmpeg_package_is_version_pinned(self) -> None:
-        self.assertIn("ffmpeg=7:5.1.9-0+deb12u1", self.contents)
+        self.assertIn("ffmpeg=7:7.1.5-0+deb13u1", self.contents)
         self.assertNotRegex(self.contents, r"\bapt-get upgrade\b")
 
     def test_runtime_is_non_root_and_has_private_work_directory(self) -> None:
