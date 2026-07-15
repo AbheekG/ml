@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { CreditRows } from "./CreditRows";
 import {
   loadRecordingEditorOptions,
   refreshOfflineLibrary,
@@ -23,10 +24,6 @@ import {
   recordingUploadPercent,
   recordingUploadProgressLabel,
 } from "./recording-upload-view";
-
-function selected(values: string[], value: string, checked: boolean): string[] {
-  return checked ? [...values, value] : values.filter((current) => current !== value);
-}
 
 export function RecordingUploadPage({
   isOnline,
@@ -319,11 +316,13 @@ export function RecordingUploadPage({
           <fieldset className="form-card choice-group" disabled={formLocked}>
             <legend>Vocals</legend>
             <p>Optional. Select the people who sang in this Recording.</p>
-            <div className="choice-grid">
-              {options?.people.map((person) => (
-                <label key={person.id}><input type="checkbox" checked={vocalistIds.includes(person.id)} onChange={(event) => setVocalistIds(selected(vocalistIds, person.id, event.target.checked))} /><span>{person.fullName}</span></label>
-              ))}
-            </div>
+            <CreditRows
+              people={options?.people ?? []}
+              roles={[{ value: "vocals" as const, label: "Vocals" }]}
+              value={vocalistIds.map((personId) => ({ personId, role: "vocals" as const }))}
+              onChange={(credits) => setVocalistIds(credits.map((credit) => credit.personId))}
+              disabled={formLocked}
+            />
             {fieldErrors.creditPersonIds?.map((message) => <em key={message}>{message}</em>)}
           </fieldset>
 

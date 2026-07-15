@@ -206,7 +206,10 @@ Deliverable: safe online maintenance by the primary editor.
 ## Phase 5 — later improvements
 
 - further phonetic/transliteration tuning, language-specific alternatives, or a field-scope control only if tested real queries expose remaining gaps;
-- replace long Person checkbox grids with compact repeatable credit rows: an Add contributor action, searchable Person combobox, controlled Role dropdown, and per-row remove control;
+- compact repeatable credit rows are now implemented locally for Song editing,
+  Recording editing, and new Recording upload: an Add contributor action,
+  searchable existing-Person input, controlled Role dropdown, duplicate-pair
+  prevention, and per-row remove control; real-device/manual acceptance remains;
 - one-tap system sharing for an individual scan or recording by sharing authenticated file bytes rather than exposing a public media URL, with capability-aware fallback behavior;
 - copy for an individual typed-lyric block, plus system text sharing where supported;
 - favorites, playlists, set lists, or recently viewed only if actual use calls for them;

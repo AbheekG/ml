@@ -3,6 +3,7 @@ import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-rou
 import { ScanViewer } from "./ScanViewer";
 import { CatalogControls } from "./CatalogControls";
 import { RecordingUploadPage } from "./RecordingUploadPage";
+import { CreditRows } from "./CreditRows";
 import {
   ApiError,
   createLookup,
@@ -1000,11 +1001,13 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
         <fieldset className="form-card choice-group">
           <legend>Vocals</legend>
           <p>Optional. Select the people who sang in this Recording.</p>
-          <div className="choice-grid">
-            {options?.people.map((person) => (
-              <label key={person.id}><input type="checkbox" checked={vocalistIds.includes(person.id)} onChange={(event) => setVocalistIds(selected(vocalistIds, person.id, event.target.checked))} /><span>{person.fullName}</span></label>
-            ))}
-          </div>
+          <CreditRows
+            people={options?.people ?? []}
+            roles={[{ value: "vocals" as const, label: "Vocals" }]}
+            value={vocalistIds.map((personId) => ({ personId, role: "vocals" as const }))}
+            onChange={(credits) => setVocalistIds(credits.map((credit) => credit.personId))}
+            disabled={isSaving || isTrashing}
+          />
           {fieldErrors.creditPersonIds?.map((message) => <em key={message}>{message}</em>)}
         </fieldset>
         <div className="form-actions">
@@ -1471,16 +1474,23 @@ function SongEditorPage({
         <fieldset className="form-card choice-group credit-choice-group">
           <legend>Song contributors</legend>
           <p>Optional. A Person may be credited for Lyrics, Music, or both.</p>
-          <div className="credit-grid">
-            <div className="credit-grid-header" aria-hidden="true"><span>Person</span><span>Lyrics</span><span>Music</span></div>
-            {options?.people.map((person) => (
-              <div className="credit-grid-row" key={person.id}>
-                <span>{person.fullName}</span>
-                <label><input type="checkbox" aria-label={`${person.fullName}: Lyrics`} checked={form.lyricsPersonIds.includes(person.id)} onChange={(event) => setForm({ ...form, lyricsPersonIds: selected(form.lyricsPersonIds, person.id, event.target.checked) })} /></label>
-                <label><input type="checkbox" aria-label={`${person.fullName}: Music`} checked={form.musicPersonIds.includes(person.id)} onChange={(event) => setForm({ ...form, musicPersonIds: selected(form.musicPersonIds, person.id, event.target.checked) })} /></label>
-              </div>
-            ))}
-          </div>
+          <CreditRows
+            people={options?.people ?? []}
+            roles={[
+              { value: "lyrics" as const, label: "Lyrics" },
+              { value: "music" as const, label: "Music" },
+            ]}
+            value={[
+              ...form.lyricsPersonIds.map((personId) => ({ personId, role: "lyrics" as const })),
+              ...form.musicPersonIds.map((personId) => ({ personId, role: "music" as const })),
+            ]}
+            onChange={(credits) => setForm((current) => ({
+              ...current,
+              lyricsPersonIds: credits.filter((credit) => credit.role === "lyrics").map((credit) => credit.personId),
+              musicPersonIds: credits.filter((credit) => credit.role === "music").map((credit) => credit.personId),
+            }))}
+            disabled={isSaving || isTrashing}
+          />
           {fieldErrors.credits?.map((message) => <em key={message}>{message}</em>)}
         </fieldset>
 

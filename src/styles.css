@@ -1128,58 +1128,62 @@ button:disabled {
   accent-color: var(--accent);
 }
 
-.credit-grid {
+.credit-rows {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.credit-add-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) minmax(8rem, 0.35fr) auto;
+  align-items: end;
+  gap: 0.65rem;
+}
+
+.credit-add-row .secondary-action {
+  min-height: 2.7rem;
+}
+
+.credit-row-hint,
+.credit-row-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.credit-row-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 0.7rem;
+  list-style: none;
 }
 
-.credit-grid-header,
-.credit-grid-row {
+.credit-row-list li {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 4.25rem 4.25rem;
+  grid-template-columns: minmax(0, 1fr) minmax(8rem, 0.35fr) auto;
   align-items: center;
-}
-
-.credit-grid-header {
-  color: var(--muted);
-  background: #f4eadb;
-  font-size: 0.72rem;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.credit-grid-row {
-  min-height: 2.75rem;
+  gap: 0.65rem;
+  padding: 0.65rem;
   background: #fffaf1;
-  font-size: 0.86rem;
-  font-weight: 650;
 }
 
-.credit-grid-row + .credit-grid-row {
+.credit-row-list li + li {
   border-top: 1px solid var(--line);
 }
 
-.credit-grid-header > span,
-.credit-grid-row > span {
+.credit-row-list strong {
   min-width: 0;
-  padding: 0.65rem 0.75rem;
   overflow-wrap: anywhere;
+  font-size: 0.86rem;
 }
 
-.credit-grid-header > span:not(:first-child),
-.credit-grid-row > label {
-  display: grid;
-  height: 100%;
-  place-items: center;
-  border-left: 1px solid var(--line);
-  text-align: center;
-}
-
-.credit-grid-row input {
-  width: 1.1rem;
-  height: 1.1rem;
-  accent-color: var(--accent);
+.credit-role-field {
+  min-width: 0;
 }
 
 .form-actions {
@@ -1742,6 +1746,17 @@ button:disabled {
   .selected-recording-file {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .credit-add-row,
+  .credit-row-list li {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .credit-add-row .secondary-action,
+  .credit-row-list .secondary-action {
+    width: 100%;
   }
 
   .duplicate-scan-notice {
