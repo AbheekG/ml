@@ -73,6 +73,9 @@ Scan ── optional Notebook
   hashes source bytes without loading whole files into memory, and writes details
   only under ignored private paths when explicitly requested. It reports equal
   hashes for review but never merges distinct historical records. Applying the
-  guarded database backfill remains a separate local implementation step; no
-  remote migration or catalog mutation is part of planning.
+  guarded database backfill is a separate exact-plan-confirmed local command. It
+  re-runs source reconciliation, checks each live Scan/media relationship, and
+  updates only null hashes in one rollback-safe transaction; exact reruns are
+  idempotent. The executor is restricted to local/temporary SQLite files and has
+  no D1/R2 client. No remote migration or catalog mutation is part of this flow.
 - Files present on disk but absent from the workbook are quarantined for review and are not silently uploaded or deleted.

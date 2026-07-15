@@ -74,10 +74,14 @@ The imported-Scan fingerprint inventory and deterministic local planner are now
 implemented. The planner streams and hashes all catalog-linked Scan sources,
 requires one-to-one catalog relationships and unchanged byte sizes, verifies
 pre-existing hashes, reports duplicate-content groups without merging them, and
-keeps detailed identifiers under ignored private output only. A guarded local
-database executor, migration-chain verification, and owner-reviewed remote
-application remain later steps; no legacy, D1, R2, or staging state is changed by
-the planner.
+keeps detailed identifiers under ignored private output only. The guarded local
+database executor is also implemented: it requires exact plan confirmation for
+application, re-runs the complete source/catalog reconciliation, checks live
+Scan/media state, updates only null hashes in one immediate transaction, and
+accepts only exact already-applied state on rerun. Focused rollback/idempotency
+tests plus fresh and existing-catalog isolated verification pass. Owner-reviewed
+remote application remains a later separately authorized step; neither tool can
+change legacy, D1, R2, or staging state.
 
 Proposed application tooling:
 

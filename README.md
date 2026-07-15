@@ -143,6 +143,29 @@ hash, and reports aggregate backfill and duplicate-content counts. Add
 `data/import-output/`. The planner never changes legacy files, the catalog,
 the database, or cloud state; equal hashes are reported and never auto-merged.
 
+After reviewing the ignored plan, preview its guarded application to the ignored
+local catalog:
+
+```bash
+npm run media:backfill-scan-fingerprints
+```
+
+The preview re-hashes the exact plan and catalog, re-runs source reconciliation,
+and checks every live Scan/media row without writing. Local application is a
+separate explicit command and requires the exact reviewed plan hash:
+
+```bash
+npm run media:backfill-scan-fingerprints -- \
+  --apply-local --confirm-plan-sha256 REVIEWED_HASH
+```
+
+Application is restricted to an existing database under ignored `data/local/`
+or a system temporary directory, runs in one immediate transaction, accepts an
+exact already-applied state for idempotency, and rolls back on any stale row,
+hash conflict, final-state mismatch, or foreign-key problem. It has no D1/R2 or
+other cloud client. Never point it at a legacy tree; remote application remains
+a separately reviewed and authorized operation.
+
 After a plan has been reviewed, preview its execution locally. This re-hashes every
 planned derivative and reports only aggregate counts; it does not contact R2 or D1:
 
