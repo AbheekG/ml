@@ -94,6 +94,10 @@ type Bindings = {
   LOCAL_ROLE?: AppRole;
   AUDIO_PROCESSOR_TOKEN?: string;
   AUDIO_PROCESSOR_TRANSFER_ORIGIN?: string;
+  GCP_PROJECT_ID?: string;
+  GCP_REGION?: string;
+  GCP_JOB_NAME?: string;
+  GCP_SERVICE_ACCOUNT_JSON?: string;
 };
 
 type Variables = {
@@ -540,6 +544,135 @@ async function loadAudioProcessingJobByRecording(
     WHERE audio_processing_jobs.recording_id = ?
   `).bind(recordingId).first<{ id: string }>();
   return job ? loadAudioProcessingJob(database, job.id) : null;
+}
+
+async function getGoogleAccessToken(
+  clientEmail: string,
+  privateKeyPem: string,
+): Promise<string> {
+  const pemHeader = "-----BEGIN PRIVATE KEY-----";
+  const pemFooter = "-----END PRIVATE KEY-----";
+  const pemContents = privateKeyPem
+    .replace(pemHeader, "")
+    .replace(pemFooter, "")
+    .replace(/\s/g, "");
+  const binaryDerString = atob(pemContents);
+  const binaryDer = new Uint8Array(binaryDerString.length);
+  for (let i = 0; i < binaryDerString.length; i++) {
+    binaryDer[i] = binaryDerString.charCodeAt(i);
+  }
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "pkcs8",
+    binaryDer.buffer,
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      hash: "SHA-256",
+    },
+    false,
+    ["sign"]
+  );
+
+  const header = { alg: "RS256", typ: "JWT" };
+  const nowSecs = Math.floor(Date.now() / 1000);
+  const claims = {
+    iss: clientEmail,
+    scope: "https://www.googleapis.com/auth/cloud-platform",
+    aud: "https://oauth2.googleapis.com/token",
+    exp: nowSecs + 3600,
+    iat: nowSecs,
+  };
+
+  const base64UrlEncode = (obj: any) => {
+    const json = JSON.stringify(obj);
+    const bytes = new TextEncoder().encode(json);
+    const binString = String.fromCharCode(...bytes);
+    return btoa(binString)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+  };
+
+  const encodedHeader = base64UrlEncode(header);
+  const encodedClaims = base64UrlEncode(claims);
+  const tokenToSign = `${encodedHeader}.${encodedClaims}`;
+
+  const signatureBytes = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    cryptoKey,
+    new TextEncoder().encode(tokenToSign)
+  );
+
+  const encodedSignature = btoa(String.fromCharCode(...new Uint8Array(signatureBytes)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  const signedJwt = `${tokenToSign}.${encodedSignature}`;
+
+  const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: signedJwt,
+    }).toString(),
+  });
+
+  if (!tokenResponse.ok) {
+    throw new Error(`Google token exchange failed: ${await tokenResponse.text()}`);
+  }
+
+  const tokenData = await tokenResponse.json() as { access_token: string };
+  return tokenData.access_token;
+}
+
+async function triggerAudioProcessorJob(
+  project: string,
+  region: string,
+  jobName: string,
+  serviceAccountJson: string,
+): Promise<void> {
+  const creds = JSON.parse(serviceAccountJson) as {
+    client_email: string;
+    private_key: string;
+  };
+  const accessToken = await getGoogleAccessToken(creds.client_email, creds.private_key);
+  const url = `https://${region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${project}/jobs/${jobName}:run`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${accessToken}`,
+      "Content-Length": "0",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Google Cloud Run trigger API call failed: ${await response.text()}`);
+  }
+}
+
+function runGcpJobInBackground(env: Bindings, context: any): void {
+  if (!env.GCP_PROJECT_ID || !env.GCP_REGION || !env.GCP_JOB_NAME || !env.GCP_SERVICE_ACCOUNT_JSON) {
+    return;
+  }
+  let executionCtx: any;
+  try {
+    executionCtx = context.executionCtx;
+  } catch {
+    // ignore: Context has no ExecutionContext in some test runners
+  }
+  const triggerPromise = triggerAudioProcessorJob(
+    env.GCP_PROJECT_ID,
+    env.GCP_REGION,
+    env.GCP_JOB_NAME,
+    env.GCP_SERVICE_ACCOUNT_JSON,
+  ).catch((err) => {
+    console.error("Failed to trigger Cloud Run audio processor job on-demand:", err instanceof Error ? err.message : err);
+  });
+
+  if (executionCtx && typeof executionCtx.waitUntil === "function") {
+    executionCtx.waitUntil(triggerPromise);
+  }
 }
 
 async function audioProcessorAuthorization(
@@ -2429,6 +2562,7 @@ app.post("/api/recording-uploads/:sessionId/finalize", requireRole("editor"), as
   }
   const recording = await loadFinalizedRecording(context.env.DB, session);
   if (!recording) return context.json({ error: "recording_upload_finalization_incomplete" }, 500);
+  runGcpJobInBackground(context.env, context);
   return context.json(
     { upload: publicRecordingUploadSession(session), recording },
     results[6].meta.changes === 1 ? 201 : 200,
@@ -2673,6 +2807,7 @@ app.post("/api/songs/:songId/recording-uploads/:sessionId/replace", requireRole(
   }
   const recording = await loadFinalizedRecording(context.env.DB, session);
   if (!recording) return context.json({ error: "recording_upload_finalization_incomplete" }, 500);
+  runGcpJobInBackground(context.env, context);
   return context.json(
     { upload: publicRecordingUploadSession(session), recording },
     results[7].meta.changes === 1 ? 201 : 200,

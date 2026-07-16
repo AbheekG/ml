@@ -16,7 +16,10 @@
     "AUTH_MODE": "access",
     "ACCESS_AUD": "81adde1c5316062ed42f2810157e9ef1df8dcf94e77fa403a12a5291def5b662",
     "ACCESS_ISSUER": "https://musiclibrary.cloudflareaccess.com",
-    "ACCESS_JWKS_URL": "https://musiclibrary.cloudflareaccess.com/cdn-cgi/access/certs"
+    "ACCESS_JWKS_URL": "https://musiclibrary.cloudflareaccess.com/cdn-cgi/access/certs",
+    "GCP_PROJECT_ID": "music-library-audio-staging",
+    "GCP_REGION": "asia-south1",
+    "GCP_JOB_NAME": "music-audio-processor"
   },
   "d1_databases": [
     {

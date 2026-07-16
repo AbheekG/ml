@@ -31,21 +31,13 @@ The boundary must preserve these invariants:
 
 ## Decision
 
-Use a **single-task Google Cloud Run Job**, invoked periodically by **Cloud
-Scheduler through the authenticated Google `jobs.run` API**. Do not wrap the
-adapter in a Cloud Run Service or add an HTTP framework.
+Use a **single-task Google Cloud Run Job**, triggered via the Google `jobs.run` API. Do not wrap the adapter in a Cloud Run Service or add an HTTP framework.
 
-The container entrypoint will load bounded configuration, call
-`run_hosted_job_once()` exactly once, emit one aggregate outcome, and exit. A
-15-minute UTC schedule is the initial balance between upload-to-processing
-latency and idle invocation cost. This interval is configuration, not a product
-or schema invariant.
+The invocation model supports two triggers:
+1. **On-Demand Trigger (Primary)**: The Cloudflare Worker triggers the Cloud Run Job immediately upon successful upload finalization or replacement. The Worker generates a signed JWT assertion using a stored Google Service Account key (`GCP_SERVICE_ACCOUNT_JSON`) and exchanges it for an OAuth access token to trigger the Google API. The trigger is executed asynchronously using Hono's `waitUntil` context post-response, ensuring zero user-facing latency.
+2. **Cloud Scheduler Trigger (Backup/Fallback)**: A periodic UTC schedule (e.g. 15-minute cron) can invoke the Job through OAuth as a fallback. During development, this scheduler is kept **PAUSED** to conserve resources, relying entirely on the zero-idle-cost on-demand trigger.
 
-A Cloud Run Service is not the initial choice because a direct Scheduler HTTP
-target has a shorter request deadline than the Worker's one-hour lease, and a
-timed-out service request can continue executing after the caller disconnects.
-A Job also matches the existing run-once adapter without creating another
-application endpoint.
+The container entrypoint loads bounded configuration, calls `run_hosted_job_once()` exactly once, emits one aggregate outcome, and exits.
 
 ## Ownership and authentication
 
