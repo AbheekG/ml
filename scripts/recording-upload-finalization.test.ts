@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { app } from "../worker/index";
 
-const migration = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+const migration = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
   .map((number) => readFileSync(
     resolve(`migrations/${String(number).padStart(4, "0")}_${[
       "initial",
@@ -19,6 +19,7 @@ const migration = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       "audio_processing_concurrency",
       "media_replacements",
       "non_unique_audio_processing_jobs",
+      "audio_dispatch_and_replacement_guards",
     ][number - 1]}.sql`),
     "utf8",
   ))
@@ -146,6 +147,12 @@ function seedStoredUpload(
       'creating', 1, '2027-07-12T00:00:00.000Z', ?, ?, ?, ?
     )
   `).run("f".repeat(64), description, recordedOn, timestamp, actor, timestamp, actor);
+  database.prepare(`
+    INSERT INTO recording_upload_intents (
+      session_id, intent_kind, target_recording_id,
+      target_recording_revision, created_at, created_by
+    ) VALUES ('upload-1', 'create', NULL, NULL, ?, ?)
+  `).run(timestamp, actor);
   if (options.withCredit) {
     database.exec(`
       INSERT INTO recording_upload_credits (session_id, person_id, role, sort_order)

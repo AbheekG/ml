@@ -19,7 +19,8 @@
     "ACCESS_JWKS_URL": "https://musiclibrary.cloudflareaccess.com/cdn-cgi/access/certs",
     "GCP_PROJECT_ID": "music-library-audio-staging",
     "GCP_REGION": "asia-south1",
-    "GCP_JOB_NAME": "music-audio-processor"
+    "GCP_JOB_NAME": "music-audio-processor",
+    "GCP_WORKLOAD_IDENTITY_PROVIDER": "//iam.googleapis.com/projects/612979221550/locations/global/workloadIdentityPools/cloudflare-access/providers/music-library-access"
   },
   "d1_databases": [
     {
@@ -33,5 +34,11 @@
       "binding": "MEDIA",
       "bucket_name": "music-library-media-staging"
     }
-  ]
+  ],
+  "images": {
+    "binding": "IMAGES"
+  },
+  "triggers": {
+    "crons": ["17 3 * * *"]
+  }
 }

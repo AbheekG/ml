@@ -55,12 +55,16 @@ The private staging application is operational:
 - editors/admins can edit existing Recording descriptions, dates, and Vocals credits, and move Recordings and unshared private media to recoverable Trash or restore them;
 - Song and Recording contributor forms now use compact repeatable rows with a searchable existing-Person picker, controlled Role selection, duplicate Person/Role prevention, and per-row removal instead of rendering every Person as a checkbox; the protected-staging interaction is manually accepted, while real-device accessibility remains a later gate;
 - editors/admins can add and rename controlled Languages, Tags, Notebooks, and People from a compact searchable screen; normalized duplicates are blocked, likely similar names require confirmation, and deletion is intentionally unavailable;
-- editors/admins can choose an existing image or request mobile rear-camera capture for a new private JPEG, PNG, or WebP Scan; file signatures, size, and SHA-256 are checked, exact-content duplicates identify the existing Song/Notebook/Page, and failed database finalization removes the uncommitted R2 object;
-- the Worker now has a durable, editor-owned 8 MiB multipart intake for new private Recording originals, including resumable server-held part state, crash-safe R2 completion, streaming SHA-256 verification, exact-content duplicate stopping, and atomic creation of the processing Recording/media/credits/job; the deployed online-only Add Recording form drives that contract with sequential slices, checkpoint reconciliation after lost responses, aggregate progress, duplicate guidance, stored-object description-conflict retry, and explicit incomplete-upload abort; its protected-staging screen is manually accepted without selecting or uploading a real file, and processing originals are not exposed for playback;
-- the deployed Worker also has a separately authenticated audio-processor claim/lease boundary, a database-enforced global single-running-job gate, bounded expired-lease recovery, operation-scoped source/derivative/result/failure capabilities, immutable per-attempt derivative upload, independent stored-byte verification, atomic ready/provenance finalization, safe failure checkpointing, and explicit editor retry; the online Song view exposes that retry only for a failed Recording, by Recording ID and current revision, while keeping the job ID and failure code private; a provider-neutral local Python adapter can claim and process one job with strict origin, redirect, byte-integrity, retry, temporary-file, 45-minute deadline, 55-minute lease-remaining, and generated-output controls; its run-once entrypoint reads the processor and Cloudflare Access credentials only from files, sends standard Service Auth headers on every same-origin operation while retaining the separate Worker bearer token, rejects unknown prefixed configuration, logs one aggregate outcome, and uses explicit success/failure/reconciliation exit codes; the accepted hosted-boundary design uses a scheduled single-task Cloud Run Job with no HTTP server; the current hardened Debian 13/FFmpeg 7.1 pinned `linux/amd64` image targets build and run locally, and the full non-root 2 GiB cgroup/tmpfs/FFmpeg/dummy-secret proof passes; Google runtime/scanning APIs, two keyless no-project-role identities, and a regional scanning-enabled repository now exist; the first Bookworm image was rejected after scanning, while the exact hardened commit image passed the reviewed scan/reachability gate; version-pinned processor and Access credential secrets now have only secret-level runtime access, while the matching Worker token/origin and Cloudflare Service Auth token/policy protect the two authentication layers; the exact digest-pinned bounded Cloud Run Job is Ready, but its first execution failed safely when Cloudflare Access redirected the claim before the Worker; no work was claimed or changed, and the deployed digest/Job now await a separately approved new image build/push/scan before any Job update or retry; no Scheduler trigger is configured;
-- Scan replacement, image derivatives/compression, Recording replacement, and any evidence-driven expansion beyond Lyrics/Music/Vocals contribution roles remain later incremental slices.
+- editors/admins can create and replace private JPEG, PNG, or WebP Scans up to the Cloudflare Images 20 MB input limit; the Worker verifies signatures and SHA-256, rejects exact content globally with race-safe D1 fingerprints, retains immutable originals/history, and creates a bounded private JPEG readability derivative before finalization;
+- the Worker has a durable, editor-owned 8 MiB multipart intake for creating or replacing private Recording originals. Immutable upload intents bind each session to its exact operation, recovery controls expose resumable/stored/duplicate sessions without exposing storage identifiers, replacement preserves prior media history, and active processing/upload guards prevent conflicting Trash or source changes;
+- the deployed audio processor uses a separately authenticated claim/lease boundary, database-enforced global single-running-job gate, bounded lease recovery, operation-scoped transfer capabilities, immutable derivative attempts, independent byte verification, atomic provenance finalization, and explicit editor retry. Finalization records an immutable dispatch attempt and starts the bounded Cloud Run Job asynchronously through keyless Cloudflare Access-to-Google Workload Identity Federation; a 15-minute OAuth Scheduler remains enabled as the reliable/cost-bounded fallback, so a failed immediate trigger leaves durable pending work rather than losing it;
+- imported and newly uploaded Scans use a private derivative-or-original read path; a bounded daily repair task backfills fingerprints and derivatives with expiring per-media leases and privacy-safe failure records. Originals remain private and retained;
+- remaining acceptance work is real Safari/iOS and Chrome/Android media/scan testing, visual approval of representative Scan derivatives, and owner review of pre-intent historical upload sessions; broader contribution roles and later product expansion remain evidence-driven.
 
-The private staging catalog is loaded into an APAC-primary D1 database for the application's users in India. All 1,325 workbook-linked media files are stored in private APAC R2 and delivered only through the authenticated API. Two unassigned legacy recordings and two unlinked scans remain local for later identification.
+The exact Scan conversion, provenance, repair, and visual-acceptance rules are
+recorded in [the Scan integrity/readability policy](docs/scan-readability.md).
+
+The private staging catalog is loaded into an APAC-primary D1 database for the application's users in India. Its 455 Songs, 498 Scans, 829 Recordings, and retained originals/derivatives remain in private APAC storage and are delivered only through authenticated API routes. Unassigned/unlinked legacy files remain local for later identification.
 
 Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
 
@@ -162,8 +166,10 @@ Application is restricted to an existing database under ignored `data/local/`
 or a system temporary directory, runs in one immediate transaction, accepts an
 exact already-applied state for idempotency, and rolls back on any stale row,
 hash conflict, final-state mismatch, or foreign-key problem. It has no D1/R2 or
-other cloud client. Never point it at a legacy tree; remote application remains
-a separately reviewed and authorized operation.
+other cloud client. Never point it at a legacy tree. The completed staging
+backfill used the separately authorized bounded Worker repair path; this local
+tool still has no remote mode, and any future environment remains a separate
+reviewed operation.
 
 After a plan has been reviewed, preview its execution locally. This re-hashes every
 planned derivative and reports only aggregate counts; it does not contact R2 or D1:
@@ -196,7 +202,8 @@ npm run ops:processor-snapshot
 Add `-- --enforce` to return a non-zero exit code when any `critical` alert is
 present, suitable for CI/automation gates. This command is read-only: it queries
 Cloud Run Job/Scheduler state, recent aggregate processor logs, and D1 aggregate
-invariants without mutating cloud resources.
+invariants for processing jobs, direct dispatch, upload intents, Scan integrity,
+maintenance failures/leases, and foreign keys without mutating cloud resources.
 
 By default, warning-level log alerts use a 24-hour lookback window so accepted
 older failures do not keep paging as active warnings. You can override this with

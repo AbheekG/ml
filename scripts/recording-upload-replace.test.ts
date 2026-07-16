@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { app } from "../worker/index";
 
-const migration = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+const migration = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
   .map((number) => readFileSync(
     resolve(`migrations/${String(number).padStart(4, "0")}_${[
       "initial",
@@ -19,6 +19,7 @@ const migration = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       "audio_processing_concurrency",
       "media_replacements",
       "non_unique_audio_processing_jobs",
+      "audio_dispatch_and_replacement_guards",
     ][number - 1]}.sql`),
     "utf8",
   ))
@@ -242,6 +243,7 @@ function seedStoredUploadSession(
   options: {
     sessionId?: string;
     sha256?: string;
+    targetRevision?: number;
   } = {},
 ): void {
   const sessionId = options.sessionId ?? "upload-replace-1";
@@ -267,6 +269,12 @@ function seedStoredUploadSession(
     `recordings/original/${sessionId}`,
     timestamp, actor, timestamp, actor,
   );
+  native.prepare(`
+    INSERT INTO recording_upload_intents (
+      session_id, intent_kind, target_recording_id,
+      target_recording_revision, created_at, created_by
+    ) VALUES (?, 'replace', 'recording-1', ?, ?, ?)
+  `).run(sessionId, options.targetRevision ?? 1, timestamp, actor);
 
   // Advance to 'stored' status
   native.exec(`
@@ -418,7 +426,7 @@ describe("Recording upload /replace endpoint", () => {
     }
   });
 
-  it("returns 404 when the target recording does not belong to the song", async () => {
+  it("rejects changing the replacement target after the upload starts", async () => {
     const { binding, native } = createD1();
     try {
       seedReadyRecordingWithSucceededJob(native);
@@ -430,9 +438,70 @@ describe("Recording upload /replace endpoint", () => {
         sessionRevision: 4,
       });
 
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(409);
       const payload = await response.json() as { error: string };
-      expect(payload.error).toBe("recording_not_found");
+      expect(payload.error).toBe("recording_upload_intent_mismatch");
+    } finally {
+      native.close();
+    }
+  });
+
+  it("rejects replacement when processing starts after the upload intent is recorded", async () => {
+    const { binding, native } = createD1();
+    try {
+      seedReadyRecordingWithSucceededJob(native);
+      seedStoredUploadSession(native);
+      native.exec(`
+        UPDATE recordings
+        SET playback_media_id = NULL, processing_state = 'processing', revision = 2
+        WHERE id = 'recording-1';
+        INSERT INTO audio_processing_jobs (
+          id, recording_id, source_media_id, source_sha256, source_byte_size,
+          policy_id, status, attempt_count, created_at, updated_at
+        ) VALUES (
+          'job-pending', 'recording-1', 'original-media-1', '${"b".repeat(64)}', 3,
+          'mp3-v1-libmp3lame-q2', 'pending', 0, '${timestamp}', '${timestamp}'
+        );
+      `);
+
+      const response = await replace(binding, "song-1", "upload-replace-1", "recording-1", {
+        targetRecordingId: "recording-1",
+        targetRecordingRevision: 1,
+        sessionRevision: 4,
+      });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({ error: "recording_conflict" });
+      expect(native.prepare(
+        "SELECT status FROM recording_upload_sessions WHERE id = 'upload-replace-1'",
+      ).get()).toEqual({ status: "stored" });
+    } finally {
+      native.close();
+    }
+  });
+
+  it("allows a safely failed Recording to be replaced", async () => {
+    const { binding, native } = createD1();
+    try {
+      seedReadyRecordingWithSucceededJob(native);
+      native.exec(`
+        UPDATE recordings
+        SET playback_media_id = NULL, processing_state = 'failed',
+            processing_error = 'previous_processing_failed', revision = 2
+        WHERE id = 'recording-1';
+      `);
+      seedStoredUploadSession(native, { targetRevision: 2 });
+
+      const response = await replace(binding, "song-1", "upload-replace-1", "recording-1", {
+        targetRecordingId: "recording-1",
+        targetRecordingRevision: 2,
+        sessionRevision: 4,
+      });
+
+      expect(response.status).toBe(201);
+      await expect(response.json()).resolves.toMatchObject({
+        recording: { id: "recording-1", processingState: "processing", revision: 3 },
+      });
     } finally {
       native.close();
     }

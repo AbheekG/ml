@@ -91,6 +91,15 @@ export type ProcessorOpsSnapshot = {
     runningJobs: number;
     succeededJobs: number;
     failedJobs: number;
+    startedDispatchAttempts: number;
+    failedDispatchAttempts: number;
+    staleDispatchAttempts: number;
+    recoverableUploadSessions: number;
+    unclassifiedUploadSessions: number;
+    missingScanHashes: number;
+    missingScanDerivatives: number;
+    scanMaintenanceFailures: number;
+    expiredScanMaintenanceLeases: number;
     foreignKeyErrors: number;
   };
   costSurface: {
@@ -399,6 +408,41 @@ export function evaluateAlerts(snapshot: Omit<ProcessorOpsSnapshot, "alerts">): 
       detail: `pendingJobs=${snapshot.d1.pendingJobs}`,
     });
   }
+  if (snapshot.d1.staleDispatchAttempts > 0) {
+    alerts.push({
+      code: "d1_stale_audio_dispatch_attempts",
+      severity: "warning",
+      detail: `staleDispatchAttempts=${snapshot.d1.staleDispatchAttempts}`,
+    });
+  }
+  if (snapshot.d1.unclassifiedUploadSessions > 0) {
+    alerts.push({
+      code: "d1_unclassified_upload_sessions",
+      severity: "warning",
+      detail: `unclassifiedUploadSessions=${snapshot.d1.unclassifiedUploadSessions}`,
+    });
+  }
+  if (snapshot.d1.missingScanHashes > 0) {
+    alerts.push({
+      code: "d1_missing_scan_hashes",
+      severity: "warning",
+      detail: `missingScanHashes=${snapshot.d1.missingScanHashes}`,
+    });
+  }
+  if (snapshot.d1.missingScanDerivatives > 0 || snapshot.d1.scanMaintenanceFailures > 0) {
+    alerts.push({
+      code: "d1_scan_maintenance_incomplete",
+      severity: "warning",
+      detail: `missingDerivatives=${snapshot.d1.missingScanDerivatives},failures=${snapshot.d1.scanMaintenanceFailures}`,
+    });
+  }
+  if (snapshot.d1.expiredScanMaintenanceLeases > 0) {
+    alerts.push({
+      code: "d1_expired_scan_maintenance_leases",
+      severity: "warning",
+      detail: `expiredScanMaintenanceLeases=${snapshot.d1.expiredScanMaintenanceLeases}`,
+    });
+  }
 
   const badShapes = Object.entries(snapshot.logs.stdout.keyShapes)
     .filter(([shape]) => !ALLOWED_STDOUT_KEY_SHAPES.has(shape));
@@ -655,7 +699,7 @@ export async function buildProcessorOpsSnapshot(
       "--remote",
       "--json",
       "--command",
-      "SELECT COUNT(*) AS total_jobs, COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0) AS pending_jobs, COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0) AS running_jobs, COALESCE(SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END),0) AS succeeded_jobs, COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0) AS failed_jobs, (SELECT COUNT(*) FROM pragma_foreign_key_check) AS foreign_key_errors FROM audio_processing_jobs;",
+      "SELECT COUNT(*) AS total_jobs, COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0) AS pending_jobs, COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0) AS running_jobs, COALESCE(SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END),0) AS succeeded_jobs, COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0) AS failed_jobs, (SELECT COUNT(*) FROM audio_processing_dispatch_attempts WHERE status='started') AS started_dispatch_attempts, (SELECT COUNT(*) FROM audio_processing_dispatch_attempts WHERE status='failed') AS failed_dispatch_attempts, (SELECT COUNT(*) FROM audio_processing_dispatch_attempts WHERE status='started' AND requested_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes')) AS stale_dispatch_attempts, (SELECT COUNT(*) FROM recording_upload_sessions WHERE status IN ('open','completing','stored','duplicate')) AS recoverable_upload_sessions, (SELECT COUNT(*) FROM recording_upload_sessions LEFT JOIN recording_upload_intents ON recording_upload_intents.session_id=recording_upload_sessions.id WHERE recording_upload_intents.session_id IS NULL) AS unclassified_upload_sessions, (SELECT COUNT(*) FROM media_objects WHERE kind='scan' AND sha256 IS NULL) AS missing_scan_hashes, (SELECT COUNT(*) FROM media_objects LEFT JOIN scan_readability_derivatives ON scan_readability_derivatives.source_media_id=media_objects.id WHERE media_objects.kind='scan' AND scan_readability_derivatives.source_media_id IS NULL) AS missing_scan_derivatives, (SELECT COUNT(*) FROM scan_maintenance_failures) AS scan_maintenance_failures, (SELECT COUNT(*) FROM scan_maintenance_leases WHERE lease_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now')) AS expired_scan_maintenance_leases, (SELECT COUNT(*) FROM pragma_foreign_key_check) AS foreign_key_errors FROM audio_processing_jobs;",
     ],
     "d1_query_failed",
   );
@@ -801,6 +845,39 @@ export async function buildProcessorOpsSnapshot(
       runningJobs: parseInteger(d1Row.running_jobs, "invalid_d1_running_jobs"),
       succeededJobs: parseInteger(d1Row.succeeded_jobs, "invalid_d1_succeeded_jobs"),
       failedJobs: parseInteger(d1Row.failed_jobs, "invalid_d1_failed_jobs"),
+      startedDispatchAttempts: parseInteger(
+        d1Row.started_dispatch_attempts,
+        "invalid_d1_started_dispatch_attempts",
+      ),
+      failedDispatchAttempts: parseInteger(
+        d1Row.failed_dispatch_attempts,
+        "invalid_d1_failed_dispatch_attempts",
+      ),
+      staleDispatchAttempts: parseInteger(
+        d1Row.stale_dispatch_attempts,
+        "invalid_d1_stale_dispatch_attempts",
+      ),
+      recoverableUploadSessions: parseInteger(
+        d1Row.recoverable_upload_sessions,
+        "invalid_d1_recoverable_upload_sessions",
+      ),
+      unclassifiedUploadSessions: parseInteger(
+        d1Row.unclassified_upload_sessions,
+        "invalid_d1_unclassified_upload_sessions",
+      ),
+      missingScanHashes: parseInteger(d1Row.missing_scan_hashes, "invalid_d1_missing_scan_hashes"),
+      missingScanDerivatives: parseInteger(
+        d1Row.missing_scan_derivatives,
+        "invalid_d1_missing_scan_derivatives",
+      ),
+      scanMaintenanceFailures: parseInteger(
+        d1Row.scan_maintenance_failures,
+        "invalid_d1_scan_maintenance_failures",
+      ),
+      expiredScanMaintenanceLeases: parseInteger(
+        d1Row.expired_scan_maintenance_leases,
+        "invalid_d1_expired_scan_maintenance_leases",
+      ),
       foreignKeyErrors: parseInteger(d1Row.foreign_key_errors, "invalid_d1_fk_errors"),
     },
     costSurface: {

@@ -45,6 +45,12 @@ import {
   sha256Hex,
 } from "./media-upload";
 import {
+  createScanReadabilityDerivative,
+  scanReadabilityObjectKey,
+  ScanReadabilityError,
+  type ScanReadabilityDerivative,
+} from "./scan-readability";
+import {
   parseScanCreate,
   parseScanRevision,
   parseScanUpdate,
@@ -76,6 +82,12 @@ import {
   type SongWriteInput,
   type SongUpdateInput,
 } from "./song-writes";
+import {
+  GoogleJobTriggerError,
+  triggerGoogleCloudRunJob,
+  validGoogleJobTriggerConfig,
+  type GoogleJobTriggerConfig,
+} from "./google-job-trigger";
 
 export type AppRole = "viewer" | "editor" | "admin";
 export type AppUser = {
@@ -87,6 +99,7 @@ export type AppUser = {
 type Bindings = {
   DB: D1Database;
   MEDIA: R2Bucket;
+  IMAGES: ImagesBinding;
   AUTH_MODE: "access" | "local";
   ACCESS_AUD: string;
   ACCESS_ISSUER: string;
@@ -97,7 +110,7 @@ type Bindings = {
   GCP_PROJECT_ID?: string;
   GCP_REGION?: string;
   GCP_JOB_NAME?: string;
-  GCP_SERVICE_ACCOUNT_JSON?: string;
+  GCP_WORKLOAD_IDENTITY_PROVIDER?: string;
 };
 
 type Variables = {
@@ -127,6 +140,16 @@ export async function resolveActiveAppUser(database: D1Database, email: string):
     FROM app_users
     WHERE identity = ? COLLATE NOCASE AND is_active = 1
   `).bind(email).first<AppUser>();
+}
+
+async function opaqueCacheNamespace(issuer: string, subject: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${issuer}\0${subject}`),
+  );
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 32);
 }
 
 export const requireRole = (required: AppRole) => createMiddleware<{
@@ -217,6 +240,9 @@ type RecordingUploadSessionRow = {
   sha256: string | null;
   duplicateMediaId: string | null;
   recordingId: string | null;
+  intentKind: "create" | "replace" | null;
+  targetRecordingId: string | null;
+  targetRecordingRevision: number | null;
 };
 
 type RecordingUploadPartRow = {
@@ -321,12 +347,121 @@ function lyricWriteError(error: unknown): { error: string; status: 400 | 409 | 5
   return { error: "lyric_write_failed", status: 500 };
 }
 
-function scanWriteError(error: unknown): { error: string; status: 400 | 500 } {
+function scanWriteError(error: unknown): { error: string; status: 400 | 409 | 500 } {
   const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("duplicate_or_invalid_scan_fingerprint")
+    || message.includes("scan_fingerprints.sha256")) {
+    return { error: "duplicate_scan_file", status: 409 };
+  }
   if (message.includes("FOREIGN KEY") || message.includes("CHECK constraint")) {
     return { error: "invalid_scan_reference", status: 400 };
   }
   return { error: "scan_write_failed", status: 500 };
+}
+
+function scanReadabilityError(error: unknown): { error: string; status: 400 | 413 | 503 } {
+  if (error instanceof ScanReadabilityError) {
+    if (error.code === "scan_image_too_large") {
+      return { error: error.code, status: 413 };
+    }
+    if (error.code === "scan_image_decode_failed"
+      || error.code === "scan_image_dimensions_invalid") {
+      return { error: error.code, status: 400 };
+    }
+  }
+  return { error: "scan_readability_unavailable", status: 503 };
+}
+
+type DuplicateScanRow = {
+  scanId: string | null;
+  songId: string | null;
+  songTitle: string | null;
+  filename: string;
+  notebookName: string | null;
+  pageLabel: string | null;
+  scanIsTrashed: number | null;
+  songIsTrashed: number | null;
+};
+
+async function loadDuplicateScan(
+  database: D1Database,
+  fingerprint: string,
+): Promise<DuplicateScanRow | null> {
+  return database.prepare(`
+    SELECT
+      scans.id AS scanId,
+      scans.song_id AS songId,
+      songs.title_latin AS songTitle,
+      media_objects.original_filename AS filename,
+      notebooks.display_name AS notebookName,
+      scans.page_label AS pageLabel,
+      CASE WHEN scans.trashed_at IS NULL THEN 0 ELSE 1 END AS scanIsTrashed,
+      CASE WHEN songs.trashed_at IS NULL THEN 0 ELSE 1 END AS songIsTrashed
+    FROM scan_fingerprints
+    JOIN media_objects ON media_objects.id = scan_fingerprints.canonical_media_id
+    LEFT JOIN scans ON scans.media_id = media_objects.id
+    LEFT JOIN songs ON songs.id = scans.song_id
+    LEFT JOIN notebooks ON notebooks.id = scans.notebook_id
+    WHERE scan_fingerprints.sha256 = ?
+    LIMIT 1
+  `).bind(fingerprint).first<DuplicateScanRow>();
+}
+
+async function removeUncommittedScanObjects(
+  media: R2Bucket,
+  originalObjectKey: string,
+  readabilityObjectKey: string,
+): Promise<void> {
+  try {
+    await media.delete([originalObjectKey, readabilityObjectKey]);
+  } catch {
+    console.error("Failed to remove uncommitted Scan objects");
+  }
+}
+
+async function removeUncommittedScanRows(database: D1Database, mediaId: string): Promise<void> {
+  try {
+    await database.batch([
+      database.prepare(`
+        DELETE FROM scan_readability_derivatives WHERE source_media_id = ?
+      `).bind(mediaId),
+      database.prepare(`DELETE FROM media_objects WHERE id = ?`).bind(mediaId),
+    ]);
+  } catch {
+    console.error("Failed to remove uncommitted Scan rows");
+  }
+}
+
+function scanReadabilityInsert(
+  database: D1Database,
+  mediaId: string,
+  sourceSha256: string,
+  sourceByteSize: number,
+  objectKey: string,
+  derivative: ScanReadabilityDerivative,
+  timestamp: string,
+  actor: string,
+): D1PreparedStatement {
+  return database.prepare(`
+    INSERT INTO scan_readability_derivatives (
+      source_media_id, source_sha256, source_byte_size, object_key,
+      mime_type, byte_size, sha256, width, height, policy_id,
+      created_at, created_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    mediaId,
+    sourceSha256,
+    sourceByteSize,
+    objectKey,
+    derivative.mimeType,
+    derivative.bytes.byteLength,
+    derivative.sha256,
+    derivative.width,
+    derivative.height,
+    derivative.policyId,
+    timestamp,
+    actor,
+  );
 }
 
 function recordingWriteError(error: unknown): { error: string; status: 400 | 409 | 500 } {
@@ -351,6 +486,7 @@ async function loadRecordingUploadSession(
   database: D1Database,
   sessionId: string,
   actor: string,
+  allowAnyActor = false,
 ): Promise<RecordingUploadSessionRow | null> {
   return database.prepare(`
     SELECT
@@ -369,10 +505,16 @@ async function loadRecordingUploadSession(
       expires_at AS expiresAt,
       sha256,
       duplicate_media_id AS duplicateMediaId,
-      recording_id AS recordingId
+      recording_id AS recordingId,
+      recording_upload_intents.intent_kind AS intentKind,
+      recording_upload_intents.target_recording_id AS targetRecordingId,
+      recording_upload_intents.target_recording_revision AS targetRecordingRevision
     FROM recording_upload_sessions
-    WHERE id = ? AND created_by = ?
-  `).bind(sessionId, actor).first<RecordingUploadSessionRow>();
+    LEFT JOIN recording_upload_intents
+      ON recording_upload_intents.session_id = recording_upload_sessions.id
+    WHERE recording_upload_sessions.id = ?
+      AND (recording_upload_sessions.created_by = ? OR ? = 1)
+  `).bind(sessionId, actor, allowAnyActor ? 1 : 0).first<RecordingUploadSessionRow>();
 }
 
 async function loadRecordingUploadByMutation(
@@ -397,10 +539,56 @@ async function loadRecordingUploadByMutation(
       expires_at AS expiresAt,
       sha256,
       duplicate_media_id AS duplicateMediaId,
-      recording_id AS recordingId
+      recording_id AS recordingId,
+      recording_upload_intents.intent_kind AS intentKind,
+      recording_upload_intents.target_recording_id AS targetRecordingId,
+      recording_upload_intents.target_recording_revision AS targetRecordingRevision
     FROM recording_upload_sessions
-    WHERE created_by = ? AND client_mutation_id = ?
+    LEFT JOIN recording_upload_intents
+      ON recording_upload_intents.session_id = recording_upload_sessions.id
+    WHERE recording_upload_sessions.created_by = ?
+      AND recording_upload_sessions.client_mutation_id = ?
   `).bind(actor, clientMutationId).first<RecordingUploadSessionRow>();
+}
+
+async function loadRecoverableRecordingUploads(
+  database: D1Database,
+  songId: string,
+  actor: string,
+): Promise<RecordingUploadSessionRow[]> {
+  const uploads = await database.prepare(`
+    SELECT
+      recording_upload_sessions.id,
+      recording_upload_sessions.song_id AS songId,
+      recording_upload_sessions.request_fingerprint AS requestFingerprint,
+      recording_upload_sessions.description,
+      recording_upload_sessions.recorded_on AS recordedOn,
+      recording_upload_sessions.original_filename AS filename,
+      recording_upload_sessions.byte_size AS byteSize,
+      recording_upload_sessions.part_count AS partCount,
+      recording_upload_sessions.object_key AS objectKey,
+      recording_upload_sessions.r2_upload_id AS uploadId,
+      recording_upload_sessions.status,
+      recording_upload_sessions.revision,
+      recording_upload_sessions.expires_at AS expiresAt,
+      recording_upload_sessions.sha256,
+      recording_upload_sessions.duplicate_media_id AS duplicateMediaId,
+      recording_upload_sessions.recording_id AS recordingId,
+      recording_upload_intents.intent_kind AS intentKind,
+      recording_upload_intents.target_recording_id AS targetRecordingId,
+      recording_upload_intents.target_recording_revision AS targetRecordingRevision
+    FROM recording_upload_sessions
+    LEFT JOIN recording_upload_intents
+      ON recording_upload_intents.session_id = recording_upload_sessions.id
+    WHERE recording_upload_sessions.song_id = ?
+      AND recording_upload_sessions.created_by = ?
+      AND recording_upload_sessions.status IN (
+        'creating', 'open', 'completing', 'stored', 'duplicate'
+      )
+    ORDER BY recording_upload_sessions.updated_at DESC, recording_upload_sessions.id
+    LIMIT 50
+  `).bind(songId, actor).all<RecordingUploadSessionRow>();
+  return uploads.results;
 }
 
 function publicRecordingUploadSession(
@@ -420,6 +608,13 @@ function publicRecordingUploadSession(
     revision: session.revision,
     expiresAt: session.expiresAt,
     recordingId: session.recordingId,
+    intent: session.intentKind == null
+      ? null
+      : {
+          kind: session.intentKind,
+          targetRecordingId: session.targetRecordingId,
+          targetRecordingRevision: session.targetRecordingRevision,
+        },
   };
   if (session.status === "duplicate") {
     result.duplicateRecording = {
@@ -429,6 +624,59 @@ function publicRecordingUploadSession(
     };
   }
   return result;
+}
+
+async function discardRecordingUploadSession(
+  context: any,
+  allowAnyActor: boolean,
+): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseRecordingUploadRevision(body);
+  if (!parsed.success) return context.json({ error: "invalid_recording_upload" }, 400);
+  const actor = context.get("appUser").identity;
+  const session = await loadRecordingUploadSession(
+    context.env.DB,
+    context.req.param("sessionId"),
+    actor,
+    allowAnyActor,
+  );
+  if (!session) return context.json({ error: "recording_upload_not_found" }, 404);
+  if (session.status !== "stored" && session.status !== "duplicate") {
+    return context.json({ error: "recording_upload_cannot_discard" }, 409);
+  }
+  const timestamp = new Date().toISOString();
+  let result: D1Result;
+  try {
+    result = await context.env.DB.prepare(`
+      UPDATE recording_upload_sessions
+      SET status = 'failed', duplicate_media_id = NULL,
+          error_code = 'user_discarded', revision = revision + 1,
+          updated_at = ?, updated_by = ?
+      WHERE id = ? AND revision = ? AND status IN ('stored', 'duplicate')
+        AND (created_by = ? OR ? = 1)
+    `).bind(
+      timestamp, actor, session.id, parsed.data.revision,
+      actor, allowAnyActor ? 1 : 0,
+    ).run();
+  } catch {
+    return context.json({ error: "recording_upload_discard_failed" }, 500);
+  }
+  if (result.meta.changes !== 1) {
+    return context.json({ error: "recording_upload_conflict" }, 409);
+  }
+  const discarded = await loadRecordingUploadSession(
+    context.env.DB, session.id, actor, allowAnyActor,
+  );
+  if (!discarded) return context.json({ error: "recording_upload_not_found" }, 404);
+  return context.json({
+    upload: publicRecordingUploadSession(discarded),
+    objectRetainedForReview: true,
+  });
 }
 
 async function loadRecordingUploadParts(
@@ -546,145 +794,114 @@ async function loadAudioProcessingJobByRecording(
   return job ? loadAudioProcessingJob(database, job.id) : null;
 }
 
-async function getGoogleAccessToken(
-  clientEmail: string,
-  privateKeyPem: string,
-): Promise<string> {
-  const pemHeader = "-----BEGIN PRIVATE KEY-----";
-  const pemFooter = "-----END PRIVATE KEY-----";
-  const pemContents = privateKeyPem
-    .replace(pemHeader, "")
-    .replace(pemFooter, "")
-    .replace(/\s/g, "");
-  const binaryDerString = atob(pemContents);
-  const binaryDer = new Uint8Array(binaryDerString.length);
-  for (let i = 0; i < binaryDerString.length; i++) {
-    binaryDer[i] = binaryDerString.charCodeAt(i);
-  }
+type AudioDispatchSource =
+  | "upload_finalize"
+  | "upload_replay"
+  | "replacement_finalize"
+  | "replacement_replay"
+  | "editor_retry"
+  | "processor_chain"
+  | "admin_smoke";
 
-  const cryptoKey = await crypto.subtle.importKey(
-    "pkcs8",
-    binaryDer.buffer,
-    {
-      name: "RSASSA-PKCS1-v1_5",
-      hash: "SHA-256",
-    },
-    false,
-    ["sign"]
-  );
-
-  const header = { alg: "RS256", typ: "JWT" };
-  const nowSecs = Math.floor(Date.now() / 1000);
-  const claims = {
-    iss: clientEmail,
-    scope: "https://www.googleapis.com/auth/cloud-platform",
-    aud: "https://oauth2.googleapis.com/token",
-    exp: nowSecs + 3600,
-    iat: nowSecs,
+function googleJobTriggerConfig(env: Bindings): GoogleJobTriggerConfig {
+  return {
+    workloadIdentityProvider: env.GCP_WORKLOAD_IDENTITY_PROVIDER ?? "",
+    projectId: env.GCP_PROJECT_ID ?? "",
+    region: env.GCP_REGION ?? "",
+    jobName: env.GCP_JOB_NAME ?? "",
   };
-
-  const base64UrlEncode = (obj: any) => {
-    const json = JSON.stringify(obj);
-    const bytes = new TextEncoder().encode(json);
-    const binString = String.fromCharCode(...bytes);
-    return btoa(binString)
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/, "");
-  };
-
-  const encodedHeader = base64UrlEncode(header);
-  const encodedClaims = base64UrlEncode(claims);
-  const tokenToSign = `${encodedHeader}.${encodedClaims}`;
-
-  const signatureBytes = await crypto.subtle.sign(
-    "RSASSA-PKCS1-v1_5",
-    cryptoKey,
-    new TextEncoder().encode(tokenToSign)
-  );
-
-  const encodedSignature = btoa(String.fromCharCode(...new Uint8Array(signatureBytes)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-
-  const signedJwt = `${tokenToSign}.${encodedSignature}`;
-
-  const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion: signedJwt,
-    }).toString(),
-  });
-
-  if (!tokenResponse.ok) {
-    throw new Error(`Google token exchange failed: ${await tokenResponse.text()}`);
-  }
-
-  const tokenData = await tokenResponse.json() as { access_token: string };
-  return tokenData.access_token;
 }
 
-async function triggerAudioProcessorJob(
-  project: string,
-  region: string,
-  jobName: string,
-  serviceAccountJson: string,
+function boundedDispatchErrorCode(error: unknown): string {
+  if (error instanceof GoogleJobTriggerError) return error.code;
+  return "google_trigger_unavailable";
+}
+
+function executionContextFrom(context: any): { waitUntil(promise: Promise<unknown>): void } | null {
+  try {
+    const executionContext = context.executionCtx;
+    return executionContext && typeof executionContext.waitUntil === "function"
+      ? executionContext
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function scheduleAudioProcessorRun(
+  context: any,
+  jobId: string,
+  triggerSource: AudioDispatchSource,
+  requestedBy: string,
 ): Promise<void> {
-  const creds = JSON.parse(serviceAccountJson) as {
-    client_email: string;
-    private_key: string;
-  };
-  const accessToken = await getGoogleAccessToken(creds.client_email, creds.private_key);
-  const url = `https://${region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${project}/jobs/${jobName}:run`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${accessToken}`,
-      "Content-Length": "0",
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`Google Cloud Run trigger API call failed: ${await response.text()}`);
-  }
-}
+  if (context.env.AUTH_MODE === "local") return;
 
-function runGcpJobInBackground(env: Bindings, context: any): void {
-  if (!env.GCP_PROJECT_ID || !env.GCP_REGION || !env.GCP_JOB_NAME || !env.GCP_SERVICE_ACCOUNT_JSON) {
+  const dispatchId = crypto.randomUUID();
+  const requestedAt = new Date().toISOString();
+  try {
+    const inserted = await context.env.DB.prepare(`
+      INSERT INTO audio_processing_dispatch_attempts (
+        id, job_id, trigger_source, status, requested_at, requested_by
+      )
+      SELECT ?, id, ?, 'started', ?, ?
+      FROM audio_processing_jobs
+      WHERE id = ? AND status = 'pending'
+    `).bind(
+      dispatchId, triggerSource, requestedAt, requestedBy, jobId,
+    ).run();
+    if (inserted.meta.changes !== 1) return;
+  } catch {
+    console.error("Audio processor dispatch checkpoint failed", { dispatchId });
     return;
   }
-  let executionCtx: any;
-  try {
-    executionCtx = context.executionCtx;
-  } catch {
-    // ignore: Context has no ExecutionContext in some test runners
-  }
-  const triggerPromise = triggerAudioProcessorJob(
-    env.GCP_PROJECT_ID,
-    env.GCP_REGION,
-    env.GCP_JOB_NAME,
-    env.GCP_SERVICE_ACCOUNT_JSON,
-  ).catch((err) => {
-    console.error("Failed to trigger Cloud Run audio processor job on-demand:", err instanceof Error ? err.message : err);
-  });
 
-  if (executionCtx && typeof executionCtx.waitUntil === "function") {
-    executionCtx.waitUntil(triggerPromise);
-  }
+  const config = googleJobTriggerConfig(context.env);
+  const accessJwt = context.req.header("Cf-Access-Jwt-Assertion") ?? "";
+  const dispatch = (async () => {
+    let status: "accepted" | "failed" = "accepted";
+    let errorCode: string | null = null;
+    try {
+      if (!accessJwt) throw new GoogleJobTriggerError("google_trigger_not_configured");
+      if (!validGoogleJobTriggerConfig(config)) {
+        throw new GoogleJobTriggerError("google_trigger_not_configured");
+      }
+      await triggerGoogleCloudRunJob(config, accessJwt);
+    } catch (error) {
+      status = "failed";
+      errorCode = boundedDispatchErrorCode(error);
+      console.error("Audio processor dispatch failed", { dispatchId, errorCode });
+    }
+
+    const completedAt = new Date().toISOString();
+    try {
+      await context.env.DB.prepare(`
+        UPDATE audio_processing_dispatch_attempts
+        SET status = ?, completed_at = ?, error_code = ?
+        WHERE id = ? AND status = 'started'
+      `).bind(status, completedAt, errorCode, dispatchId).run();
+    } catch {
+      console.error("Audio processor dispatch result checkpoint failed", { dispatchId });
+    }
+  })();
+
+  const executionContext = executionContextFrom(context);
+  if (executionContext) executionContext.waitUntil(dispatch);
+  else await dispatch;
 }
 
-async function triggerNextPendingJob(database: D1Database, env: Bindings, context: any): Promise<void> {
+async function triggerNextPendingJob(context: any): Promise<void> {
   try {
-    const pending = await database.prepare(`
-      SELECT id FROM audio_processing_jobs WHERE status = 'pending' LIMIT 1
-    `).first<{ id: string }>();
+    const pending = await context.env.DB.prepare(`
+      SELECT id FROM audio_processing_jobs
+      WHERE status = 'pending'
+      ORDER BY created_at, id
+      LIMIT 1
+    `).first() as { id: string } | null;
     if (pending) {
-      runGcpJobInBackground(env, context);
+      await scheduleAudioProcessorRun(context, pending.id, "processor_chain", "audio-processor");
     }
-  } catch (err) {
-    console.error("Failed to query pending audio processing jobs for trigger chaining:", err instanceof Error ? err.message : err);
+  } catch {
+    console.error("Pending audio processor dispatch check failed");
   }
 }
 
@@ -1063,6 +1280,19 @@ export function parseByteRange(value: string, size: number): { offset: number; l
 }
 
 export const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+app.use("/api/*", async (context, next) => {
+  await next();
+  context.header("X-Content-Type-Options", "nosniff");
+  context.header("Referrer-Policy", "no-referrer");
+  context.header("X-Frame-Options", "DENY");
+  context.header("Permissions-Policy", "camera=(self), microphone=(), geolocation=()");
+  context.header("Cross-Origin-Resource-Policy", "same-origin");
+  const contentType = context.res.headers.get("Content-Type") ?? "";
+  if (contentType.includes("application/json")) {
+    context.header("Cache-Control", "private, no-store");
+  }
+});
 
 app.use("/api/*", async (context, next) => {
   if (context.req.path.startsWith("/api/processing/")) {
@@ -1449,6 +1679,12 @@ app.post("/api/processing/jobs/:jobId/result", async (context) => {
     return context.json({ error: "audio_processing_result_mismatch" }, 422);
   }
   if (job.status === "succeeded") {
+    if (succeededAudioProcessingJobMatches(job, result)) {
+      await triggerNextPendingJob(context);
+      return context.json({
+        job: { id: job.id, status: job.status, playbackKind: job.playbackKind },
+      });
+    }
     return succeededAudioProcessingJobMatches(job, result)
       ? context.json({ job: { id: job.id, status: job.status, playbackKind: job.playbackKind } })
       : context.json({ error: "audio_processing_result_conflict" }, 409);
@@ -1631,6 +1867,7 @@ app.post("/api/processing/jobs/:jobId/result", async (context) => {
   } catch {
     job = await loadAudioProcessingJob(context.env.DB, job.id);
     if (job && succeededAudioProcessingJobMatches(job, result)) {
+      await triggerNextPendingJob(context);
       return context.json({
         job: { id: job.id, status: job.status, playbackKind: job.playbackKind },
       });
@@ -1641,15 +1878,7 @@ app.post("/api/processing/jobs/:jobId/result", async (context) => {
   if (!job || !succeededAudioProcessingJobMatches(job, result)) {
     return context.json({ error: "audio_processing_finalization_incomplete" }, 500);
   }
-  let executionCtx: any;
-  try {
-    executionCtx = context.executionCtx;
-  } catch {}
-  if (executionCtx && typeof executionCtx.waitUntil === "function") {
-    executionCtx.waitUntil(triggerNextPendingJob(context.env.DB, context.env, context));
-  } else {
-    triggerNextPendingJob(context.env.DB, context.env, context).catch(() => {});
-  }
+  await triggerNextPendingJob(context);
 
   return context.json({
     job: { id: job.id, status: job.status, playbackKind: job.playbackKind },
@@ -1695,9 +1924,11 @@ app.post("/api/processing/jobs/:jobId/failure", async (context) => {
   const job = await loadAudioProcessingJob(context.env.DB, context.req.param("jobId"));
   if (!job) return context.json({ error: "audio_processing_job_not_found" }, 404);
   if (job.status === "failed") {
-    return job.errorCode === failure.errorCode
-      ? context.json({ job: { id: job.id, status: job.status, errorCode: job.errorCode } })
-      : context.json({ error: "audio_processing_failure_conflict" }, 409);
+    if (job.errorCode !== failure.errorCode) {
+      return context.json({ error: "audio_processing_failure_conflict" }, 409);
+    }
+    await triggerNextPendingJob(context);
+    return context.json({ job: { id: job.id, status: job.status, errorCode: job.errorCode } });
   }
   const now = new Date().toISOString();
   if (
@@ -1718,15 +1949,7 @@ app.post("/api/processing/jobs/:jobId/failure", async (context) => {
   } catch {
     return context.json({ error: "audio_processing_failure_checkpoint_failed" }, 503);
   }
-  let executionCtx: any;
-  try {
-    executionCtx = context.executionCtx;
-  } catch {}
-  if (executionCtx && typeof executionCtx.waitUntil === "function") {
-    executionCtx.waitUntil(triggerNextPendingJob(context.env.DB, context.env, context));
-  } else {
-    triggerNextPendingJob(context.env.DB, context.env, context).catch(() => {});
-  }
+  await triggerNextPendingJob(context);
 
   return context.json({
     job: { id: job.id, status: "failed", errorCode: failure.errorCode },
@@ -1740,12 +1963,17 @@ app.get("/api/health", (context) => {
   });
 });
 
-app.get("/api/session", (context) => {
+app.get("/api/session", async (context) => {
   const user = context.get("appUser");
+  const identity = context.get("accessIdentity");
   return context.json({
     user: {
       displayName: user.displayName,
       role: user.role,
+      cacheNamespace: await opaqueCacheNamespace(
+        context.env.AUTH_MODE === "access" ? context.env.ACCESS_ISSUER : "local",
+        identity.subject,
+      ),
     },
   });
 });
@@ -1863,6 +2091,7 @@ app.post("/api/recordings/:recordingId/retry-processing", requireRole("editor"),
   if (!job || job.status !== "pending" || job.recordingProcessingState !== "processing") {
     return context.json({ error: "audio_processing_retry_incomplete" }, 500);
   }
+  await scheduleAudioProcessorRun(context, job.id, "editor_retry", actor);
   return context.json({
     job: { status: job.status, attemptCount: job.attemptCount },
     recording: {
@@ -1871,6 +2100,28 @@ app.post("/api/recordings/:recordingId/retry-processing", requireRole("editor"),
       processingState: job.recordingProcessingState,
     },
   });
+});
+
+app.get("/api/songs/:songId/recording-uploads", requireRole("editor"), async (context) => {
+  const actor = context.get("appUser").identity;
+  const songId = context.req.param("songId");
+  const song = await context.env.DB.prepare(`
+    SELECT id FROM songs WHERE id = ?
+  `).bind(songId).first<{ id: string }>();
+  if (!song) return context.json({ error: "song_not_found" }, 404);
+  const sessions = await loadRecoverableRecordingUploads(context.env.DB, songId, actor);
+  const uploads = await Promise.all(sessions.map(async (session) => {
+    const [parts, duplicate] = await Promise.all([
+      loadRecordingUploadParts(context.env.DB, session.id),
+      loadRecordingUploadDuplicate(context.env.DB, session),
+    ]);
+    return publicRecordingUploadSession(
+      session,
+      parts.map((part) => part.partNumber),
+      duplicate,
+    );
+  }));
+  return context.json({ uploads });
 });
 
 app.post("/api/songs/:songId/recording-uploads", requireRole("editor"), async (context) => {
@@ -1887,14 +2138,44 @@ app.post("/api/songs/:songId/recording-uploads", requireRole("editor"), async (c
   const upload: RecordingUploadCreateInput = parsed.data;
   const songId = context.req.param("songId");
   const actor = context.get("appUser").identity;
-  const [song, peopleExist] = await Promise.all([
+  const [song, peopleExist, replacementTarget] = await Promise.all([
     context.env.DB.prepare(`
       SELECT id FROM songs WHERE id = ? AND trashed_at IS NULL
     `).bind(songId).first<{ id: string }>(),
     lookupIdsExist(context.env.DB, "people", upload.creditPersonIds),
+    upload.replaceTarget
+      ? context.env.DB.prepare(`
+          SELECT
+            recordings.id,
+            recordings.revision,
+            recordings.processing_state AS processingState,
+            EXISTS (
+              SELECT 1 FROM audio_processing_jobs
+              WHERE recording_id = recordings.id AND status IN ('pending', 'running')
+            ) AS hasActiveJob
+          FROM recordings
+          WHERE recordings.id = ? AND recordings.song_id = ?
+            AND recordings.trashed_at IS NULL
+        `).bind(upload.replaceTarget.recordingId, songId).first<{
+          id: string;
+          revision: number;
+          processingState: "processing" | "ready" | "failed";
+          hasActiveJob: number;
+        }>()
+      : Promise.resolve(null),
   ]);
   if (!song) return context.json({ error: "song_not_found" }, 404);
   if (!peopleExist) return context.json({ error: "invalid_recording_reference" }, 400);
+  if (upload.replaceTarget) {
+    if (!replacementTarget) return context.json({ error: "recording_not_found" }, 404);
+    if (
+      replacementTarget.revision !== upload.replaceTarget.revision
+      || replacementTarget.processingState === "processing"
+      || replacementTarget.hasActiveJob === 1
+    ) {
+      return context.json({ error: "recording_processing_active" }, 409);
+    }
+  }
 
   const fingerprint = await recordingUploadRequestFingerprint(songId, upload);
   let session = await loadRecordingUploadByMutation(
@@ -1925,6 +2206,19 @@ app.post("/api/songs/:songId/recording-uploads", requireRole("editor"), async (c
       upload.description, upload.recordedOn, upload.filename, upload.mimeTypeHint,
       upload.byteSize, RECORDING_UPLOAD_PART_BYTES, upload.partCount, objectKey,
       expiresAt, timestamp, actor, timestamp, actor, songId,
+    ), context.env.DB.prepare(`
+      INSERT INTO recording_upload_intents (
+        session_id, intent_kind, target_recording_id,
+        target_recording_revision, created_at, created_by
+      )
+      SELECT id, ?, ?, ?, ?, ?
+      FROM recording_upload_sessions
+      WHERE id = ? AND created_by = ? AND status = 'creating'
+    `).bind(
+      upload.replaceTarget ? "replace" : "create",
+      upload.replaceTarget?.recordingId ?? null,
+      upload.replaceTarget?.revision ?? null,
+      timestamp, actor, sessionId, actor,
     )];
     for (const [sortOrder, personId] of upload.creditPersonIds.entries()) {
       statements.push(context.env.DB.prepare(`
@@ -2330,10 +2624,17 @@ app.post("/api/recording-uploads/:sessionId/finalize", requireRole("editor"), as
   if (session.status === "finalized") {
     const recording = await loadFinalizedRecording(context.env.DB, session);
     if (!recording) return context.json({ error: "recording_upload_finalization_incomplete" }, 500);
+    const job = await loadAudioProcessingJobByRecording(context.env.DB, recording.id);
+    if (job?.status === "pending") {
+      await scheduleAudioProcessorRun(context, job.id, "upload_replay", actor);
+    }
     return context.json({ upload: publicRecordingUploadSession(session), recording });
   }
   if (session.status !== "stored" || !session.sha256) {
     return context.json({ error: "recording_upload_not_stored" }, 409);
+  }
+  if (session.intentKind !== "create") {
+    return context.json({ error: "recording_upload_intent_mismatch" }, 409);
   }
   if (session.revision !== parsed.data.revision) {
     return context.json({ error: "recording_upload_conflict" }, 409);
@@ -2595,7 +2896,7 @@ app.post("/api/recording-uploads/:sessionId/finalize", requireRole("editor"), as
   }
   const recording = await loadFinalizedRecording(context.env.DB, session);
   if (!recording) return context.json({ error: "recording_upload_finalization_incomplete" }, 500);
-  runGcpJobInBackground(context.env, context);
+  await scheduleAudioProcessorRun(context, processingJobId, "upload_finalize", actor);
   return context.json(
     { upload: publicRecordingUploadSession(session), recording },
     results[6].meta.changes === 1 ? 201 : 200,
@@ -2622,25 +2923,59 @@ app.post("/api/songs/:songId/recording-uploads/:sessionId/replace", requireRole(
   if (!session) return context.json({ error: "recording_upload_not_found" }, 404);
 
   if (session.status !== "stored") {
-    if (session.status === "duplicate" || session.status === "finalized") {
+    if (session.status === "duplicate") {
       const duplicate = await loadRecordingUploadDuplicate(context.env.DB, session);
       return context.json({ upload: publicRecordingUploadSession(session, [], duplicate) });
     }
+    if (session.status === "finalized") {
+      const recording = await loadFinalizedRecording(context.env.DB, session);
+      if (!recording) return context.json({ error: "recording_upload_finalization_incomplete" }, 500);
+      const job = await loadAudioProcessingJobByRecording(context.env.DB, recording.id);
+      if (job?.status === "pending") {
+        await scheduleAudioProcessorRun(context, job.id, "replacement_replay", actor);
+      }
+      return context.json({ upload: publicRecordingUploadSession(session), recording });
+    }
     return context.json({ error: "recording_upload_conflict" }, 409);
+  }
+  if (
+    session.intentKind !== "replace"
+    || session.targetRecordingId !== targetRecordingId
+  ) {
+    return context.json({ error: "recording_upload_intent_mismatch" }, 409);
+  }
+  if (session.targetRecordingRevision !== parsed.data.targetRecordingRevision) {
+    return context.json({ error: "recording_conflict" }, 409);
   }
 
   const timestamp = new Date().toISOString();
   const finalDescription = parsed.data.description ?? session.description;
-  const normalizedDescription = finalDescription?.normalize("NFKC").trim().replace(/\s+/gu, " ") ?? null;
+  const normalizedDescription = finalDescription === null
+    ? null
+    : normalizedTextKey(finalDescription);
+  if (finalDescription !== null && !normalizedDescription) {
+    return context.json({ error: "invalid_recording_upload" }, 400);
+  }
 
   const currentRecording = await context.env.DB.prepare(`
-    SELECT id, original_media_id, playback_media_id, revision
+    SELECT
+      recordings.id,
+      recordings.original_media_id,
+      recordings.playback_media_id,
+      recordings.processing_state,
+      recordings.revision,
+      EXISTS (
+        SELECT 1 FROM audio_processing_jobs
+        WHERE recording_id = recordings.id AND status IN ('pending', 'running')
+      ) AS has_active_job
     FROM recordings
-    WHERE id = ? AND song_id = ? AND trashed_at IS NULL
+    WHERE recordings.id = ? AND recordings.song_id = ? AND recordings.trashed_at IS NULL
   `).bind(targetRecordingId, session.songId).first<{
     id: string;
     original_media_id: string;
     playback_media_id: string | null;
+    processing_state: "processing" | "ready" | "failed";
+    has_active_job: number;
     revision: number;
   }>();
 
@@ -2648,9 +2983,13 @@ app.post("/api/songs/:songId/recording-uploads/:sessionId/replace", requireRole(
   if (currentRecording.revision !== parsed.data.targetRecordingRevision) {
     return context.json({ error: "recording_conflict" }, 409);
   }
+  if (currentRecording.processing_state === "processing" || currentRecording.has_active_job === 1) {
+    return context.json({ error: "recording_processing_active" }, 409);
+  }
 
   const mediaId = crypto.randomUUID();
   const historyId = crypto.randomUUID();
+  const processingJobId = crypto.randomUUID();
 
   let results: D1Result[];
   try {
@@ -2783,8 +3122,8 @@ app.post("/api/songs/:songId/recording-uploads/:sessionId/replace", requireRole(
           AND recording_upload_sessions.status = 'stored'
           AND recording_upload_sessions.revision = ?
       `).bind(
-        crypto.randomUUID(), targetRecordingId, mediaId,
-        'mp3-v1-libmp3lame-q2', timestamp, timestamp,
+        processingJobId, targetRecordingId, mediaId,
+        AUDIO_PROCESSING_POLICY_ID, timestamp, timestamp,
         targetRecordingId, mediaId, session.id, actor, parsed.data.sessionRevision,
       ),
       context.env.DB.prepare(`
@@ -2840,7 +3179,7 @@ app.post("/api/songs/:songId/recording-uploads/:sessionId/replace", requireRole(
   }
   const recording = await loadFinalizedRecording(context.env.DB, session);
   if (!recording) return context.json({ error: "recording_upload_finalization_incomplete" }, 500);
-  runGcpJobInBackground(context.env, context);
+  await scheduleAudioProcessorRun(context, processingJobId, "replacement_finalize", actor);
   return context.json(
     { upload: publicRecordingUploadSession(session), recording },
     results[7].meta.changes === 1 ? 201 : 200,
@@ -2893,6 +3232,14 @@ app.post("/api/recording-uploads/:sessionId/abort", requireRole("editor"), async
   if (!aborted) return context.json({ error: "recording_upload_not_found" }, 404);
   return context.json({ upload: publicRecordingUploadSession(aborted), cleanupDeferred });
 });
+
+app.post("/api/recording-uploads/:sessionId/discard", requireRole("editor"), async (context) => (
+  discardRecordingUploadSession(context, false)
+));
+
+app.post("/api/admin/recording-uploads/:sessionId/discard", requireRole("admin"), async (context) => (
+  discardRecordingUploadSession(context, true)
+));
 
 app.get("/api/lookups", requireRole("editor"), async (context) => {
   const [languages, tags, notebooks, people] = await Promise.all([
@@ -3311,7 +3658,7 @@ app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
     return context.json({ error: "empty_scan_file", fields: { file: ["The selected file is empty"] } }, 400);
   }
   if (fileValue.size > MAX_SCAN_UPLOAD_BYTES) {
-    return context.json({ error: "scan_file_too_large", fields: { file: ["The maximum Scan size is 25 MB"] } }, 413);
+    return context.json({ error: "scan_file_too_large", fields: { file: ["The maximum Scan size is 20 MB"] } }, 413);
   }
 
   const parsed = parseScanCreate({
@@ -3347,33 +3694,14 @@ app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
   }
 
   const fingerprint = await sha256Hex(bytes);
-  const duplicate = await context.env.DB.prepare(`
-    SELECT
-      scans.id AS scanId,
-      scans.song_id AS songId,
-      songs.title_latin AS songTitle,
-      media_objects.original_filename AS filename,
-      notebooks.display_name AS notebookName,
-      scans.page_label AS pageLabel,
-      CASE WHEN scans.trashed_at IS NULL THEN 0 ELSE 1 END AS scanIsTrashed,
-      CASE WHEN songs.trashed_at IS NULL THEN 0 ELSE 1 END AS songIsTrashed
-    FROM media_objects
-    JOIN scans ON scans.media_id = media_objects.id
-    JOIN songs ON songs.id = scans.song_id
-    LEFT JOIN notebooks ON notebooks.id = scans.notebook_id
-    WHERE media_objects.kind = 'scan' AND media_objects.sha256 = ?
-    LIMIT 1
-  `).bind(fingerprint).first<{
-    scanId: string;
-    songId: string;
-    songTitle: string;
-    filename: string;
-    notebookName: string | null;
-    pageLabel: string | null;
-    scanIsTrashed: number;
-    songIsTrashed: number;
-  }>();
+  const duplicate = await loadDuplicateScan(context.env.DB, fingerprint);
   if (duplicate) {
+    if (duplicate.scanId === null || duplicate.songId === null || duplicate.songTitle === null) {
+      return context.json({
+        error: "duplicate_scan_file",
+        fields: { file: ["This file is already retained in the library"] },
+      }, 409);
+    }
     return context.json({
       error: "duplicate_scan_file",
       existing: {
@@ -3388,21 +3716,39 @@ app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
     }, 409);
   }
 
+  let readability: ScanReadabilityDerivative;
+  try {
+    readability = await createScanReadabilityDerivative(context.env.IMAGES, bytes);
+  } catch (error) {
+    const mapped = scanReadabilityError(error);
+    return context.json({ error: mapped.error }, mapped.status);
+  }
+
   const scanId = crypto.randomUUID();
   const mediaId = crypto.randomUUID();
   const objectKey = `scans/${mediaId}.${imageType.extension}`;
+  const readabilityObjectKey = scanReadabilityObjectKey(mediaId);
   const filename = safeUploadFilename(fileValue.name, imageType.extension);
   const timestamp = new Date().toISOString();
   const actor = context.get("appUser").identity;
 
   try {
-    await context.env.MEDIA.put(objectKey, bytes, {
-      httpMetadata: {
-        contentType: imageType.mimeType,
-        contentDisposition: "inline",
-      },
-    });
+    await Promise.all([
+      context.env.MEDIA.put(objectKey, bytes, {
+        httpMetadata: {
+          contentType: imageType.mimeType,
+          contentDisposition: "inline",
+        },
+      }),
+      context.env.MEDIA.put(readabilityObjectKey, readability.bytes, {
+        httpMetadata: {
+          contentType: readability.mimeType,
+          contentDisposition: "inline",
+        },
+      }),
+    ]);
   } catch {
+    await removeUncommittedScanObjects(context.env.MEDIA, objectKey, readabilityObjectKey);
     return context.json({ error: "scan_storage_failed" }, 503);
   }
 
@@ -3416,6 +3762,16 @@ app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
       `).bind(
         mediaId, objectKey, filename, imageType.mimeType, bytes.byteLength, fingerprint,
         timestamp, actor,
+      ),
+      scanReadabilityInsert(
+        context.env.DB,
+        mediaId,
+        fingerprint,
+        bytes.byteLength,
+        readabilityObjectKey,
+        readability,
+        timestamp,
+        actor,
       ),
       context.env.DB.prepare(`
         INSERT INTO scans (
@@ -3436,17 +3792,14 @@ app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
           AND EXISTS (SELECT 1 FROM scans WHERE id = ? AND song_id = songs.id)
       `).bind(timestamp, actor, songId, scanId),
     ]);
-    if (results[1].meta.changes === 0) {
-      await context.env.DB.prepare(`DELETE FROM media_objects WHERE id = ?`).bind(mediaId).run();
-      await context.env.MEDIA.delete(objectKey);
+    if (results[2].meta.changes === 0) {
+      await removeUncommittedScanRows(context.env.DB, mediaId);
+      await removeUncommittedScanObjects(context.env.MEDIA, objectKey, readabilityObjectKey);
       return context.json({ error: "song_not_found" }, 404);
     }
   } catch (error) {
-    try {
-      await context.env.MEDIA.delete(objectKey);
-    } catch {
-      console.error("Failed to remove an uncommitted Scan object", mediaId);
-    }
+    await removeUncommittedScanRows(context.env.DB, mediaId);
+    await removeUncommittedScanObjects(context.env.MEDIA, objectKey, readabilityObjectKey);
     const response = scanWriteError(error);
     return context.json({ error: response.error }, response.status);
   }
@@ -3790,7 +4143,7 @@ app.post("/api/songs/:songId/scans/:scanId/media", requireRole("editor"), async 
     return context.json({ error: "empty_scan_file", fields: { file: ["The selected file is empty"] } }, 400);
   }
   if (fileValue.size > MAX_SCAN_UPLOAD_BYTES) {
-    return context.json({ error: "scan_file_too_large", fields: { file: ["The maximum Scan size is 25 MB"] } }, 413);
+    return context.json({ error: "scan_file_too_large", fields: { file: ["The maximum Scan size is 20 MB"] } }, 413);
   }
 
   const parsed = parseScanRevision({
@@ -3810,7 +4163,7 @@ app.post("/api/songs/:songId/scans/:scanId/media", requireRole("editor"), async 
     JOIN songs ON songs.id = scans.song_id
     JOIN media_objects ON media_objects.id = scans.media_id
     WHERE scans.id = ? AND scans.song_id = ? AND scans.trashed_at IS NULL AND songs.trashed_at IS NULL
-  `).bind(scanId, songId).first<{ revision: number; media_id: string; sha256: string }>();
+  `).bind(scanId, songId).first<{ revision: number; media_id: string; sha256: string | null }>();
 
   if (!currentScan) return context.json({ error: "scan_not_found" }, 404);
   if (currentScan.revision !== parsed.data.revision) return context.json({ error: "scan_conflict" }, 409);
@@ -3833,21 +4186,45 @@ app.post("/api/songs/:songId/scans/:scanId/media", requireRole("editor"), async 
   if (fingerprint === currentScan.sha256) {
     return context.json({ error: "duplicate_scan_file", fields: { file: ["This file is identical to the current scan media"] } }, 409);
   }
+  if (await loadDuplicateScan(context.env.DB, fingerprint)) {
+    return context.json({
+      error: "duplicate_scan_file",
+      fields: { file: ["This file is already retained elsewhere in the library"] },
+    }, 409);
+  }
+
+  let readability: ScanReadabilityDerivative;
+  try {
+    readability = await createScanReadabilityDerivative(context.env.IMAGES, bytes);
+  } catch (error) {
+    const mapped = scanReadabilityError(error);
+    return context.json({ error: mapped.error }, mapped.status);
+  }
 
   const mediaId = crypto.randomUUID();
   const historyId = crypto.randomUUID();
   const objectKey = `scans/${mediaId}.${imageType.extension}`;
+  const readabilityObjectKey = scanReadabilityObjectKey(mediaId);
   const filename = safeUploadFilename(fileValue.name, imageType.extension);
   const timestamp = new Date().toISOString();
 
   try {
-    await context.env.MEDIA.put(objectKey, bytes, {
-      httpMetadata: {
-        contentType: imageType.mimeType,
-        contentDisposition: "inline",
-      },
-    });
+    await Promise.all([
+      context.env.MEDIA.put(objectKey, bytes, {
+        httpMetadata: {
+          contentType: imageType.mimeType,
+          contentDisposition: "inline",
+        },
+      }),
+      context.env.MEDIA.put(readabilityObjectKey, readability.bytes, {
+        httpMetadata: {
+          contentType: readability.mimeType,
+          contentDisposition: "inline",
+        },
+      }),
+    ]);
   } catch {
+    await removeUncommittedScanObjects(context.env.MEDIA, objectKey, readabilityObjectKey);
     return context.json({ error: "scan_storage_failed" }, 503);
   }
 
@@ -3861,6 +4238,16 @@ app.post("/api/songs/:songId/scans/:scanId/media", requireRole("editor"), async 
       `).bind(
         mediaId, objectKey, filename, imageType.mimeType, bytes.byteLength, fingerprint,
         timestamp, actor,
+      ),
+      scanReadabilityInsert(
+        context.env.DB,
+        mediaId,
+        fingerprint,
+        bytes.byteLength,
+        readabilityObjectKey,
+        readability,
+        timestamp,
+        actor,
       ),
       context.env.DB.prepare(`
         INSERT INTO scan_media_history (
@@ -3883,14 +4270,14 @@ app.post("/api/songs/:songId/scans/:scanId/media", requireRole("editor"), async 
           AND EXISTS (SELECT 1 FROM scans WHERE id = ? AND song_id = songs.id)
       `).bind(timestamp, actor, songId, scanId),
     ]);
-    if (results[2].meta.changes === 0) {
-      await context.env.DB.prepare(`DELETE FROM media_objects WHERE id = ?`).bind(mediaId).run();
-      await context.env.MEDIA.delete(objectKey);
+    if (results[3].meta.changes === 0) {
+      await removeUncommittedScanRows(context.env.DB, mediaId);
+      await removeUncommittedScanObjects(context.env.MEDIA, objectKey, readabilityObjectKey);
       return context.json({ error: "scan_conflict" }, 409);
     }
   } catch (error) {
-    await context.env.DB.prepare(`DELETE FROM media_objects WHERE id = ?`).bind(mediaId).run();
-    await context.env.MEDIA.delete(objectKey);
+    await removeUncommittedScanRows(context.env.DB, mediaId);
+    await removeUncommittedScanObjects(context.env.MEDIA, objectKey, readabilityObjectKey);
     const mapped = scanWriteError(error);
     return context.json({ error: mapped.error }, mapped.status);
   }
@@ -4689,6 +5076,47 @@ app.get("/api/songs/:songId", async (context) => {
   });
 });
 
+app.get("/api/scans/:scanId/image", async (context) => {
+  const scan = await context.env.DB.prepare(`
+    SELECT
+      COALESCE(scan_readability_derivatives.object_key, media_objects.object_key) AS objectKey,
+      CASE
+        WHEN scan_readability_derivatives.source_media_id IS NULL THEN media_objects.mime_type
+        ELSE scan_readability_derivatives.mime_type
+      END AS mimeType,
+      media_objects.original_filename AS filename,
+      CASE WHEN scan_readability_derivatives.source_media_id IS NULL THEN 0 ELSE 1 END AS isDerivative
+    FROM scans
+    JOIN songs ON songs.id = scans.song_id
+    JOIN media_objects ON media_objects.id = scans.media_id
+    LEFT JOIN scan_readability_derivatives
+      ON scan_readability_derivatives.source_media_id = media_objects.id
+    WHERE scans.id = ?
+      AND scans.trashed_at IS NULL
+      AND songs.trashed_at IS NULL
+      AND media_objects.state = 'active'
+  `).bind(context.req.param("scanId")).first<{
+    objectKey: string;
+    mimeType: string | null;
+    filename: string;
+    isDerivative: number;
+  }>();
+  if (!scan) return context.json({ error: "scan_not_found" }, 404);
+
+  const object = await context.env.MEDIA.get(scan.objectKey);
+  if (!object) return context.json({ error: "scan_file_unavailable" }, 404);
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("Content-Type", scan.mimeType ?? "application/octet-stream");
+  headers.set("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(scan.filename)}`);
+  headers.set("Content-Length", String(object.size));
+  headers.set("Cache-Control", "private, max-age=3600");
+  headers.set("ETag", object.httpEtag);
+  headers.set("X-Scan-Representation", scan.isDerivative === 1 ? "readability" : "original");
+  return new Response(object.body, { headers });
+});
+
 app.get("/api/media/:mediaId", async (context) => {
   const mediaId = context.req.param("mediaId");
   const media = await context.env.DB.prepare(`
@@ -4758,6 +5186,287 @@ app.get("/api/media/:mediaId", async (context) => {
   return new Response(object.body, { headers });
 });
 
+type PendingScanMaintenanceRow = {
+  mediaId: string;
+  objectKey: string;
+  byteSize: number;
+  sha256: string | null;
+};
+
+type ScanMaintenanceStage = "source_read" | "source_verify" | "derivative" | "commit";
+
+const SCAN_MAINTENANCE_LEASE_MINUTES = 10;
+
+async function recordScanMaintenanceFailure(
+  database: D1Database,
+  mediaId: string,
+  stage: ScanMaintenanceStage,
+  errorCode: string,
+): Promise<void> {
+  const timestamp = new Date().toISOString();
+  await database.prepare(`
+    INSERT INTO scan_maintenance_failures (
+      media_id, stage, error_code, attempt_count,
+      first_failed_at, last_failed_at, retry_after
+    ) VALUES (?, ?, ?, 1, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', ?, '+1 day'))
+    ON CONFLICT(media_id) DO UPDATE SET
+      stage = excluded.stage,
+      error_code = excluded.error_code,
+      attempt_count = scan_maintenance_failures.attempt_count + 1,
+      last_failed_at = excluded.last_failed_at,
+      retry_after = excluded.retry_after
+  `).bind(mediaId, stage, errorCode, timestamp, timestamp, timestamp).run();
+}
+
+async function pendingScanMaintenance(database: D1Database): Promise<PendingScanMaintenanceRow | null> {
+  return database.prepare(`
+    SELECT
+      media_objects.id AS mediaId,
+      media_objects.object_key AS objectKey,
+      media_objects.byte_size AS byteSize,
+      media_objects.sha256
+    FROM media_objects
+    LEFT JOIN scan_readability_derivatives
+      ON scan_readability_derivatives.source_media_id = media_objects.id
+    LEFT JOIN scan_maintenance_failures
+      ON scan_maintenance_failures.media_id = media_objects.id
+    LEFT JOIN scan_maintenance_leases
+      ON scan_maintenance_leases.media_id = media_objects.id
+      AND scan_maintenance_leases.lease_expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE media_objects.kind = 'scan'
+      AND (
+        media_objects.sha256 IS NULL
+        OR scan_readability_derivatives.source_media_id IS NULL
+      )
+      AND (
+        scan_maintenance_failures.media_id IS NULL
+        OR scan_maintenance_failures.retry_after <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      )
+      AND scan_maintenance_leases.media_id IS NULL
+    ORDER BY media_objects.id
+    LIMIT 1
+  `).first<PendingScanMaintenanceRow>();
+}
+
+async function claimScanMaintenance(
+  database: D1Database,
+  mediaId: string,
+  leaseToken: string,
+): Promise<boolean> {
+  const leasedAt = new Date().toISOString();
+  const result = await database.prepare(`
+    INSERT INTO scan_maintenance_leases (
+      media_id, lease_token, leased_at, lease_expires_at
+    ) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', ?, '+${SCAN_MAINTENANCE_LEASE_MINUTES} minutes'))
+    ON CONFLICT(media_id) DO UPDATE SET
+      lease_token = excluded.lease_token,
+      leased_at = excluded.leased_at,
+      lease_expires_at = excluded.lease_expires_at
+    WHERE scan_maintenance_leases.lease_expires_at <= excluded.leased_at
+  `).bind(mediaId, leaseToken, leasedAt, leasedAt).run();
+  return result.meta.changes === 1;
+}
+
+async function releaseScanMaintenance(
+  database: D1Database,
+  mediaId: string,
+  leaseToken: string,
+): Promise<void> {
+  try {
+    await database.prepare(`
+      DELETE FROM scan_maintenance_leases
+      WHERE media_id = ? AND lease_token = ?
+    `).bind(mediaId, leaseToken).run();
+  } catch {
+    console.error("Failed to release a Scan maintenance lease");
+  }
+}
+
+async function commitScanFingerprint(
+  database: D1Database,
+  pending: PendingScanMaintenanceRow,
+  sourceSha256: string,
+): Promise<boolean> {
+  if (pending.sha256 === sourceSha256) return true;
+  try {
+    await database.prepare(`
+      UPDATE media_objects
+      SET sha256 = ?
+      WHERE id = ?
+        AND kind = 'scan'
+        AND object_key = ?
+        AND byte_size = ?
+        AND sha256 IS NULL
+    `).bind(
+      sourceSha256,
+      pending.mediaId,
+      pending.objectKey,
+      pending.byteSize,
+    ).run();
+    const verified = await database.prepare(`
+      SELECT 1 AS valid
+      FROM media_objects
+      JOIN scan_fingerprint_members
+        ON scan_fingerprint_members.media_id = media_objects.id
+      WHERE media_objects.id = ?
+        AND media_objects.kind = 'scan'
+        AND media_objects.object_key = ?
+        AND media_objects.byte_size = ?
+        AND media_objects.sha256 = ?
+        AND scan_fingerprint_members.sha256 = ?
+    `).bind(
+      pending.mediaId,
+      pending.objectKey,
+      pending.byteSize,
+      sourceSha256,
+      sourceSha256,
+    ).first<{ valid: number }>();
+    return Boolean(verified);
+  } catch {
+    return false;
+  }
+}
+
+async function processClaimedScan(
+  env: Pick<Bindings, "DB" | "MEDIA" | "IMAGES">,
+  pending: PendingScanMaintenanceRow,
+): Promise<"processed" | "failed"> {
+  let source: R2ObjectBody | null;
+  try {
+    source = await env.MEDIA.get(pending.objectKey);
+  } catch {
+    await recordScanMaintenanceFailure(env.DB, pending.mediaId, "source_read", "source_storage_unavailable");
+    return "failed";
+  }
+  if (!source) {
+    await recordScanMaintenanceFailure(env.DB, pending.mediaId, "source_read", "source_file_unavailable");
+    return "failed";
+  }
+
+  let sourceBytes: Uint8Array;
+  try {
+    sourceBytes = new Uint8Array(await source.arrayBuffer());
+  } catch {
+    await recordScanMaintenanceFailure(env.DB, pending.mediaId, "source_read", "source_read_failed");
+    return "failed";
+  }
+  if (sourceBytes.byteLength !== pending.byteSize || !inspectScanImage(sourceBytes)) {
+    await recordScanMaintenanceFailure(env.DB, pending.mediaId, "source_verify", "source_precondition_failed");
+    return "failed";
+  }
+
+  const sourceSha256 = await sha256Hex(sourceBytes);
+  if (pending.sha256 !== null && pending.sha256 !== sourceSha256) {
+    await recordScanMaintenanceFailure(env.DB, pending.mediaId, "source_verify", "source_hash_mismatch");
+    return "failed";
+  }
+  if (!await commitScanFingerprint(env.DB, pending, sourceSha256)) {
+    await recordScanMaintenanceFailure(env.DB, pending.mediaId, "commit", "scan_fingerprint_commit_failed");
+    return "failed";
+  }
+
+  let readability: ScanReadabilityDerivative;
+  try {
+    readability = await createScanReadabilityDerivative(env.IMAGES, sourceBytes);
+  } catch (error) {
+    const code = error instanceof ScanReadabilityError
+      ? error.code
+      : "scan_readability_unavailable";
+    await recordScanMaintenanceFailure(env.DB, pending.mediaId, "derivative", code);
+    return "failed";
+  }
+
+  const readabilityObjectKey = scanReadabilityObjectKey(pending.mediaId);
+  try {
+    await env.MEDIA.put(readabilityObjectKey, readability.bytes, {
+      httpMetadata: {
+        contentType: readability.mimeType,
+        contentDisposition: "inline",
+      },
+    });
+  } catch {
+    await recordScanMaintenanceFailure(env.DB, pending.mediaId, "derivative", "derivative_storage_failed");
+    return "failed";
+  }
+
+  const timestamp = new Date().toISOString();
+  try {
+    await env.DB.batch([
+      scanReadabilityInsert(
+        env.DB,
+        pending.mediaId,
+        sourceSha256,
+        pending.byteSize,
+        readabilityObjectKey,
+        readability,
+        timestamp,
+        "system:scan-maintenance",
+      ),
+      env.DB.prepare(`DELETE FROM scan_maintenance_failures WHERE media_id = ?`).bind(pending.mediaId),
+    ]);
+    const verified = await env.DB.prepare(`
+      SELECT 1 AS valid
+      FROM media_objects
+      JOIN scan_readability_derivatives
+        ON scan_readability_derivatives.source_media_id = media_objects.id
+      WHERE media_objects.id = ?
+        AND media_objects.sha256 = ?
+        AND scan_readability_derivatives.source_sha256 = ?
+        AND scan_readability_derivatives.sha256 = ?
+        AND scan_readability_derivatives.object_key = ?
+    `).bind(
+      pending.mediaId,
+      sourceSha256,
+      sourceSha256,
+      readability.sha256,
+      readabilityObjectKey,
+    ).first<{ valid: number }>();
+    if (!verified) throw new Error("scan_maintenance_postcondition_failed");
+  } catch {
+    try {
+      await env.MEDIA.delete(readabilityObjectKey);
+    } catch {
+      console.error("Failed to remove an uncommitted Scan readability object");
+    }
+    await recordScanMaintenanceFailure(env.DB, pending.mediaId, "commit", "scan_maintenance_commit_failed");
+    return "failed";
+  }
+
+  return "processed";
+}
+
+export async function processOnePendingScan(env: Pick<Bindings, "DB" | "MEDIA" | "IMAGES">): Promise<
+  "complete" | "processed" | "failed"
+> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const pending = await pendingScanMaintenance(env.DB);
+    if (!pending) return "complete";
+    const leaseToken = crypto.randomUUID();
+    if (!await claimScanMaintenance(env.DB, pending.mediaId, leaseToken)) continue;
+    try {
+      return await processClaimedScan(env, pending);
+    } finally {
+      await releaseScanMaintenance(env.DB, pending.mediaId, leaseToken);
+    }
+  }
+  return "complete";
+}
+
+export async function processPendingScans(
+  env: Pick<Bindings, "DB" | "MEDIA" | "IMAGES">,
+  limit = 5,
+): Promise<{ processed: number; failed: number; complete: boolean }> {
+  let processed = 0;
+  let failed = 0;
+  for (let index = 0; index < limit; index += 1) {
+    const result = await processOnePendingScan(env);
+    if (result === "complete") return { processed, failed, complete: true };
+    if (result === "processed") processed += 1;
+    else failed += 1;
+  }
+  return { processed, failed, complete: false };
+}
+
 app.notFound((context) => {
   return context.json(
     {
@@ -4767,4 +5476,13 @@ app.notFound((context) => {
   );
 });
 
-export default app;
+export default {
+  fetch(request, env, executionContext) {
+    return app.fetch(request, env, executionContext);
+  },
+  scheduled(_controller, env, executionContext) {
+    executionContext.waitUntil(processPendingScans(env, 5).then((result) => {
+      console.log(JSON.stringify({ event: "scan_maintenance", ...result }));
+    }));
+  },
+} satisfies ExportedHandler<Bindings>;

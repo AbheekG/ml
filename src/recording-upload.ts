@@ -17,6 +17,10 @@ export type DuplicateRecording = {
   trashed: boolean | null;
 };
 
+export type RecordingUploadIntent =
+  | { kind: "create"; targetRecordingId: null; targetRecordingRevision: null }
+  | { kind: "replace"; targetRecordingId: string; targetRecordingRevision: number };
+
 export type RecordingUploadSession = {
   id: string;
   songId: string;
@@ -29,6 +33,7 @@ export type RecordingUploadSession = {
   revision: number;
   expiresAt: string;
   recordingId: string | null;
+  intent: RecordingUploadIntent | null;
   duplicateRecording?: DuplicateRecording;
 };
 
@@ -122,6 +127,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   recording_upload_expired: "This upload expired. Start a new upload with the original file.",
   recording_upload_not_found: "This upload is no longer available.",
   recording_upload_stored_object_mismatch: "The stored audio did not match the selected file size and needs administrator review.",
+  recording_upload_intent_mismatch: "This older upload cannot be finalized automatically. Dismiss it or ask an administrator to review it.",
+  recording_upload_cannot_discard: "This upload is not in a completed state that can be dismissed.",
+  recording_upload_discard_failed: "The upload could not be dismissed safely.",
+  recording_processing_active: "Wait for the current audio processing to finish before replacing this Recording.",
   duplicate_recording_description: "This Song already has a Recording with that description. Enter a different description to finish.",
   recording_upload_network_error: "The connection was interrupted. The server-held upload state is safe to retry.",
   recording_upload_invalid_response: "The server returned an invalid upload response. Stop and retry after review.",
@@ -203,11 +212,36 @@ function parseDuplicateRecording(value: unknown): DuplicateRecording | undefined
   return { id, songId, trashed };
 }
 
+function parseRecordingUploadIntent(value: unknown): RecordingUploadIntent | null | undefined {
+  if (value === null || value === undefined) return value ?? null;
+  if (!isRecord(value)) return undefined;
+  if (
+    value.kind === "create"
+    && value.targetRecordingId === null
+    && value.targetRecordingRevision === null
+  ) {
+    return { kind: "create", targetRecordingId: null, targetRecordingRevision: null };
+  }
+  if (
+    value.kind === "replace"
+    && typeof value.targetRecordingId === "string"
+    && Number.isSafeInteger(value.targetRecordingRevision)
+  ) {
+    return {
+      kind: "replace",
+      targetRecordingId: value.targetRecordingId,
+      targetRecordingRevision: value.targetRecordingRevision as number,
+    };
+  }
+  return undefined;
+}
+
 function parseUpload(value: unknown): RecordingUploadSession {
   if (!isRecord(value)) throw invalidResponse();
   const status = value.status;
   const completedParts = value.completedParts;
   const recordingId = value.recordingId;
+  const intent = parseRecordingUploadIntent(value.intent);
   if (
     typeof value.id !== "string"
     || typeof value.songId !== "string"
@@ -222,6 +256,7 @@ function parseUpload(value: unknown): RecordingUploadSession {
     || !Number.isSafeInteger(value.revision)
     || typeof value.expiresAt !== "string"
     || !(typeof recordingId === "string" || recordingId === null)
+    || intent === undefined
   ) throw invalidResponse();
 
   const duplicate = value.duplicateRecording === undefined
@@ -240,6 +275,7 @@ function parseUpload(value: unknown): RecordingUploadSession {
     revision: value.revision as number,
     expiresAt: value.expiresAt,
     recordingId,
+    intent,
     ...(duplicate ? { duplicateRecording: duplicate } : {}),
   };
 }
@@ -358,6 +394,7 @@ async function loadUpload(
 async function createUpload(
   input: RecordingUploadInput,
   fetcher: typeof fetch,
+  replaceTarget?: { recordingId: string; revision: number },
   signal?: AbortSignal,
 ): Promise<RecordingUploadSession> {
   const payload = {
@@ -368,6 +405,12 @@ async function createUpload(
     description: input.description,
     recordedOn: input.recordedOn,
     creditPersonIds: input.creditPersonIds,
+    ...(replaceTarget
+      ? {
+          targetRecordingId: replaceTarget.recordingId,
+          targetRecordingRevision: replaceTarget.revision,
+        }
+      : {}),
   };
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -479,19 +522,21 @@ async function finalizeUpload(
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            revision: session.revision,
-            ...(options.descriptionOverride === undefined
-              ? {}
-              : { description: options.descriptionOverride }),
-            ...(options.replaceTarget
-              ? {
-                  targetRecordingId: options.replaceTarget.recordingId,
-                  targetRecordingRevision: options.replaceTarget.revision,
-                  sessionRevision: session.revision,
-                }
-              : {}),
-          }),
+          body: JSON.stringify(options.replaceTarget
+            ? {
+                targetRecordingId: options.replaceTarget.recordingId,
+                targetRecordingRevision: options.replaceTarget.revision,
+                sessionRevision: session.revision,
+                ...(options.descriptionOverride === undefined
+                  ? {}
+                  : { description: options.descriptionOverride }),
+              }
+            : {
+                revision: session.revision,
+                ...(options.descriptionOverride === undefined
+                  ? {}
+                  : { description: options.descriptionOverride }),
+              }),
           signal: options.signal,
         },
       ));
@@ -516,16 +561,13 @@ async function finalizeUpload(
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              revision: session.revision,
-              ...(options.replaceTarget
-                ? {
-                    targetRecordingId: options.replaceTarget.recordingId,
-                    targetRecordingRevision: options.replaceTarget.revision,
-                    sessionRevision: session.revision,
-                  }
-                : {}),
-            }),
+            body: JSON.stringify(options.replaceTarget
+              ? {
+                  targetRecordingId: options.replaceTarget.recordingId,
+                  targetRecordingRevision: options.replaceTarget.revision,
+                  sessionRevision: session.revision,
+                }
+              : { revision: session.revision }),
             signal: options.signal,
           },
         );
@@ -550,7 +592,7 @@ export async function uploadRecordingOriginal(
       session = await loadUpload(fetcher, session.id, options.signal);
     } else {
       reportProgress(options, "creating", null, input.file.size);
-      session = await createUpload(input, fetcher, options.signal);
+      session = await createUpload(input, fetcher, options.replaceTarget, options.signal);
     }
     validateSessionForFile(session, input);
 
@@ -614,6 +656,109 @@ export async function abortRecordingUpload(
   return parseUploadPayload(await requestJson(
     fetcher,
     `/api/recording-uploads/${encodeURIComponent(upload.id)}/abort`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: upload.revision }),
+      signal,
+    },
+  ));
+}
+
+export async function listRecoverableRecordingUploads(
+  songId: string,
+  fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
+): Promise<RecordingUploadSession[]> {
+  const payload = await requestJson(
+    fetcher,
+    `/api/songs/${encodeURIComponent(songId)}/recording-uploads`,
+    { method: "GET", signal },
+  );
+  if (!isRecord(payload) || !Array.isArray(payload.uploads)) throw invalidResponse();
+  return payload.uploads.map(parseUpload);
+}
+
+export async function discardRecordingUpload(
+  upload: RecordingUploadSession,
+  fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
+): Promise<RecordingUploadSession> {
+  return parseUploadPayload(await requestJson(
+    fetcher,
+    `/api/recording-uploads/${encodeURIComponent(upload.id)}/discard`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: upload.revision }),
+      signal,
+    },
+  ));
+}
+
+export async function finishStoredRecordingUpload(
+  upload: RecordingUploadSession,
+  options: Pick<RecordingUploadOptions, "fetcher" | "signal" | "replaceTarget"> = {},
+): Promise<RecordingUploadResult> {
+  if (upload.status !== "stored" && upload.status !== "finalized") {
+    throw new RecordingUploadError(
+      ERROR_MESSAGES.recording_upload_terminal,
+      409,
+      "recording_upload_terminal",
+    );
+  }
+  if (
+    upload.intent?.kind === "replace"
+    && (
+      !options.replaceTarget
+      || options.replaceTarget.recordingId !== upload.intent.targetRecordingId
+      || options.replaceTarget.revision !== upload.intent.targetRecordingRevision
+    )
+  ) {
+    throw invalidResponse();
+  }
+  const fetcher = options.fetcher ?? fetch;
+  const replaceTarget = options.replaceTarget;
+  const payload = await requestJson(
+    fetcher,
+    replaceTarget
+      ? `/api/songs/${encodeURIComponent(upload.songId)}/recording-uploads/${encodeURIComponent(upload.id)}/replace`
+      : `/api/recording-uploads/${encodeURIComponent(upload.id)}/finalize`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(replaceTarget
+        ? {
+            targetRecordingId: replaceTarget.recordingId,
+            targetRecordingRevision: replaceTarget.revision,
+            sessionRevision: upload.revision,
+          }
+        : { revision: upload.revision }),
+      signal: options.signal,
+    },
+  );
+  return parseFinalizedPayload(payload);
+}
+
+export async function completeServerHeldRecordingUpload(
+  upload: RecordingUploadSession,
+  fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
+): Promise<RecordingUploadSession> {
+  if (
+    !["open", "completing", "stored"].includes(upload.status)
+    || (upload.status === "open" && upload.completedParts.length !== upload.partCount)
+  ) {
+    throw new RecordingUploadError(
+      ERROR_MESSAGES.recording_upload_terminal,
+      409,
+      "recording_upload_terminal",
+    );
+  }
+  if (upload.status === "stored") return upload;
+  return parseUploadPayload(await requestJson(
+    fetcher,
+    `/api/recording-uploads/${encodeURIComponent(upload.id)}/complete`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

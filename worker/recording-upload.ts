@@ -14,7 +14,17 @@ const createUploadEnvelopeSchema = z.object({
   description: z.string().max(10_000).nullable().optional(),
   recordedOn: z.string().nullable().optional(),
   creditPersonIds: z.array(z.string()).optional(),
-}).strict();
+  targetRecordingId: z.string().min(1).max(255).optional(),
+  targetRecordingRevision: z.number().int().positive().optional(),
+}).strict().superRefine((value, context) => {
+  if ((value.targetRecordingId === undefined) !== (value.targetRecordingRevision === undefined)) {
+    context.addIssue({
+      code: "custom",
+      path: ["targetRecordingId"],
+      message: "Replacement target and revision must be provided together",
+    });
+  }
+});
 
 const recordingUploadRevisionSchema = z.object({
   revision: z.number().int().positive(),
@@ -29,14 +39,14 @@ const recordingUploadFinalizationSchema = z.object({
 }).strict();
 
 const recordingUploadReplacementSchema = z.object({
-  targetRecordingId: z.string(),
+  targetRecordingId: z.string().min(1).max(255),
   targetRecordingRevision: z.number().int().positive(),
   sessionRevision: z.number().int().positive(),
   description: z.string()
     .max(10_000, "Recording description is too long")
     .refine((value) => value.trim().length > 0, "Recording description must not be blank")
     .optional(),
-});
+}).strict();
 
 export type RecordingUploadCreateInput = {
   clientMutationId: string;
@@ -47,6 +57,7 @@ export type RecordingUploadCreateInput = {
   description: string | null;
   recordedOn: string | null;
   creditPersonIds: string[];
+  replaceTarget: { recordingId: string; revision: number } | null;
 };
 
 export type RecordingUploadParseResult =
@@ -103,6 +114,12 @@ export function parseRecordingUploadCreate(value: unknown): RecordingUploadParse
       mimeTypeHint: mimeTypeHint(envelope.data.mimeType),
       byteSize: shape.byteSize,
       partCount: shape.partCount,
+      replaceTarget: envelope.data.targetRecordingId === undefined
+        ? null
+        : {
+            recordingId: envelope.data.targetRecordingId,
+            revision: envelope.data.targetRecordingRevision!,
+          },
       ...metadata.data,
     },
   };

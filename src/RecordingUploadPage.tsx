@@ -11,6 +11,10 @@ import {
   MAX_RECORDING_UPLOAD_BYTES,
   RecordingUploadError,
   abortRecordingUpload,
+  completeServerHeldRecordingUpload,
+  discardRecordingUpload,
+  finishStoredRecordingUpload,
+  listRecoverableRecordingUploads,
   uploadRecordingOriginal,
   type DuplicateRecording,
   type RecordingUploadInput,
@@ -57,6 +61,7 @@ export function RecordingUploadPage({
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [replaceTarget, setReplaceTarget] = useState<{ recordingId: string; revision: number } | null>(null);
+  const [recoverableUploads, setRecoverableUploads] = useState<RecordingUploadSession[]>([]);
   const activeRequest = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -67,16 +72,29 @@ export function RecordingUploadPage({
         return;
       }
       try {
-        const [editorOptions, song] = await Promise.all([
+        const [editorOptions, song, serverUploads] = await Promise.all([
           loadRecordingEditorOptions(),
           refreshSong(songId),
+          listRecoverableRecordingUploads(songId).catch(() => []),
         ]);
         if (!cancelled) {
           setOptions(editorOptions);
           setSongTitle(song.titleLatin);
+          setRecoverableUploads(serverUploads.filter((candidate) => (
+            candidate.intent === null
+            || (mode === "create" && candidate.intent.kind === "create")
+            || (
+              mode === "replace"
+              && candidate.intent.kind === "replace"
+              && candidate.intent.targetRecordingId === recordingId
+            )
+          )));
           if (mode === "replace") {
             const recording = song.recordings.find((r) => r.id === recordingId);
             if (!recording) throw new Error("This Recording is no longer available.");
+            if (recording.processingState === "processing") {
+              throw new Error("Wait for the current audio processing to finish before replacing this Recording.");
+            }
             setDescription(recording.description);
             setRecordedOn(recording.recordedOn || "");
             setVocalistIds(recording.credits.filter((c) => c.role === "vocals").map((c) => c.personId));
@@ -96,7 +114,7 @@ export function RecordingUploadPage({
     }
     void load();
     return () => { cancelled = true; };
-  }, [canEdit, isOnline, songId]);
+  }, [canEdit, isOnline, mode, recordingId, songId]);
 
   useEffect(() => {
     if (!isOnline) activeRequest.current?.abort();
@@ -215,6 +233,7 @@ export function RecordingUploadPage({
     activeRequest.current = controller;
     try {
       await abortRecordingUpload(upload, fetch, controller.signal);
+      setRecoverableUploads((current) => current.filter((candidate) => candidate.id !== upload.id));
       setAttempt(null);
       setUpload(null);
       setProgress(null);
@@ -233,6 +252,102 @@ export function RecordingUploadPage({
       }
     } finally {
       if (activeRequest.current === controller) activeRequest.current = null;
+      setIsSaving(false);
+    }
+  }
+
+  function selectRecoverableUpload(candidate: RecordingUploadSession): void {
+    setUpload(candidate);
+    setProgress(null);
+    setError(null);
+    setNotice("Reselect the same original file. Upload will continue only from server-verified parts.");
+  }
+
+  async function finishRecoverableUpload(candidate: RecordingUploadSession): Promise<void> {
+    if (!isOnline || canEdit !== true || isSaving) return;
+    setIsSaving(true);
+    setError(null);
+    setNotice(null);
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    try {
+      const stored = candidate.status === "stored"
+        ? candidate
+        : await completeServerHeldRecordingUpload(candidate, fetch, controller.signal);
+      if (stored.status === "duplicate" && stored.duplicateRecording) {
+        setDuplicate(stored.duplicateRecording);
+        setUpload(stored);
+        setRecoverableUploads((current) => current.map((item) => (
+          item.id === stored.id ? stored : item
+        )));
+        return;
+      }
+      const replacement = stored.intent?.kind === "replace"
+        ? {
+            recordingId: stored.intent.targetRecordingId,
+            revision: stored.intent.targetRecordingRevision,
+          }
+        : undefined;
+      const result = await finishStoredRecordingUpload(stored, {
+        signal: controller.signal,
+        replaceTarget: replacement,
+      });
+      if (result.kind === "duplicate") {
+        setDuplicate(result.duplicateRecording);
+        setUpload(result.upload);
+        setRecoverableUploads((current) => current.map((item) => (
+          item.id === result.upload.id ? result.upload : item
+        )));
+        return;
+      }
+      await refreshOfflineLibrary().catch(() => undefined);
+      navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
+    } catch (finishError) {
+      setError(finishError instanceof Error
+        ? finishError.message
+        : "The server-held Recording upload could not be finished.");
+    } finally {
+      if (activeRequest.current === controller) activeRequest.current = null;
+      setIsSaving(false);
+    }
+  }
+
+  async function discardRecoverableUpload(candidate: RecordingUploadSession): Promise<void> {
+    if (!isOnline || canEdit !== true || isSaving) return;
+    if (!window.confirm(
+      "Dismiss this completed upload? Its private object will be retained for administrator review, but it will no longer block this Song.",
+    )) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await discardRecordingUpload(candidate);
+      setRecoverableUploads((current) => current.filter((item) => item.id !== candidate.id));
+      if (upload?.id === candidate.id) setUpload(null);
+      setNotice("The upload was dismissed from active work. Its private object remains retained for review.");
+    } catch (discardError) {
+      setError(discardError instanceof Error
+        ? discardError.message
+        : "The completed upload could not be dismissed.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function abortRecoverableUpload(candidate: RecordingUploadSession): Promise<void> {
+    if (!isOnline || canEdit !== true || isSaving) return;
+    if (!window.confirm("Cancel this incomplete upload? It cannot be resumed afterward.")) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await abortRecordingUpload(candidate);
+      setRecoverableUploads((current) => current.filter((item) => item.id !== candidate.id));
+      if (upload?.id === candidate.id) setUpload(null);
+      setNotice("The incomplete private upload was cancelled.");
+    } catch (abortError) {
+      setError(abortError instanceof Error
+        ? abortError.message
+        : "The incomplete upload could not be cancelled.");
+    } finally {
       setIsSaving(false);
     }
   }
@@ -264,6 +379,51 @@ export function RecordingUploadPage({
 
       {error && <p className="catalog-message error-message" role="alert">{error}</p>}
       {notice && <p className="catalog-message" role="status">{notice}</p>}
+
+      {!attempt && recoverableUploads.length > 0 && (
+        <section className="form-card" aria-labelledby="recover-recording-uploads-title">
+          <h2 id="recover-recording-uploads-title">Server-held uploads</h2>
+          <p>These private uploads survived an interrupted page or connection.</p>
+          <div className="choice-grid">
+            {recoverableUploads.map((candidate) => {
+              const canFinish = candidate.intent !== null && (
+                candidate.status === "stored"
+                || candidate.status === "completing"
+                || (
+                  candidate.status === "open"
+                  && candidate.completedParts.length === candidate.partCount
+                )
+              );
+              const needsFile = candidate.intent !== null
+                && candidate.status === "open"
+                && candidate.completedParts.length < candidate.partCount;
+              return (
+                <article className="recording-upload-notice" key={candidate.id}>
+                  <div>
+                    <strong>{candidate.filename}</strong>
+                    <span>{formatRecordingBytes(candidate.byteSize)} · {candidate.status}</span>
+                    {candidate.intent === null && <span>This older session needs review before it can be finalized.</span>}
+                  </div>
+                  <div className="recording-upload-notice-actions">
+                    {canFinish && (
+                      <button className="primary-action" type="button" disabled={isSaving} onClick={() => { void finishRecoverableUpload(candidate); }}>Finish</button>
+                    )}
+                    {needsFile && (
+                      <button className="secondary-action" type="button" disabled={isSaving} onClick={() => selectRecoverableUpload(candidate)}>Resume</button>
+                    )}
+                    {(candidate.status === "creating" || candidate.status === "open") && (
+                      <button className="danger-action" type="button" disabled={isSaving} onClick={() => { void abortRecoverableUpload(candidate); }}>Cancel upload</button>
+                    )}
+                    {(candidate.status === "stored" || candidate.status === "duplicate") && (
+                      <button className="danger-action" type="button" disabled={isSaving} onClick={() => { void discardRecoverableUpload(candidate); }}>Dismiss</button>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {duplicate && (
         <section className="recording-upload-notice" aria-labelledby="duplicate-recording-title">

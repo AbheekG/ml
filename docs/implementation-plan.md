@@ -2,14 +2,29 @@
 
 Status: approved direction; execute iteratively and validate each phase on real data and devices.
 
+Current protected-staging checkpoint (2026-07-16): the vertical slice, online
+catalog/child editing, private Scan create/replace, and Recording
+create/replace are implemented. Audio finalization now records an immutable
+dispatch attempt and starts the bounded Cloud Run Job through keyless
+Cloudflare Access-to-Google Workload Identity Federation; the enabled
+15-minute Scheduler is a reliable/cost-bounded fallback. The old Cloudflare-held Google
+JSON key is deleted and the old trigger service account is disabled. Imported
+Scan sources are being reconciled into the global fingerprint registry and
+private 2400-pixel JPEG readability derivatives through bounded, leased daily
+maintenance. Production remains absent; real-device media/derivative acceptance
+and explicit review of historical pre-intent upload sessions remain gates.
+
 ## Current execution order
 
-The core read/edit/recovery flows, safe new-Scan upload, local catalog filters/sorting, and field-aware offline search now work in staging. The owner accepted relevance-ranked phonetic/transliteration search with stronger title/alias priority, literal-only lower-ranked metadata/lyrics, bounded typos, and local joined/split-word alignment. A field-scope control was not needed for this slice and remains evidence-driven future work. Continue with broader media processing:
+The core read/edit/recovery/search flows and safe Scan/Recording create/replace
+pipelines now work in staging. Continue in this order:
 
-1. new Recording upload plus the audio validation/conversion pipeline;
-2. safe Scan/Recording replacement and imported-media fingerprint/derivative work;
-3. compact contributor inputs, sharing, and remaining feedback-driven polish;
-4. further search tuning or a field-scope control only when concrete real-use examples justify it.
+1. finish/reconcile imported Scan fingerprint and readability repair, then
+   visually accept representative derivatives on real devices;
+2. review/discard or recover historical upload sessions that predate immutable
+   create/replace intents;
+3. run Safari/iOS and Chrome/Android offline, Scan, upload, and playback gates;
+4. add sharing or further search/product polish only from concrete feedback.
 
 This is a delivery order rather than a schema dependency. The accepted search and filter work remains independently testable while media workflows are added.
 
@@ -21,7 +36,7 @@ Use one TypeScript Cloudflare Worker project that serves both the PWA static ass
 - private R2 for scans, original audio, and playback derivatives;
 - Cloudflare Access for allowlisted identity at the deployed boundary.
 
-Audio decode validation and conversion are deliberately outside the 128 MB Worker runtime. Use the provider-neutral Python/FFmpeg core described in [audio-processing.md](audio-processing.md): run existing-media preparation locally, and later execute the same core once per single-task scheduled Cloud Run Job for rare new uploads, as defined in the accepted local design in [audio-processing-invocation.md](audio-processing-invocation.md). Do not add an HTTP server for this boundary. Keep Cloudflare and Google Cloud within their free allowances when practical. The owner completed the isolated Google Cloud staging project, billing, budget-alert, and local CLI setup; every runtime resource remains separately approval-gated.
+Audio decode validation and conversion are deliberately outside the 128 MB Worker runtime. Use the provider-neutral Python/FFmpeg core described in [audio-processing.md](audio-processing.md): run existing-media preparation locally and execute the same core once per single-task Cloud Run Job for rare new uploads, as defined in [audio-processing-invocation.md](audio-processing-invocation.md). Do not add an HTTP server for this boundary. Keep Cloudflare and Google Cloud within their free allowances when practical. The isolated Google Cloud staging Job and its keyless invocation boundaries are deployed; production resources remain separately approval-gated.
 
 Existing prepared derivatives cross the cloud boundary through a reviewed deterministic plan and a dry-run-by-default executor. R2 upload and D1 finalization remain separate owner-approved commands. Upload is resumable and content-verified; D1 finalization requires the schema migration to exist, re-verifies the complete R2 set, and uses guarded live-state preconditions in one rollback-safe import. The executor does not deploy, apply migrations, or combine these external approvals.
 
@@ -36,7 +51,7 @@ processing Recording, copied credits, and durable job only for a nonduplicate
 stored upload. Readiness still requires independently verified hosted-processing
 output; processing originals are not exposed as playback media.
 
-The Worker-side processing control plane is now implemented and tested locally.
+The Worker-side processing control plane is implemented and deployed.
 A separately configured processor can claim one pending job, receive an expiring
 lease plus operation-bound same-origin transfer capabilities, stream the exact
 private source, and immutably upload one derivative attempt. The Worker accepts
@@ -45,9 +60,8 @@ source and derivative bytes, and atomically records provenance, playback
 readiness, and job success. Safe failures are durable and editor-retryable. The
 versioned processor token and exact transfer origin are now configured across
 the least-privilege Google secret and protected Worker boundary. The control
-plane is deployed to protected staging with migrations `0005`–`0008`, but
-remains fail-closed after its first processor execution rejected the Access
-login redirect before reaching the Worker. It has not processed a real upload.
+plane is deployed to protected staging with its schema guards. A real uploaded
+Recording and the Scheduler/on-demand no-work paths have completed successfully.
 
 The provider-neutral processor-side HTTP adapter is also implemented locally as
 a one-job library boundary around the existing Python/FFmpeg `prepare()` core.
@@ -56,14 +70,12 @@ Worker routes, disables redirects, streams the source into a private temporary
 directory with exact length/hash enforcement, uploads only a reverified selected
 derivative, and sends bounded idempotent result/failure callbacks. A result
 delivery that may already have committed never becomes a contradictory failure
-callback. No HTTP server is added. The dormant Cloud Run Job and both credential
-boundaries now exist in protected staging, but the first no-work smoke proved
-the deployed adapter digest does not yet send Cloudflare Service Auth headers. The
-local source now strictly loads one file-only Access client ID/secret pair,
-sends the standard two Access headers on claim and every same-origin capability
-request, retains the separate Worker bearer token, and rejects any additional
-transfer origin to prevent credential disclosure. The accepted design remains
-a scheduled single-task Cloud Run Job. Its database-enforced
+callback. No HTTP server is added. The Cloud Run Job and both credential
+boundaries exist in protected staging. The runtime strictly loads one file-only
+Access client ID/secret pair, sends the standard two Access headers on claim and
+every same-origin capability request, retains the separate Worker bearer token,
+and rejects any additional transfer origin. The accepted design remains a
+scheduled single-task Cloud Run Job. Its database-enforced
 global running-job gate, three-attempt bounded lease-loss recovery, 45-minute
 monotonic processor deadline, 55-minute lease-remaining floor, and streaming
 generated-output ceiling are now implemented and tested locally. A minimal
@@ -74,18 +86,15 @@ non-root image plus a generated worst-case storage/real conversion fixture are
 implemented. Static policy tests, the full host fixture, both pinned
 `linux/amd64` image builds, the full non-root 2 GiB cgroup/tmpfs fixture, the
 in-image FFmpeg/libmp3lame checks, and the read-only dummy-secret smoke pass.
-Exact paused-first cloud commands, cost assumptions, rotation, rollback, and
-staging checks are separately reviewed in
-[audio-processing-cloud-runbook.md](audio-processing-cloud-runbook.md). Every
-remaining processor cloud action remains separately owner-approved and unexecuted.
+Exact cloud commands, cost assumptions, rotation, rollback, and staging checks
+are reviewed in [audio-processing-cloud-runbook.md](audio-processing-cloud-runbook.md).
+Production remains separately owner-approved and uncreated.
 
-The Service Auth checkpoint passes all 90 audio tests, 31 application
-test files / 250 tests, all three TypeScript projects, production build ID
-`e74405e5e982`, the full bounded `linux/amd64` verification fixture, and the
-non-root dual-file runtime configuration/redaction smoke. Its dedicated
-Cloudflare token/policy and exact version-pinned Google file secret now exist;
-an Access-only request reached the processor route without claiming work. The
-existing image, Job, Scheduler, D1, R2, and application data did not change.
+The deployed credential checkpoint uses a dedicated Cloudflare Service Auth
+token/policy for processor requests and Workload Identity Federation for Worker
+invocation of the fixed Job. Live no-work dispatch passes without a Cloudflare-
+held Google key. The runtime identities retain no project-wide role, and routine
+logs contain aggregate outcomes only.
 
 The imported-Scan fingerprint inventory and deterministic local planner are now
 implemented. The planner streams and hashes all catalog-linked Scan sources,
@@ -96,9 +105,10 @@ database executor is also implemented: it requires exact plan confirmation for
 application, re-runs the complete source/catalog reconciliation, checks live
 Scan/media state, updates only null hashes in one immediate transaction, and
 accepts only exact already-applied state on rerun. Focused rollback/idempotency
-tests plus fresh and existing-catalog isolated verification pass. Owner-reviewed
-remote application remains a later separately authorized step; neither tool can
-change legacy, D1, R2, or staging state.
+tests plus fresh and existing-catalog isolated verification pass. The local tool
+still cannot change legacy, D1, R2, or staging state. A separate bounded Worker
+maintenance task now performs the authorized staging fingerprint/derivative
+repair with leases, failure records, and aggregate reconciliation.
 
 Proposed application tooling:
 
@@ -161,7 +171,7 @@ The Google audio-processing staging project is
 `music-library-audio-staging`. Billing is linked, a monthly notification-only
 budget is active with promotional credits excluded from its alert calculation,
 and the isolated local CLI configuration defaults Cloud Run to `asia-south1`.
-The reviewed runtime/scanning APIs, two keyless service accounts without
+The reviewed runtime/scanning APIs, keyless service accounts without
 project-wide roles, and one regional scanning-enabled repository exist. The
 first Bookworm image was pushed only for vulnerability review and is blocked
 from deployment. Its hardened Debian 13/FFmpeg 7.1 replacement was pushed by
@@ -171,13 +181,14 @@ Job. The automatically replicated processor and Access credential secrets each
 have one enabled version and only a secret-level runtime accessor; the matching
 processor token and exact transfer origin are Worker secrets, while an attached
 Cloudflare Service Auth policy selects only the dedicated service token. The
-exact reviewed digest is configured as a dormant
-Ready Cloud Run Job with the bounded resource and environment contract; it has
-one failed execution and no invoker binding. The execution loaded configuration
-and then failed closed on `claim_redirect_rejected` because Cloudflare Access
-intercepted the request before the Worker. D1 remained unchanged. No Scheduler
-trigger has been configured. A separate Google production project has not been
-created.
+exact reviewed digest is configured as a Ready Cloud Run Job with the bounded
+resource and environment contract. The runtime reads its two fixed-version
+secrets, the Scheduler identity and the Cloudflare WIF principal set alone can
+invoke the Job, and live no-work execution through the federated on-demand path
+has passed. The existing Scheduler is enabled every 15 minutes as a fallback.
+The former trigger service-account key has been removed from both providers and
+the former identity is disabled. A separate Google production project has not
+been created.
 
 Never point development code at production data by default.
 

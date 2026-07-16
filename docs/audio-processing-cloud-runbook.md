@@ -1,21 +1,18 @@
 # Staging audio-processing operator runbook
 
-Status: reviewed command plan only, 2026-07-15. This file does not authorize any
-command in it. Every API enablement, migration, Worker secret/deployment, Google
-identity/secret/repository/image/Job/Scheduler change, paid scan, and schedule
-resume requires fresh explicit owner approval. Production is out of scope.
+Status: protected-staging rollout completed and re-audited 2026-07-16. Commands
+below are reference procedures, not standing authorization. Production remains
+out of scope and requires fresh explicit approval.
 
-Protected staging has separately completed the reviewed prerequisite, image
-scan, and credential-boundary phases through Secret Manager version 1 and the
-matching Worker secrets. The exact digest-pinned bounded Cloud Run Job is Ready,
-matches the reviewed specification, and has zero IAM bindings. Its first
-execution failed safely on `claim_redirect_rejected` because Cloudflare Access
-intercepted the request before the Worker. Local Service Auth support and both
-fresh `linux/amd64` proofs now pass. A dedicated service token and attached
-Service Auth policy admit the standard two headers, and the exact credential
-JSON is retained only as automatically replicated Google secret version 1 with
-one secret-level runtime accessor. No new image/scan, Job update, or retry has
-occurred. No Scheduler job exists.
+Protected staging has the digest-pinned bounded Job, fixed-version runtime
+secrets, dedicated Cloudflare Service Auth policy, and enabled 15-minute OAuth
+Scheduler. Live no-work, real-processing, natural Scheduler, and keyless direct
+dispatch checks have passed. Immediate Worker invocation uses Cloudflare Access
+JWT-to-Google Workload Identity Federation; Cloudflare stores no Google JSON
+key. Only the Scheduler identity and WIF provider principal set have Job-level
+Invoker. The former trigger identity is disabled and its user-managed key is
+deleted. The runtime identities have no project-wide role, and the default
+Compute identity no longer has project Editor.
 
 Use this together with [audio-processing.md](audio-processing.md),
 [audio-processing-invocation.md](audio-processing-invocation.md), and
@@ -554,9 +551,12 @@ npm run ops:processor-snapshot -- --alert-lookback-hours 6
 Current severity policy in this command is:
 
 - `critical`: foreign-key errors or non-aggregate stdout payload shapes;
-- `warning`: pending/running D1 jobs, failed processor outcomes, or non-zero
-  container exit lines inside the configured lookback window;
-- `info`: scheduler paused (expected in cost-conservative staging posture).
+- `warning`: pending/running D1 jobs, a stale direct-dispatch attempt,
+  pre-intent upload sessions, missing Scan hashes/derivatives, Scan maintenance
+  failures/expired leases, failed processor outcomes, or non-zero container exit
+  lines inside the configured lookback window;
+- `info`: Scheduler paused (unexpected while the reliability fallback is meant
+  to be active, but not itself a data-integrity failure).
 
 Historical failures/non-zero exits outside the lookback window are emitted as
 `info` (`*_historical`) to preserve context without inflating active warnings.

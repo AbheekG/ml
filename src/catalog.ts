@@ -207,6 +207,7 @@ export async function refreshSong(songId: string): Promise<SongDetail> {
 export type AppSession = {
   displayName: string | null;
   role: "viewer" | "editor" | "admin";
+  cacheNamespace: string;
 };
 
 export type SongEditorOptions = {
@@ -331,7 +332,7 @@ function apiErrorMessage(code: string): string {
     invalid_scan_reference: "The selected Notebook is no longer available. Reload the form.",
     scan_file_required: "Choose a Scan image.",
     empty_scan_file: "The selected Scan file is empty.",
-    scan_file_too_large: "The Scan is larger than the 25 MB upload limit.",
+    scan_file_too_large: "The Scan is larger than the 20 MB upload limit.",
     scan_file_unreadable: "The selected Scan file could not be read.",
     unsupported_scan_file: "Use a JPEG, PNG, or WebP image with a recognized file signature.",
     duplicate_scan_file: "This exact image is already stored as a Scan. The duplicate was not uploaded.",
@@ -386,6 +387,28 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
 export async function loadSession(): Promise<AppSession> {
   const payload = await apiJson<{ user: AppSession }>("/api/session");
   return payload.user;
+}
+
+export async function clearPrivateLocalData(): Promise<void> {
+  await database.transaction(
+    "rw",
+    database.songs,
+    database.songDetails,
+    database.metadata,
+    async () => {
+      await Promise.all([
+        database.songs.clear(),
+        database.songDetails.clear(),
+        database.metadata.clear(),
+      ]);
+    },
+  );
+  if ("caches" in globalThis) {
+    const names = await caches.keys();
+    await Promise.all(names
+      .filter((name) => name.startsWith("music-library-"))
+      .map((name) => caches.delete(name)));
+  }
 }
 
 export async function loadSongEditorOptions(): Promise<SongEditorOptions> {

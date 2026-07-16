@@ -1,4 +1,5 @@
-export const MAX_SCAN_UPLOAD_BYTES = 25 * 1024 * 1024;
+// Cloudflare's private Images binding accepts at most 20 MB of source bytes.
+export const MAX_SCAN_UPLOAD_BYTES = 20_000_000;
 
 export type ScanImageType = {
   mimeType: "image/jpeg" | "image/png" | "image/webp";

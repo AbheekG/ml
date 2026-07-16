@@ -76,7 +76,7 @@ Rules should be enforced at every relevant layer:
 - Never transcode audio in response to a playback request. Asynchronous conversion uses a `processing` state and exposes the player only after the derivative is verified and the Recording becomes `ready`; a failed job preserves the original and reports a retryable error.
 - The stored playback-media reference is the default browser source. Capability detection may verify or fall back among already prepared sources, but never changes the stored original or starts conversion.
 - Generate correctly oriented, readability-preserving Scan derivatives suitable for A4 pages. Retain Scan originals until derivative quality and backups are accepted; only then consider a deliberate archival/deletion policy.
-- Until that derivative pipeline is implemented, new Scan upload accepts only browser-compatible JPEG, PNG, or WebP originals up to 25 MB. It still verifies byte signatures and SHA-256, rejects exact duplicates, and never exposes the R2 object publicly.
+- The implemented Scan pipeline accepts browser-compatible JPEG, PNG, or WebP originals up to 20,000,000 bytes, verifies signatures and full decode, records SHA-256, rejects exact duplicates globally, retains immutable originals/replacement history, and prepares a private JPEG readability derivative before committing the new current media. The derivative is at most 2400 pixels on its longest edge at quality 85; the authenticated viewer falls back to the original only while historical repair is incomplete or has a recorded failure.
 - Future one-tap sharing sends authenticated file bytes through the device share interface where supported, with safe fallbacks; it does not create a permanent public media URL.
 
 ### General safety

@@ -1,5 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { app, parseByteRange, resolveActiveAppUser, roleAllows, type AppRole } from "./index";
+import {
+  app,
+  parseByteRange,
+  processOnePendingScan,
+  resolveActiveAppUser,
+  roleAllows,
+  type AppRole,
+} from "./index";
+
+function fakeImages(): ImagesBinding {
+  let infoCalls = 0;
+  const output = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+  return {
+    async info() {
+      infoCalls += 1;
+      return infoCalls % 2 === 1
+        ? { format: "image/jpeg", fileSize: 4, width: 1200, height: 900 }
+        : { format: "image/jpeg", fileSize: 4, width: 1200, height: 900 };
+    },
+    input() {
+      const transformer = {
+        transform: () => transformer,
+        draw: () => transformer,
+        async output() {
+          return {
+            response: () => new Response(output),
+            contentType: () => "image/jpeg",
+            image: () => new Blob([output]).stream(),
+          };
+        },
+      };
+      return transformer;
+    },
+  } as unknown as ImagesBinding;
+}
 
 describe("parseByteRange", () => {
   it("parses bounded, open-ended, and suffix ranges", () => {
@@ -15,10 +49,119 @@ describe("parseByteRange", () => {
   });
 });
 
+describe("historical Scan maintenance", () => {
+  const sourceBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+
+  function databaseForScanMaintenance(events: string[]): D1Database {
+    return {
+      prepare(query: string) {
+        const statement = {
+          bind(..._values: unknown[]) { return statement; },
+          async first() {
+            if (query.includes("LEFT JOIN scan_maintenance_leases")) {
+              events.push("selected");
+              return {
+                mediaId: "scan-media-1",
+                objectKey: "scans/legacy.jpg",
+                byteSize: sourceBytes.byteLength,
+                sha256: null,
+              };
+            }
+            if (query.includes("JOIN scan_fingerprint_members")) {
+              events.push("fingerprint_verified");
+              return { valid: 1 };
+            }
+            if (query.includes("JOIN scan_readability_derivatives")) {
+              events.push("derivative_verified");
+              return { valid: 1 };
+            }
+            return null;
+          },
+          async run() {
+            if (query.includes("INSERT INTO scan_maintenance_leases")) events.push("claimed");
+            if (query.includes("UPDATE media_objects")) events.push("fingerprint_committed");
+            if (query.includes("INSERT INTO scan_maintenance_failures")) events.push("failure_recorded");
+            if (query.includes("DELETE FROM scan_maintenance_leases")) events.push("released");
+            return { meta: { changes: 1 } };
+          },
+        };
+        return statement as unknown as D1PreparedStatement;
+      },
+      async batch() {
+        events.push("derivative_committed");
+        return [];
+      },
+    } as unknown as D1Database;
+  }
+
+  it("leases, fingerprints, and commits a verified readability derivative", async () => {
+    const events: string[] = [];
+    const media = {
+      async get() {
+        events.push("source_read");
+        return { arrayBuffer: async () => sourceBytes.slice().buffer };
+      },
+      async put() {
+        events.push("derivative_stored");
+        return {};
+      },
+      async delete() {},
+    } as unknown as R2Bucket;
+
+    await expect(processOnePendingScan({
+      DB: databaseForScanMaintenance(events),
+      MEDIA: media,
+      IMAGES: fakeImages(),
+    })).resolves.toBe("processed");
+    expect(events).toEqual([
+      "selected",
+      "claimed",
+      "source_read",
+      "fingerprint_committed",
+      "fingerprint_verified",
+      "derivative_stored",
+      "derivative_committed",
+      "derivative_verified",
+      "released",
+    ]);
+  });
+
+  it("retains a committed source fingerprint when derivative decoding fails", async () => {
+    const events: string[] = [];
+    const images = {
+      async info() { throw new Error("provider unavailable"); },
+      input() { throw new Error("not reached"); },
+    } as unknown as ImagesBinding;
+    const media = {
+      async get() {
+        events.push("source_read");
+        return { arrayBuffer: async () => sourceBytes.slice().buffer };
+      },
+      async put() { events.push("unexpected_store"); return {}; },
+    } as unknown as R2Bucket;
+
+    await expect(processOnePendingScan({
+      DB: databaseForScanMaintenance(events),
+      MEDIA: media,
+      IMAGES: images,
+    })).resolves.toBe("failed");
+    expect(events).toEqual([
+      "selected",
+      "claimed",
+      "source_read",
+      "fingerprint_committed",
+      "fingerprint_verified",
+      "failure_recorded",
+      "released",
+    ]);
+  });
+});
+
 function localBindings(database?: D1Database, localRole?: AppRole) {
   return {
     DB: database ?? {} as D1Database,
     MEDIA: {} as R2Bucket,
+    IMAGES: fakeImages(),
     AUTH_MODE: "local" as const,
     ACCESS_AUD: "unused-locally",
     ACCESS_ISSUER: "unused-locally",
@@ -67,8 +210,12 @@ describe("Worker API", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      user: { displayName: "Local developer", role: "viewer" },
+    await expect(response.json()).resolves.toMatchObject({
+      user: {
+        displayName: "Local developer",
+        role: "viewer",
+        cacheNamespace: expect.stringMatching(/^[a-f0-9]{32}$/u),
+      },
     });
   });
 
@@ -1305,16 +1452,15 @@ describe("Scan upload API", () => {
         expect(statements[0].values[3]).toBe("image/jpeg");
         expect(statements[0].values[4]).toBe(4);
         expect(statements[0].values[5]).toMatch(/^[a-f0-9]{64}$/);
-        expect(statements[1].query).toContain("INSERT INTO scans");
+        expect(statements[1].query).toContain("INSERT INTO scan_readability_derivatives");
+        expect(statements[2].query).toContain("INSERT INTO scans");
         return statements.map(() => ({ meta: { changes: 1 } }));
       },
     } as unknown as D1Database;
-    let storedKey = "";
-    let storedBytes = 0;
+    const stored = new Map<string, number>();
     const media = {
       put: async (key: string, value: Uint8Array) => {
-        storedKey = key;
-        storedBytes = value.byteLength;
+        stored.set(key, value.byteLength);
         return {};
       },
     } as unknown as R2Bucket;
@@ -1326,8 +1472,11 @@ describe("Scan upload API", () => {
     );
 
     expect(response.status).toBe(201);
-    expect(storedKey).toMatch(/^scans\/[a-f0-9-]+\.jpg$/);
-    expect(storedBytes).toBe(4);
+    expect([...stored.keys()]).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^scans\/[a-f0-9-]+\.jpg$/u),
+      expect.stringMatching(/^scans\/readability\/[a-f0-9-]+\.jpg$/u),
+    ]));
+    expect([...stored.values()]).toEqual([4, 4]);
     await expect(response.json()).resolves.toMatchObject({ scan: { revision: 1, filename: "page.txt" } });
   });
 
@@ -1375,6 +1524,42 @@ describe("Scan upload API", () => {
     });
   });
 
+  it("does not expose nullable details for duplicate media retained only in history", async () => {
+    const database = {
+      prepare: (query: string) => ({
+        bind: () => ({
+          first: async () => query.includes("FROM songs")
+            ? { id: "song-1" }
+            : {
+                scanId: null,
+                songId: null,
+                songTitle: null,
+                filename: "historical.jpg",
+                notebookName: null,
+                pageLabel: null,
+                scanIsTrashed: null,
+                songIsTrashed: null,
+              },
+        }),
+      }),
+    } as unknown as D1Database;
+    let wroteMedia = false;
+    const media = { put: async () => { wroteMedia = true; } } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/scans",
+      { method: "POST", body: scanUploadBody() },
+      { ...localBindings(database), MEDIA: media },
+    );
+
+    expect(response.status).toBe(409);
+    expect(wroteMedia).toBe(false);
+    await expect(response.json()).resolves.toEqual({
+      error: "duplicate_scan_file",
+      fields: { file: ["This file is already retained in the library"] },
+    });
+  });
+
   it("removes an uploaded object when the database transaction fails", async () => {
     const database = {
       prepare: (query: string) => ({
@@ -1387,11 +1572,11 @@ describe("Scan upload API", () => {
       }),
       batch: async () => { throw new Error("database unavailable"); },
     } as unknown as D1Database;
-    let uploadedKey = "";
-    let deletedKey = "";
+    const uploadedKeys: string[] = [];
+    let deletedKeys: string | string[] = [];
     const media = {
-      put: async (key: string) => { uploadedKey = key; return {}; },
-      delete: async (key: string) => { deletedKey = key; },
+      put: async (key: string) => { uploadedKeys.push(key); return {}; },
+      delete: async (keys: string | string[]) => { deletedKeys = keys; },
     } as unknown as R2Bucket;
 
     const response = await app.request(
@@ -1401,6 +1586,6 @@ describe("Scan upload API", () => {
     );
 
     expect(response.status).toBe(500);
-    expect(deletedKey).toBe(uploadedKey);
+    expect(deletedKeys).toEqual(uploadedKeys);
   });
 });

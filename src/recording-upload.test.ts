@@ -25,6 +25,7 @@ function session(overrides: Partial<RecordingUploadSession> = {}): RecordingUplo
     revision: 2,
     expiresAt: "2099-01-01T00:00:00.000Z",
     recordingId: null,
+    intent: null,
     ...overrides,
   };
 }

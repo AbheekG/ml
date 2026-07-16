@@ -5,6 +5,7 @@ import {
   expectedRecordingPartBytes,
   parseRecordingUploadFinalization,
   parseRecordingUploadCreate,
+  parseRecordingUploadReplacement,
   recordingUploadRequestFingerprint,
   recordingUploadShape,
   sha256RecordingStream,
@@ -67,6 +68,7 @@ describe("Recording multipart upload contract", () => {
         mimeTypeHint: null,
         byteSize: 123,
         partCount: 1,
+        replaceTarget: null,
         description: "Early take",
         recordedOn: "2020-02-29",
         creditPersonIds: ["person-1"],
@@ -75,6 +77,21 @@ describe("Recording multipart upload contract", () => {
     if (!parsed.success) throw new Error("fixture failed");
     await expect(recordingUploadRequestFingerprint("song-1", parsed.data))
       .resolves.toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it("requires a complete replacement target and rejects extra replacement fields", () => {
+    expect(parseRecordingUploadCreate({
+      clientMutationId: "123e4567-e89b-42d3-a456-426614174000",
+      filename: "take.wav",
+      byteSize: 3,
+      targetRecordingId: "recording-1",
+    }).success).toBe(false);
+    expect(parseRecordingUploadReplacement({
+      targetRecordingId: "recording-1",
+      targetRecordingRevision: 1,
+      sessionRevision: 4,
+      revision: 4,
+    }).success).toBe(false);
   });
 
   it("rejects invalid dates, duplicate credits, empty files, and mutation reuse without a UUID", () => {

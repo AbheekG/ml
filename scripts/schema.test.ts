@@ -14,7 +14,10 @@ const audioProcessingControlMigration = readFileSync(resolve("migrations/0007_au
 const audioProcessingConcurrencyMigration = readFileSync(resolve("migrations/0008_audio_processing_concurrency.sql"), "utf8");
 const mediaReplacementsMigration = readFileSync(resolve("migrations/0009_media_replacements.sql"), "utf8");
 const nonUniqueJobsMigration = readFileSync(resolve("migrations/0010_non_unique_audio_processing_jobs.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}`;
+const audioDispatchMigration = readFileSync(resolve("migrations/0011_audio_dispatch_and_replacement_guards.sql"), "utf8");
+const scanIntegrityMigration = readFileSync(resolve("migrations/0012_scan_integrity_and_readability.sql"), "utf8");
+const scanMaintenanceLeasesMigration = readFileSync(resolve("migrations/0013_scan_maintenance_leases.sql"), "utf8");
+const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}`;
 const timestamp = "2026-07-12T00:00:00.000Z";
 
 function runSql(sql: string): string {
@@ -29,6 +32,14 @@ function migrateLegacy(beforeMigration: string, afterMigration: string): string 
   return execFileSync("sqlite3", [":memory:"], {
     encoding: "utf8",
     input: `${initialMigration}\n${beforeMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${afterMigration}`,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
+function migrateScanIntegrity(beforeMigration: string, afterMigration: string): string {
+  return execFileSync("sqlite3", [":memory:"], {
+    encoding: "utf8",
+    input: `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${beforeMigration}\n${scanIntegrityMigration}\n${afterMigration}`,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -105,6 +116,10 @@ describe("initial database schema", () => {
         'recording.bin', 8388609, 8388608, 2, 'recordings/original/upload-1',
         'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
       );
+      INSERT INTO recording_upload_intents (
+        session_id, intent_kind, target_recording_id,
+        target_recording_revision, created_at, created_by
+      ) VALUES ('upload-1', 'create', NULL, NULL, '${timestamp}', 'test');
       UPDATE recording_upload_sessions
       SET r2_upload_id = 'multipart-1', status = 'open', revision = 2
       WHERE id = 'upload-1';
@@ -243,6 +258,10 @@ describe("initial database schema", () => {
         'recording.bin', 1, 8388608, 1, 'recordings/original/upload-1',
         'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
       );
+      INSERT INTO recording_upload_intents (
+        session_id, intent_kind, target_recording_id,
+        target_recording_revision, created_at, created_by
+      ) VALUES ('upload-1', 'create', NULL, NULL, '${timestamp}', 'test');
       UPDATE recording_upload_sessions
       SET r2_upload_id = 'multipart-1', status = 'open', revision = 2
       WHERE id = 'upload-1';
@@ -794,7 +813,7 @@ describe("initial database schema", () => {
         id, object_key, original_filename, mime_type, byte_size, sha256, kind,
         created_at, created_by
       ) VALUES (
-        'media-1', 'scans/test.jpg', 'page.jpg', 'image/jpeg', 1234, 'hash-1', 'scan',
+        'media-1', 'scans/test.jpg', 'page.jpg', 'image/jpeg', 1234, '${"a".repeat(64)}', 'scan',
         '${timestamp}', 'test'
       );
       INSERT INTO scans (
@@ -825,7 +844,7 @@ describe("initial database schema", () => {
       WHERE scans.id = 'scan-1';
     `);
 
-    expect(output).toBe("notebook-1|Page 12|3|scans/test.jpg|page.jpg|1234|hash-1|active\n");
+    expect(output).toBe(`notebook-1|Page 12|3|scans/test.jpg|page.jpg|1234|${"a".repeat(64)}|active\n`);
   });
 
   it("can trash and restore a Recording, its credits, and both private media records", () => {
@@ -1036,7 +1055,7 @@ describe("initial database schema", () => {
         id, object_key, original_filename, mime_type, byte_size, sha256, kind,
         created_at, created_by
       ) VALUES (
-        'media-1', 'scans/test.jpg', 'page.jpg', 'image/jpeg', 1234, 'hash-1', 'scan',
+        'media-1', 'scans/test.jpg', 'page.jpg', 'image/jpeg', 1234, '${"a".repeat(64)}', 'scan',
         '${timestamp}', 'test'
       );
       INSERT INTO scans (
@@ -1050,7 +1069,7 @@ describe("initial database schema", () => {
         id, object_key, original_filename, mime_type, byte_size, sha256, kind,
         created_at, created_by
       ) VALUES (
-        'media-2', 'scans/test2.jpg', 'page2.jpg', 'image/jpeg', 2345, 'hash-2', 'scan',
+        'media-2', 'scans/test2.jpg', 'page2.jpg', 'image/jpeg', 2345, '${"b".repeat(64)}', 'scan',
         '${timestamp}', 'test'
       );
       INSERT INTO scan_media_history (
@@ -1100,5 +1119,154 @@ describe("initial database schema", () => {
       SELECT count(*) FROM recording_media_history;
     `);
     expect(output).toBe("1\n");
+  });
+
+  it("enforces race-safe global Scan fingerprints for new writes", () => {
+    expect(() => runSql(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', 'scans/scan-media-1.jpg', 'one.jpg', 'image/jpeg', 4,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-2', 'scans/scan-media-2.jpg', 'two.jpg', 'image/jpeg', 4,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+    `)).toThrow(/duplicate_or_invalid_scan_fingerprint/);
+  });
+
+  it("preserves and marks historical Scan duplicates during null-hash backfill", () => {
+    const output = migrateScanIntegrity(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES
+        ('scan-media-1', 'scans/legacy-1.jpg', 'one.jpg', 'image/jpeg', 4, NULL, 'scan', '${timestamp}', 'import'),
+        ('scan-media-2', 'scans/legacy-2.jpg', 'two.jpg', 'image/jpeg', 4, NULL, 'scan', '${timestamp}', 'import');
+    `, `
+      UPDATE media_objects SET sha256 = '${"a".repeat(64)}' WHERE id = 'scan-media-1';
+      UPDATE media_objects SET sha256 = '${"a".repeat(64)}' WHERE id = 'scan-media-2';
+      SELECT
+        (SELECT count(*) FROM scan_fingerprints) || '|' ||
+        (SELECT count(*) FROM scan_fingerprint_members) || '|' ||
+        (SELECT sum(is_historical_duplicate) FROM scan_fingerprint_members);
+    `);
+    expect(output).toBe("1|2|1\n");
+  });
+
+  it("leases Scan maintenance atomically and permits only an expired lease takeover", () => {
+    const output = runSql(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', 'scans/scan-media-1.jpg', 'one.jpg', 'image/jpeg', 4,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO scan_maintenance_leases (
+        media_id, lease_token, leased_at, lease_expires_at
+      ) VALUES (
+        'scan-media-1', '${"l".repeat(32)}', '${timestamp}', '2026-07-12T00:10:00.000Z'
+      );
+      INSERT INTO scan_maintenance_leases (
+        media_id, lease_token, leased_at, lease_expires_at
+      ) VALUES (
+        'scan-media-1', '${"m".repeat(32)}', '2026-07-12T00:05:00.000Z', '2026-07-12T00:15:00.000Z'
+      )
+      ON CONFLICT(media_id) DO UPDATE SET
+        lease_token = excluded.lease_token,
+        leased_at = excluded.leased_at,
+        lease_expires_at = excluded.lease_expires_at
+      WHERE scan_maintenance_leases.lease_expires_at <= excluded.leased_at;
+      SELECT lease_token FROM scan_maintenance_leases;
+      INSERT INTO scan_maintenance_leases (
+        media_id, lease_token, leased_at, lease_expires_at
+      ) VALUES (
+        'scan-media-1', '${"n".repeat(32)}', '2026-07-12T00:10:00.000Z', '2026-07-12T00:20:00.000Z'
+      )
+      ON CONFLICT(media_id) DO UPDATE SET
+        lease_token = excluded.lease_token,
+        leased_at = excluded.leased_at,
+        lease_expires_at = excluded.lease_expires_at
+      WHERE scan_maintenance_leases.lease_expires_at <= excluded.leased_at;
+      SELECT lease_token FROM scan_maintenance_leases;
+    `);
+    expect(output).toBe(`${"l".repeat(32)}\n${"n".repeat(32)}\n`);
+  });
+
+  it("promotes a historical Scan fingerprint member consistently", () => {
+    const output = runSql(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', 'scans/legacy-1.jpg', 'one.jpg', 'image/jpeg', 4,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      DROP TRIGGER validate_new_scan_fingerprint;
+      DROP TRIGGER register_new_scan_fingerprint;
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-2', 'scans/legacy-2.jpg', 'two.jpg', 'image/jpeg', 4,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'import'
+      );
+      INSERT INTO scan_fingerprint_members (
+        media_id, sha256, is_historical_duplicate, registered_at
+      ) VALUES ('scan-media-2', '${"a".repeat(64)}', 1, '${timestamp}');
+      DELETE FROM media_objects WHERE id = 'scan-media-1';
+      SELECT
+        (SELECT canonical_media_id FROM scan_fingerprints WHERE sha256 = '${"a".repeat(64)}') || '|' ||
+        (SELECT is_historical_duplicate FROM scan_fingerprint_members WHERE media_id = 'scan-media-2');
+    `);
+    expect(output).toBe("scan-media-2|0\n");
+  });
+
+  it("binds immutable readability provenance to the exact Scan source", () => {
+    expect(() => runSql(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', 'scans/scan-media-1.jpg', 'one.jpg', 'image/jpeg', 4,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO scan_readability_derivatives (
+        source_media_id, source_sha256, source_byte_size, object_key,
+        mime_type, byte_size, sha256, width, height, policy_id,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', '${"a".repeat(64)}', 4, 'scans/readability/scan-media-1.jpg',
+        'image/jpeg', 3, '${"b".repeat(64)}', 1200, 900,
+        'scan-jpeg-v1-2400-q85', '${timestamp}', 'test'
+      );
+      UPDATE media_objects SET byte_size = 5 WHERE id = 'scan-media-1';
+    `)).toThrow(/media_is_bound_to_scan_readability_provenance/);
+
+    expect(() => runSql(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', 'scans/scan-media-1.jpg', 'one.jpg', 'image/jpeg', 4,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO scan_readability_derivatives (
+        source_media_id, source_sha256, source_byte_size, object_key,
+        mime_type, byte_size, sha256, width, height, policy_id,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', '${"a".repeat(64)}', 4, 'scans/readability/scan-media-1.jpg',
+        'image/jpeg', 3, '${"b".repeat(64)}', 1200, 900,
+        'scan-jpeg-v1-2400-q85', '${timestamp}', 'test'
+      );
+      UPDATE scan_readability_derivatives SET width = 1199 WHERE source_media_id = 'scan-media-1';
+    `)).toThrow(/scan_readability_provenance_is_immutable/);
   });
 });

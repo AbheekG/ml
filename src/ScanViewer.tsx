@@ -73,7 +73,8 @@ export function ScanViewer({
   const previousId = currentScan ? adjacentScanId(scans, currentScan.id, -1) : null;
   const nextId = currentScan ? adjacentScanId(scans, currentScan.id, 1) : null;
   const currentIndex = currentScan ? scans.findIndex((scan) => scan.id === currentScan.id) : -1;
-  const mediaUrl = currentScan ? `/api/media/${encodeURIComponent(currentScan.mediaId)}` : "";
+  const mediaUrl = currentScan ? `/api/scans/${encodeURIComponent(currentScan.id)}/image` : "";
+  const originalMediaUrl = currentScan ? `/api/media/${encodeURIComponent(currentScan.mediaId)}` : "";
   const fittedSize = fitScanSize(naturalSize, viewportSize);
   const webkitDocument = typeof document !== "undefined" ? document as WebkitDocument : null;
   const fullscreenAvailable = typeof document !== "undefined" && (
@@ -324,7 +325,7 @@ export function ScanViewer({
               <button type="button" disabled={view.zoom >= MAX_SCAN_ZOOM} onClick={() => zoomTo(view.zoom + SCAN_ZOOM_STEP)} aria-label="Zoom in">+</button>
             </div>
             <div>
-              <a href={mediaUrl} target="_blank" rel="noreferrer">Open original</a>
+              <a href={originalMediaUrl} target="_blank" rel="noreferrer">Open original</a>
               <button type="button" onClick={() => { void enterImageOnly(); }} title="Hide controls and use device fullscreen when available">Image only</button>
             </div>
           </div>
@@ -343,7 +344,7 @@ export function ScanViewer({
           {loadFailed ? (
             <div className="scan-load-error" role="alert">
               <strong>This scan could not be displayed here.</strong>
-              <a href={mediaUrl} target="_blank" rel="noreferrer">Open the original file</a>
+              <a href={originalMediaUrl} target="_blank" rel="noreferrer">Open the original file</a>
             </div>
           ) : (
             <img

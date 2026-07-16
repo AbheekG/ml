@@ -147,6 +147,15 @@ const d1Json = [
         running_jobs: 0,
         succeeded_jobs: 1,
         failed_jobs: 0,
+        started_dispatch_attempts: 0,
+        failed_dispatch_attempts: 0,
+        stale_dispatch_attempts: 0,
+        recoverable_upload_sessions: 0,
+        unclassified_upload_sessions: 0,
+        missing_scan_hashes: 0,
+        missing_scan_derivatives: 0,
+        scan_maintenance_failures: 0,
+        expired_scan_maintenance_leases: 0,
         foreign_key_errors: 0,
       },
     ],
@@ -197,9 +206,56 @@ describe("processor ops snapshot", () => {
     expect(snapshot.logs.stdout.byOutcome.succeeded).toBe(1);
     expect(snapshot.logs.system.exitLines["Container called exit(0)."]).toBe(2);
     expect(snapshot.d1.foreignKeyErrors).toBe(0);
+    expect(snapshot.d1.missingScanDerivatives).toBe(0);
     expect(snapshot.costSurface.artifactRepoSizeBytes).toBe(429709000);
     expect(snapshot.costSurface.schedulerJobsCount).toBe(1);
     expect(snapshot.alerts.some((alert) => alert.code === "scheduler_paused")).toBe(true);
+  });
+
+  it("surfaces durable dispatch, upload-intent, and Scan-maintenance drift", async () => {
+    const driftedD1 = structuredClone(d1Json);
+    Object.assign(driftedD1[0].results[0], {
+      stale_dispatch_attempts: 1,
+      unclassified_upload_sessions: 2,
+      missing_scan_hashes: 3,
+      missing_scan_derivatives: 4,
+      scan_maintenance_failures: 1,
+      expired_scan_maintenance_leases: 1,
+    });
+    const runner = runnerFromMap({
+      "scheduler jobs describe": { ...schedulerDescribe, state: "ENABLED" },
+      "run jobs describe": runJobDescribe,
+      "run jobs executions list": executionsList,
+      "logs/run.googleapis.com%2Fstdout": stdoutLogs,
+      "logs/run.googleapis.com%2Fvarlog%2Fsystem": systemLogs,
+      "wrangler d1 execute": driftedD1,
+      "artifacts repositories describe": artifactDescribe,
+      "scheduler jobs list": schedulerList,
+    });
+
+    const snapshot = await buildProcessorOpsSnapshot({
+      projectId: "music-library-audio-staging",
+      region: "asia-south1",
+      runJob: "music-audio-processor",
+      schedulerJob: "music-audio-processor-quarter-hour",
+      d1Database: "music-library-staging-apac",
+      artifactRepo: "music-audio",
+      stdoutLimit: 200,
+      systemLimit: 120,
+      executionLimit: 200,
+      alertLookbackHours: 24,
+      summary: false,
+      includeExecutionDetails: false,
+      enforce: false,
+    }, runner);
+
+    expect(snapshot.alerts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "d1_stale_audio_dispatch_attempts", severity: "warning" }),
+      expect.objectContaining({ code: "d1_unclassified_upload_sessions", severity: "warning" }),
+      expect.objectContaining({ code: "d1_missing_scan_hashes", severity: "warning" }),
+      expect.objectContaining({ code: "d1_scan_maintenance_incomplete", severity: "warning" }),
+      expect.objectContaining({ code: "d1_expired_scan_maintenance_leases", severity: "warning" }),
+    ]));
   });
 
   it("flags non-aggregate stdout payload shapes as critical", async () => {

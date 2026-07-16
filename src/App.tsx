@@ -8,6 +8,7 @@ import { pauseOtherAudioPlayers } from "./audio-playback";
 import { copyTextBlock, shareTextBlock, supportsSystemTextShare } from "./text-sharing";
 import {
   ApiError,
+  clearPrivateLocalData,
   createLookup,
   createLyric,
   createScan,
@@ -898,7 +899,7 @@ function ScanEditorPage({
                   )}
                 </div>
               )}
-              <small>JPEG, PNG, or WebP · maximum 25 MB. The actual file content is checked before it is stored.</small>
+              <small>JPEG, PNG, or WebP · maximum 20 MB. The actual file content is checked before it is stored.</small>
               {fieldErrors.file?.map((message) => <em key={message}>{message}</em>)}
             </div>
           ) : (
@@ -959,6 +960,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
   const [description, setDescription] = useState("");
   const [recordedOn, setRecordedOn] = useState("");
   const [vocalistIds, setVocalistIds] = useState<string[]>([]);
+  const [processingState, setProcessingState] = useState<"processing" | "ready" | "failed">("ready");
   const [revision, setRevision] = useState<number | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
@@ -990,6 +992,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
         setDescription(recording.description);
         setRecordedOn(recording.recordedOn ?? "");
         setVocalistIds(recording.credits.filter((credit) => credit.role === "vocals").map((credit) => credit.personId));
+        setProcessingState(recording.processingState);
         setRevision(recording.revision);
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The Recording editor could not be loaded.");
@@ -1070,7 +1073,9 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
               <span>Private original file</span>
               <strong>{filename}</strong>
             </div>
-            <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(songId)}/recordings/${encodeURIComponent(recordingId)}/replace`}>Replace audio</Link>
+            {processingState === "processing"
+              ? <span className="media-note">Replacement is available after processing finishes.</span>
+              : <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(songId)}/recordings/${encodeURIComponent(recordingId)}/replace`}>Replace audio</Link>}
           </div>
           <label className="form-field">
             <span>Recording description <strong aria-hidden="true">*</strong></span>
@@ -1613,7 +1618,14 @@ function SongEditorPage({
   );
 }
 
-function AccountPage({ session }: { session: AppSession | null }) {
+function AccountPage({
+  session,
+  onLogout,
+}: {
+  session: AppSession | null;
+  onLogout: () => Promise<void>;
+}) {
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   return (
     <main className="page-shell account-page" id="main-content">
       <p className="eyebrow">Application</p>
@@ -1628,6 +1640,18 @@ function AccountPage({ session }: { session: AppSession | null }) {
           <dd>{session?.role ?? "Unavailable"}</dd>
         </div>
       </dl>
+      <button
+        className="danger-action"
+        type="button"
+        disabled={isLoggingOut}
+        onClick={() => {
+          setIsLoggingOut(true);
+          void onLogout().catch(() => setIsLoggingOut(false));
+        }}
+      >
+        {isLoggingOut ? "Clearing this device…" : "Sign out and clear this device"}
+      </button>
+      <p className="media-note">Signing out removes the offline catalog and typed lyrics stored by this browser.</p>
     </main>
   );
 }
@@ -1846,12 +1870,49 @@ export function App() {
   const isOnline = useOnlineStatus();
   const [session, setSession] = useState<AppSession | null>(null);
   const [sessionResolved, setSessionResolved] = useState(false);
+  const cacheNamespaceKey = "music-library-cache-namespace";
+  const privacyChannelName = "music-library-private-data";
+
+  function notifyPrivateDataCleared(): void {
+    if ("BroadcastChannel" in window) {
+      const channel = new BroadcastChannel(privacyChannelName);
+      channel.postMessage({ type: "private-data-cleared" });
+      channel.close();
+    }
+  }
+
+  async function logoutAndClear(): Promise<void> {
+    await clearPrivateLocalData();
+    localStorage.removeItem(cacheNamespaceKey);
+    notifyPrivateDataCleared();
+    window.location.assign("/cdn-cgi/access/logout");
+  }
+
+  useEffect(() => {
+    if (!("BroadcastChannel" in window)) return undefined;
+    const channel = new BroadcastChannel(privacyChannelName);
+    channel.addEventListener("message", (event) => {
+      if (event.data?.type !== "private-data-cleared") return;
+      localStorage.removeItem(cacheNamespaceKey);
+      setSession(null);
+      setSessionResolved(false);
+      void clearPrivateLocalData();
+    });
+    return () => channel.close();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     if (!isOnline) return () => { cancelled = true; };
     setSessionResolved(false);
-    loadSession().then((user) => {
+    loadSession().then(async (user) => {
+      if (!cancelled) {
+        const previousNamespace = localStorage.getItem(cacheNamespaceKey);
+        if (previousNamespace && previousNamespace !== user.cacheNamespace) {
+          await clearPrivateLocalData();
+        }
+        localStorage.setItem(cacheNamespaceKey, user.cacheNamespace);
+      }
       if (!cancelled) {
         setSession(user);
         setSessionResolved(true);
@@ -1881,7 +1942,9 @@ export function App() {
         </span>
       </header>
 
-      <Routes>
+      {isOnline && !sessionResolved
+        ? <main className="page-shell" id="main-content"><p>Checking this device’s private session…</p></main>
+        : <Routes>
         <Route path="/songs" element={<SongsPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/new" element={<SongEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/edit" element={<SongEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
@@ -1896,9 +1959,9 @@ export function App() {
         <Route path="/songs/:songId" element={<SongDetailPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/trash" element={<TrashPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/manage" element={<ManageLookupsPage isOnline={isOnline} canEdit={canEdit} />} />
-        <Route path="/account" element={<AccountPage session={session} />} />
+        <Route path="/account" element={<AccountPage session={session} onLogout={logoutAndClear} />} />
         <Route path="*" element={<Navigate to="/songs" replace />} />
-      </Routes>
+      </Routes>}
 
       <nav className="bottom-nav" aria-label="Primary navigation">
         <Link to="/songs">Songs</Link>

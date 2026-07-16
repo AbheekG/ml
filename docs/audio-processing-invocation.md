@@ -1,8 +1,7 @@
 # Hosted audio-processing invocation
 
-Status: accepted local design, 2026-07-14. Nothing in this
-document authorizes cloud creation, configuration, deployment, or staging
-changes.
+Status: implemented in protected staging and re-audited 2026-07-16. Production
+resources and cutover remain unapproved.
 
 ## Scope
 
@@ -33,9 +32,12 @@ The boundary must preserve these invariants:
 
 Use a **single-task Google Cloud Run Job**, triggered via the Google `jobs.run` API. Do not wrap the adapter in a Cloud Run Service or add an HTTP framework.
 
-The invocation model supports two triggers:
-1. **On-Demand Trigger (Primary)**: The Cloudflare Worker triggers the Cloud Run Job immediately upon successful upload finalization or replacement. The Worker generates a signed JWT assertion using a stored Google Service Account key (`GCP_SERVICE_ACCOUNT_JSON`) and exchanges it for an OAuth access token to trigger the Google API. The trigger is executed asynchronously using Hono's `waitUntil` context post-response, ensuring zero user-facing latency.
-2. **Cloud Scheduler Trigger (Backup/Fallback)**: A periodic UTC schedule (e.g. 15-minute cron) can invoke the Job through OAuth as a fallback. During development, this scheduler is kept **PAUSED** to conserve resources, relying entirely on the zero-idle-cost on-demand trigger.
+The invocation model has two complementary triggers:
+
+1. **On-demand trigger (primary UX path):** successful upload/replacement finalization and editor retry create an immutable D1 dispatch attempt. In `waitUntil`, the Worker exchanges the already verified Cloudflare Access application JWT through Google Security Token Service using a narrowly scoped Workload Identity Federation provider. The provider principal set has Invoker only on this Job; there is no Google service-account JSON key in Cloudflare. The attempt becomes `accepted` or a bounded `failed` record without delaying the editor response or changing the pending job.
+2. **Cloud Scheduler trigger (reliability fallback):** the existing Scheduler job runs every 15 minutes and calls the same fixed `jobs.run` API through its dedicated OAuth service account. It has zero platform retries. This recovers a pending job when immediate federation, Google API delivery, or the asynchronous Worker task fails while keeping the idle cadence inside the reviewed free-allowance estimate.
+
+Both paths may start overlapping no-work executions, but the D1 global running-job gate allows only one claim. The design therefore provides quick expected pickup without depending on an embedded long-lived key, and durable bounded polling without making browser Play start processing.
 
 The container entrypoint loads bounded configuration, calls `run_hosted_job_once()` exactly once, emits one aggregate outcome, and exits.
 
@@ -47,6 +49,11 @@ The responsibilities remain deliberately separate:
   account receives Cloud Run Invoker on this one Job, not project-wide editor
   access. Scheduler calls the Google API with OAuth; it never knows the audio
   processor token.
+- Cloudflare's Workload Identity Federation principal set owns only `run.invoker`
+  on this one Job. The provider trusts only the Access application issuer and
+  audience, maps an authenticated subject, and grants no project-wide role or
+  service-account impersonation. The prior user-managed trigger key is deleted
+  and its old service account is disabled.
 - The Cloud Run Job runtime uses a separate service account. Its only Google API
   permissions are secret-level Secret Manager Secret Accessor bindings on the
   processor token and Access credential secrets. It has no D1, R2, Cloud
@@ -225,54 +232,21 @@ future digest or changed processing path. The first approved Cloud Run no-work
 execution must still prove readability of the platform's actual root-owned
 secret volume.
 
-The credential boundary was subsequently configured under separate owner
-approval. Secret Manager contains one automatically replicated enabled version,
-with only the keyless runtime identity granted secret-level accessor; that
-identity still has no project-wide role or user-managed key. The same token and
-exact protected transfer origin are Worker secrets. The transient local token
-file was removed, and no value was printed or retained in Git. No Cloud Run Job,
-Scheduler trigger, or processor execution existed at that checkpoint.
+## Protected-staging state
 
-The dormant Cloud Run Job was then created under separate owner approval and is
-Ready. Its independently described specification matches the reviewed contract:
-the exact hardened digest, gen2, runtime identity, one task and parallelism one,
-zero retries, 50-minute timeout, 1 CPU, 2 GiB memory, 1,152 MiB in-memory volume,
-secret version 1 at the file path, and the exact 12 bounded environment values.
-Its first manual no-work execution pulled and started the correct runtime, read
-secret version 1, loaded configuration, and then failed closed with the sole
-application error `claim_redirect_rejected`. Cloudflare Access intercepted the
-claim before the Worker because that deployed digest does not send Service Auth
-headers. Local source now requires one strict file-only JSON Access credential,
-adds the standard two headers to claim/source/derivative/result/failure, retains
-the separate Worker bearer on claim/result/failure, redacts both Access values,
-and constrains every transfer to the exact Worker origin. Exactly one execution
-is failed; the Job remains Ready, has no IAM binding, and no Scheduler job
-exists. D1 retained zero jobs and zero foreign-key errors. Temporary-volume
-writability remains unproved because no job was claimed. Do not retry until the
-local checks, a newly scanned image, Service Auth policy/credential boundary,
-and updated Job are separately reviewed and approved.
+The credential/runtime rollout is complete in staging. Secret Manager retains
+fixed enabled versions of the processor token and Cloudflare Service Auth
+credential with only secret-level runtime access. The digest-pinned non-root Job
+uses one task, parallelism one, zero retries, a 50-minute timeout, 1 CPU, 2 GiB
+memory, and a bounded in-memory volume. The dedicated Access service-token policy
+is separate from the human allow policy; no Bypass or public media route exists.
 
-The local checks now pass: all 90 audio tests cover strict file parsing,
-environment-secret rejection, representation/log redaction, exact-origin
-confinement, and Access headers across claim/source/derivative/result/failure.
-The full application and TypeScript/build suites also pass. Fresh
-`linux/amd64` targets rebuilt successfully; the bounded verification fixture
-completed with 1,073,741,824 peak temporary bytes and 1,224,548,352 conservative
-peak bytes below 2 GiB, while the 213,095,696-byte non-root runtime loaded both
-read-only dummy credential files and kept their values out of its routine
-representation. Nothing was pushed or changed in staging.
-
-The matching Service Auth credential boundary is now configured under separate
-owner approval. The dedicated Cloudflare service token is the sole Include
-selector of an attached Service Auth policy; the existing human Allow policy
-remains separate, and no Bypass or single-header mode was added. A request with
-only the standard Access headers reached the processor route and received its
-expected Worker `401` for the deliberately missing processor bearer, proving
-machine admission without claiming work. The exact strict JSON is Google secret
-version 1 with automatic replication, one secret-level runtime accessor, and an
-independent byte match. The transient local file was removed. The existing Job
-still uses the old digest/config, has exactly its one prior failed execution,
-and was not retried; Scheduler and D1 processing rows remain absent.
+Manual and natural Scheduler no-work executions, a real audio-processing pass,
+and a live Workload Identity Federation dispatch smoke have succeeded. Routine
+application stdout remains aggregate-only. The Scheduler identity plus the WIF
+principal set are the only Job invokers. The former JSON-key trigger identity is
+disabled, its user-managed key is deleted, and Cloudflare no longer stores that
+key. D1 is still the sole processing state authority.
 
 ## Aggregate-only observability
 
@@ -359,10 +333,11 @@ The smallest safe sequence after this design is accepted is:
    checks, non-root execution, cleanup, and read-only dummy-secret smoke pass;
 5. separately review exact cloud commands, identities, costs, secret rotation,
    rollback, and staging verification: prepared in
-   [audio-processing-cloud-runbook.md](audio-processing-cloud-runbook.md), with
-   every command still owner-gated and unexecuted; and
-6. only with explicit owner approval, create/configure the remaining runtime
-   cloud resources and deploy to staging.
+   [audio-processing-cloud-runbook.md](audio-processing-cloud-runbook.md); the
+   staging rollout is complete and production remains owner-gated; and
+6. validate the deployed keyless immediate trigger, Scheduler fallback, and
+   aggregate operational snapshot before production consideration: completed in
+   protected staging.
 
 Each local step is independently reviewable. Production remains out of scope.
 
