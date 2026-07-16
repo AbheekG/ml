@@ -21,7 +21,7 @@ const PRIVATE_PLAN_ROOTS = [
   resolve("data/import-output"),
   resolve("notes/private"),
 ];
-const PROTECTED_LEGACY_ROOTS = [resolve("appsheet"), resolve("woodchime")];
+const PROTECTED_LEGACY_ROOTS = [resolve("legacy/appsheet"), resolve("legacy/woodchime")];
 const OPAQUE_LABEL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -482,9 +482,9 @@ export async function buildAudioIntegrationPlan(
     ) {
       throw new AudioIntegrationError("unexpected_recording_processing_state");
     }
-    const catalogSource = resolve(projectRoot, "appsheet", original.objectKey);
+    const catalogSource = resolve(projectRoot, "legacy/appsheet", original.objectKey);
     if (
-      !isWithin(catalogSource, resolve(projectRoot, "appsheet"))
+      !isWithin(catalogSource, resolve(projectRoot, "legacy/appsheet"))
       || catalogSource !== job.source
     ) {
       throw new AudioIntegrationError("batch_source_catalog_mismatch");

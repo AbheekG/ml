@@ -14,9 +14,10 @@ The intended product behavior is:
 
 ## Legacy projects and source of truth
 
-- `appsheet/` is the newest attempt and the migration source of truth. Its `data.xlsx` workbook contains the current relational data; `scans/` and `recordings/` contain the referenced media.
-- `woodchime/` is an older Flask/SQLite prototype. Treat it as a source of product ideas only, especially its phonetic/transliteration search. Do not use its schema or authentication design as the base of a new app.
-- Both legacy folders are intentionally gitignored and contain private/user-owned data. Never rename, normalize, delete, convert, or edit anything in them in place.
+- The `legacy/` folder contains all private, gitignored legacy projects.
+- `legacy/appsheet/` is the newest attempt and the migration source of truth. Its `data.xlsx` workbook contains the current relational data; `scans/` and `recordings/` contain the referenced media.
+- `legacy/woodchime/` is an older Flask/SQLite prototype. Treat it as a source of product ideas only, especially its phonetic/transliteration search. Do not use its schema or authentication design as the base of a new app.
+- All folders inside `legacy/` are intentionally gitignored and contain private/user-owned data. Never rename, normalize, delete, convert, or edit anything in them in place.
 - Put private investigation notes in `notes/private/`, which is also intentionally gitignored. Do not include song titles, lyrics, personal names, email addresses, or media in tracked fixtures or logs.
 
 ## Data and migration safety

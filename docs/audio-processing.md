@@ -51,7 +51,7 @@ Failures retain the original and remain retryable. Partial or rejected outputs a
 
 The conversion core is a small Python module that invokes FFmpeg without containing storage- or cloud-specific logic.
 
-- A dry-run/idempotent local adapter prepares existing imported derivatives into a new output area and reports aggregate reconciliation without modifying `appsheet/`.
+- A dry-run/idempotent local adapter prepares existing imported derivatives into a new output area and reports aggregate reconciliation without modifying `legacy/appsheet/`.
 - A separate planner re-hashes the prepared set and proposes deterministic private object keys, original fingerprint backfills, derivative/provenance rows, and Recording playback references. It cannot upload or mutate D1/R2; those remain separately reviewed actions.
 - A dry-run-by-default executor consumes only that exact plan. Its R2 phase compares any existing deterministic object by size and SHA-256, uploads only a missing object, verifies the stored bytes, and atomically checkpoints each completed object in ignored private state. A rerun reuses verified objects and refuses conflicting bytes.
 - The separately authorized D1 phase requires the reviewed plan hash, complete upload state, a fresh verification of every planned R2 object, and the already-applied derivative-provenance migration. It submits one guarded import whose live row/revision preconditions and final relationship reconciliation fail the whole database transaction if the catalog has diverged. It never applies schema migrations automatically.

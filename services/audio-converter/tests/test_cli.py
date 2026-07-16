@@ -9,7 +9,7 @@ from audio_converter.service import PreparationError
 
 class CliSafetyTests(unittest.TestCase):
     def test_output_inside_appsheet_is_rejected(self) -> None:
-        output = PROJECT_ROOT / "appsheet" / "recordings" / "output.mp3"
+        output = PROJECT_ROOT / "legacy" / "appsheet" / "recordings" / "output.mp3"
         with self.assertRaisesRegex(
             PreparationError,
             "output_inside_protected_legacy_root",
@@ -17,7 +17,7 @@ class CliSafetyTests(unittest.TestCase):
             validate_output_path(output)
 
     def test_output_inside_woodchime_is_rejected(self) -> None:
-        output = PROJECT_ROOT / "woodchime" / "output.mp3"
+        output = PROJECT_ROOT / "legacy" / "woodchime" / "output.mp3"
         with self.assertRaisesRegex(
             PreparationError,
             "output_inside_protected_legacy_root",

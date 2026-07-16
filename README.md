@@ -2,7 +2,7 @@
 
 A private, installable song-library PWA for a small group using iPhone, iPad, Android, and desktop browsers.
 
-The application is being rebuilt from two private legacy attempts. The AppSheet workbook and media are the migration source; the older woodchime Flask project is reference material only. Neither legacy directory is tracked by Git.
+The application is being rebuilt from private legacy attempts (grouped inside the `legacy/` folder). The AppSheet workbook and media are the migration source; the older woodchime Flask project is reference material only. None of the legacy directories are tracked by Git.
 
 ## Product direction
 
@@ -23,8 +23,7 @@ See [the product plan](docs/product-plan.md) and [the implementation plan](docs/
 
 The following local directories are intentionally ignored:
 
-- `appsheet/` — private workbook, scans, recordings, and legacy scripts;
-- `woodchime/` — old private prototype;
+- `legacy/` — private legacy directories (including `legacy/appsheet/` workbook/media, `legacy/woodchime/` Flask prototype, and any older legacy assets);
 - `notes/private/` — private assessments and captures.
 
 Do not commit song titles, lyrics, names, email addresses, media, credentials, generated imports, or local Cloudflare state.

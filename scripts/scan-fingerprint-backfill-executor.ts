@@ -150,7 +150,7 @@ async function validateDatabasePath(
   path: string,
   projectRoot: string,
 ): Promise<string> {
-  const protectedRoots = [resolve(projectRoot, "appsheet"), resolve(projectRoot, "woodchime")];
+  const protectedRoots = [resolve(projectRoot, "legacy/appsheet"), resolve(projectRoot, "legacy/woodchime")];
   const resolved = resolve(path);
   if (protectedRoots.some((root) => isWithin(resolved, root))) {
     throw new ScanFingerprintExecutionError("database_inside_legacy_root");

@@ -28,8 +28,8 @@ async function fixture(): Promise<PlannerOptions> {
   const detailsPath = resolve(root, "notes/private/audio-batch-reuse-details.json");
   const planPath = resolve(root, "data/import-output/audio-integration-plan.json");
   const outputRoot = resolve(root, "notes/private/audio-migration-output");
-  const directSource = resolve(root, "appsheet/recordings/direct.mp3");
-  const derivativeSource = resolve(root, "appsheet/recordings/source.m4a");
+  const directSource = resolve(root, "legacy/appsheet/recordings/direct.mp3");
+  const derivativeSource = resolve(root, "legacy/appsheet/recordings/source.m4a");
   const directOutput = resolve(outputRoot, "media-direct.mp3");
   const derivativeOutput = resolve(outputRoot, "media-derivative.mp3");
   const directBytes = Buffer.from("direct source");

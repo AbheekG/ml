@@ -297,8 +297,8 @@ function asDateOnly(value: unknown): string | null {
 
 function parseOptions(arguments_: string[]): ImportOptions {
   const options: ImportOptions = {
-    workbookPath: "appsheet/data.xlsx",
-    mediaRoot: "appsheet",
+    workbookPath: "legacy/appsheet/data.xlsx",
+    mediaRoot: "legacy/appsheet",
     outputDirectory: "data/import-output",
     writeOutput: false,
   };

@@ -2,8 +2,7 @@
 notes/private/
 
 # Private legacy projects and media
-appsheet/
-woodchime/
+legacy/
 
 # Secrets and local configuration
 .env

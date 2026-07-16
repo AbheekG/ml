@@ -192,7 +192,7 @@ Cloud data placement uses the APAC location hint because normal users are primar
 5. Produce reconciliation output for every table, relationship, and media object.
 6. Add tests for duplicate keys, orphan prevention, lyric migration, and delete guards.
 
-Deliverable: repeatable local database creation from `appsheet/data.xlsx` with no legacy modification.
+Deliverable: repeatable local database creation from `legacy/appsheet/data.xlsx` with no legacy modification.
 
 ## Phase 2 — read-only PWA
 

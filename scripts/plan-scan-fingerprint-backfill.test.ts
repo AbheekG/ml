@@ -15,7 +15,7 @@ function hash(bytes: Uint8Array): string {
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "scan-fingerprint-plan-"));
-  const legacy = resolve(root, "appsheet", "scans");
+  const legacy = resolve(root, "legacy/appsheet", "scans");
   const output = resolve(root, "data", "import-output");
   await Promise.all([mkdir(legacy, { recursive: true }), mkdir(output, { recursive: true })]);
   const first = new Uint8Array([1, 2, 3, 4]);

@@ -184,7 +184,7 @@ export async function buildScanFingerprintBackfillPlan(
 }> {
   const projectRoot = resolve(options.projectRoot ?? PROJECT_ROOT);
   const catalogPath = resolve(options.catalogPath);
-  const legacyRoot = resolve(projectRoot, "appsheet");
+  const legacyRoot = resolve(projectRoot, "legacy/appsheet");
   const [{ catalog, sha256: catalogSha256 }, legacyRootReal] = await Promise.all([
     readCatalog(catalogPath),
     realpath(legacyRoot).catch(() => {
@@ -294,7 +294,7 @@ export async function writeScanFingerprintPlanAtomic(
     resolve(projectRoot, "data/import-output"),
     resolve(projectRoot, "notes/private"),
   ];
-  const protectedRoots = [resolve(projectRoot, "appsheet"), resolve(projectRoot, "woodchime")];
+  const protectedRoots = [resolve(projectRoot, "legacy/appsheet"), resolve(projectRoot, "legacy/woodchime")];
   if (!privateRoots.some((root) => isWithin(resolved, root))) {
     throw new ScanFingerprintBackfillError("plan_output_must_be_private");
   }

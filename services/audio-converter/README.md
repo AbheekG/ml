@@ -2,7 +2,7 @@
 
 This service contains the provider-neutral Python/FFmpeg core for the playback policy in [`docs/audio-processing.md`](../../docs/audio-processing.md).
 
-The first adapter is a local, single-file CLI. It is dry-run by default, never changes its input, refuses output inside the protected legacy `appsheet/` and `woodchime/` folders, and emits no filename unless the caller deliberately supplies one as the opaque label.
+The first adapter is a local, single-file CLI. It is dry-run by default, never changes its input, refuses output inside the protected legacy `legacy/appsheet/` and `legacy/woodchime/` folders, and emits no filename unless the caller deliberately supplies one as the opaque label.
 
 ```sh
 cd services/audio-converter
@@ -30,7 +30,7 @@ The batch adapter consumes an ignored JSON manifest with unique opaque labels an
   "jobs": [
     {
       "label": "opaque-media-id",
-      "input": "../../appsheet/recordings/private-source",
+      "input": "../../legacy/appsheet/recordings/private-source",
       "output": "audio-migration-output/opaque-media-id.mp3"
     }
   ]

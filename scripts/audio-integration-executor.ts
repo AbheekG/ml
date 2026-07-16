@@ -169,7 +169,7 @@ async function writeTextAtomic(
   if (!privateRoots.some((root) => isWithin(resolved, root))) {
     throw new AudioIntegrationExecutionError("executor_output_must_be_private");
   }
-  if (["appsheet", "woodchime"].some((name) => (
+  if (["legacy/appsheet", "legacy/woodchime"].some((name) => (
     isWithin(resolved, resolve(projectRoot, name))
   ))) {
     throw new AudioIntegrationExecutionError("executor_output_inside_legacy_root");

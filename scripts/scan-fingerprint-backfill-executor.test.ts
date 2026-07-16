@@ -15,7 +15,7 @@ import {
 
 async function fixture() {
   const root = await mkdtemp(resolve(tmpdir(), "scan-fingerprint-executor-"));
-  const legacy = resolve(root, "appsheet/scans");
+  const legacy = resolve(root, "legacy/appsheet/scans");
   const output = resolve(root, "data/import-output");
   const databasePath = resolve(root, "catalog.sqlite");
   const catalogPath = resolve(output, "catalog.json");
@@ -199,7 +199,7 @@ describe("Scan fingerprint backfill executor", () => {
 
   it("refuses database paths inside either protected legacy tree", async () => {
     const item = await fixture();
-    const unsafe = resolve(item.root, "appsheet/catalog.sqlite");
+    const unsafe = resolve(item.root, "legacy/appsheet/catalog.sqlite");
     await mkdir(dirname(unsafe), { recursive: true });
     await writeFile(unsafe, "not a database");
     await expect(executeScanFingerprintBackfill({

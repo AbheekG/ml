@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 const BUCKET = "music-library-media-staging";
 const CATALOG_PATH = resolve("data/import-output/catalog.json");
 const STATE_PATH = resolve("data/import-output/r2-upload-state.json");
-const MEDIA_ROOT = resolve("appsheet");
+const MEDIA_ROOT = resolve("legacy/appsheet");
 const WRANGLER = resolve("node_modules/.bin/wrangler");
 
 type MediaObject = {

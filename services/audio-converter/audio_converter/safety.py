@@ -8,8 +8,8 @@ from .service import PreparationError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROTECTED_OUTPUT_ROOTS = (
-    PROJECT_ROOT / "appsheet",
-    PROJECT_ROOT / "woodchime",
+    PROJECT_ROOT / "legacy" / "appsheet",
+    PROJECT_ROOT / "legacy" / "woodchime",
 )
 OPAQUE_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
