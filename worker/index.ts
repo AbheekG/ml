@@ -675,6 +675,19 @@ function runGcpJobInBackground(env: Bindings, context: any): void {
   }
 }
 
+async function triggerNextPendingJob(database: D1Database, env: Bindings, context: any): Promise<void> {
+  try {
+    const pending = await database.prepare(`
+      SELECT id FROM audio_processing_jobs WHERE status = 'pending' LIMIT 1
+    `).first<{ id: string }>();
+    if (pending) {
+      runGcpJobInBackground(env, context);
+    }
+  } catch (err) {
+    console.error("Failed to query pending audio processing jobs for trigger chaining:", err instanceof Error ? err.message : err);
+  }
+}
+
 async function audioProcessorAuthorization(
   authorization: string | undefined,
   configuredToken: string | undefined,
@@ -1628,6 +1641,16 @@ app.post("/api/processing/jobs/:jobId/result", async (context) => {
   if (!job || !succeededAudioProcessingJobMatches(job, result)) {
     return context.json({ error: "audio_processing_finalization_incomplete" }, 500);
   }
+  let executionCtx: any;
+  try {
+    executionCtx = context.executionCtx;
+  } catch {}
+  if (executionCtx && typeof executionCtx.waitUntil === "function") {
+    executionCtx.waitUntil(triggerNextPendingJob(context.env.DB, context.env, context));
+  } else {
+    triggerNextPendingJob(context.env.DB, context.env, context).catch(() => {});
+  }
+
   return context.json({
     job: { id: job.id, status: job.status, playbackKind: job.playbackKind },
   });
@@ -1695,6 +1718,16 @@ app.post("/api/processing/jobs/:jobId/failure", async (context) => {
   } catch {
     return context.json({ error: "audio_processing_failure_checkpoint_failed" }, 503);
   }
+  let executionCtx: any;
+  try {
+    executionCtx = context.executionCtx;
+  } catch {}
+  if (executionCtx && typeof executionCtx.waitUntil === "function") {
+    executionCtx.waitUntil(triggerNextPendingJob(context.env.DB, context.env, context));
+  } else {
+    triggerNextPendingJob(context.env.DB, context.env, context).catch(() => {});
+  }
+
   return context.json({
     job: { id: job.id, status: "failed", errorCode: failure.errorCode },
   });
