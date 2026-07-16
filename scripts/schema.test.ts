@@ -13,7 +13,8 @@ const recordingUploadSessionsMigration = readFileSync(resolve("migrations/0006_r
 const audioProcessingControlMigration = readFileSync(resolve("migrations/0007_audio_processing_control.sql"), "utf8");
 const audioProcessingConcurrencyMigration = readFileSync(resolve("migrations/0008_audio_processing_concurrency.sql"), "utf8");
 const mediaReplacementsMigration = readFileSync(resolve("migrations/0009_media_replacements.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}`;
+const nonUniqueJobsMigration = readFileSync(resolve("migrations/0010_non_unique_audio_processing_jobs.sql"), "utf8");
+const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}`;
 const timestamp = "2026-07-12T00:00:00.000Z";
 
 function runSql(sql: string): string {

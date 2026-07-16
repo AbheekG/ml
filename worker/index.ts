@@ -533,7 +533,11 @@ async function loadAudioProcessingJobByRecording(
   recordingId: string,
 ): Promise<AudioProcessingJobRow | null> {
   const job = await database.prepare(`
-    SELECT id FROM audio_processing_jobs WHERE recording_id = ?
+    SELECT audio_processing_jobs.id
+    FROM audio_processing_jobs
+    JOIN recordings ON recordings.id = audio_processing_jobs.recording_id
+      AND recordings.original_media_id = audio_processing_jobs.source_media_id
+    WHERE audio_processing_jobs.recording_id = ?
   `).bind(recordingId).first<{ id: string }>();
   return job ? loadAudioProcessingJob(database, job.id) : null;
 }
@@ -2576,14 +2580,6 @@ app.post("/api/songs/:songId/recording-uploads/:sessionId/replace", requireRole(
           )
       `).bind(targetRecordingId, session.id, actor, parsed.data.sessionRevision),
       context.env.DB.prepare(`
-        DELETE FROM audio_processing_jobs
-        WHERE recording_id = ?
-          AND EXISTS (
-            SELECT 1 FROM recording_upload_sessions
-            WHERE id = ? AND created_by = ? AND status = 'stored' AND revision = ?
-          )
-      `).bind(targetRecordingId, session.id, actor, parsed.data.sessionRevision),
-      context.env.DB.prepare(`
         INSERT INTO recording_credits (
           id, recording_id, person_id, role, sort_order
         )
@@ -2679,7 +2675,7 @@ app.post("/api/songs/:songId/recording-uploads/:sessionId/replace", requireRole(
   if (!recording) return context.json({ error: "recording_upload_finalization_incomplete" }, 500);
   return context.json(
     { upload: publicRecordingUploadSession(session), recording },
-    results[8].meta.changes === 1 ? 201 : 200,
+    results[7].meta.changes === 1 ? 201 : 200,
   );
 });
 
