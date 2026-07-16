@@ -2567,7 +2567,22 @@ app.post("/api/songs/:songId/recording-uploads/:sessionId/replace", requireRole(
         targetRecordingId, session.songId, parsed.data.targetRecordingRevision,
         session.id, actor, parsed.data.sessionRevision,
       ),
-      context.env.DB.prepare(`DELETE FROM recording_credits WHERE recording_id = ?`).bind(targetRecordingId),
+      context.env.DB.prepare(`
+        DELETE FROM recording_credits
+        WHERE recording_id = ?
+          AND EXISTS (
+            SELECT 1 FROM recording_upload_sessions
+            WHERE id = ? AND created_by = ? AND status = 'stored' AND revision = ?
+          )
+      `).bind(targetRecordingId, session.id, actor, parsed.data.sessionRevision),
+      context.env.DB.prepare(`
+        DELETE FROM audio_processing_jobs
+        WHERE recording_id = ?
+          AND EXISTS (
+            SELECT 1 FROM recording_upload_sessions
+            WHERE id = ? AND created_by = ? AND status = 'stored' AND revision = ?
+          )
+      `).bind(targetRecordingId, session.id, actor, parsed.data.sessionRevision),
       context.env.DB.prepare(`
         INSERT INTO recording_credits (
           id, recording_id, person_id, role, sort_order
@@ -2664,7 +2679,7 @@ app.post("/api/songs/:songId/recording-uploads/:sessionId/replace", requireRole(
   if (!recording) return context.json({ error: "recording_upload_finalization_incomplete" }, 500);
   return context.json(
     { upload: publicRecordingUploadSession(session), recording },
-    results[7].meta.changes === 1 ? 201 : 200,
+    results[8].meta.changes === 1 ? 201 : 200,
   );
 });
 
