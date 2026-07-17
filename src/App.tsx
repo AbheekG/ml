@@ -58,40 +58,32 @@ import { emptyCatalogFilters, filterAndSortCatalog, type CatalogSort } from "./c
 import { findSimilarLookupItems } from "./lookup-similarity";
 import { shouldOfferDirectCameraCapture } from "./device-capabilities";
 import { scanDisplayName } from "./scan-viewer";
+import {
+  createLatestConnectivityChecker,
+  preserveSessionResolutionDuringRevalidation,
+} from "./app-lifecycle";
 
 function useOnlineStatus(): boolean {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
 
   useEffect(() => {
-    let disposed = false;
-    let activeRequest: AbortController | null = null;
-
-    async function checkConnection(): Promise<void> {
-      activeRequest?.abort();
-      const controller = new AbortController();
-      activeRequest = controller;
-      const timeout = window.setTimeout(() => controller.abort(), 5000);
-
-      try {
+    const checker = createLatestConnectivityChecker(
+      async (signal) => {
         const response = await fetch(`/api/health?connectivity=${Date.now()}`, {
           cache: "no-store",
           headers: { Accept: "application/json" },
-          signal: controller.signal,
+          signal,
         });
-        const isHealthy = response.ok
+        return response.ok
           && response.headers.get("content-type")?.includes("application/json") === true;
-        if (!disposed) setIsOnline(isHealthy);
-      } catch {
-        if (!disposed) setIsOnline(false);
-      } finally {
-        window.clearTimeout(timeout);
-      }
-    }
+      },
+      setIsOnline,
+    );
 
-    const goOnline = () => { void checkConnection(); };
-    const goOffline = () => setIsOnline(false);
+    const goOnline = () => { void checker.check(); };
+    const goOffline = () => checker.markOffline();
     const checkWhenVisible = () => {
-      if (document.visibilityState === "visible") void checkConnection();
+      if (document.visibilityState === "visible") void checker.check();
     };
 
     window.addEventListener("online", goOnline);
@@ -99,12 +91,11 @@ function useOnlineStatus(): boolean {
     window.addEventListener("focus", goOnline);
     window.addEventListener("pageshow", goOnline);
     document.addEventListener("visibilitychange", checkWhenVisible);
-    const interval = window.setInterval(() => { void checkConnection(); }, 30000);
-    void checkConnection();
+    const interval = window.setInterval(() => { void checker.check(); }, 30000);
+    void checker.check();
 
     return () => {
-      disposed = true;
-      activeRequest?.abort();
+      checker.dispose();
       window.clearInterval(interval);
       window.removeEventListener("online", goOnline);
       window.removeEventListener("offline", goOffline);
@@ -1904,7 +1895,7 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     if (!isOnline) return () => { cancelled = true; };
-    setSessionResolved(false);
+    setSessionResolved(preserveSessionResolutionDuringRevalidation);
     loadSession().then(async (user) => {
       if (!cancelled) {
         const previousNamespace = localStorage.getItem(cacheNamespaceKey);
