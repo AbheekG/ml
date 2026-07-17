@@ -1339,6 +1339,8 @@ button:disabled {
   padding: max(0.75rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right)) max(0.75rem, env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left));
   place-items: center;
   background: rgb(19 17 14 / 92%);
+  overscroll-behavior: none;
+  touch-action: none;
 }
 
 .scan-viewer-panel {
@@ -1468,6 +1470,7 @@ button:disabled {
   transform-origin: 0 0;
   will-change: transform;
   -webkit-user-drag: none;
+  touch-action: none;
 }
 
 .scan-load-error {

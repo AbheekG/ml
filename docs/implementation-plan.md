@@ -18,8 +18,11 @@ gate also passed Scan and Recording create/replace, multipart interruption and
 resume, exact duplicate rejection/dismissal, audio processing/playback, metadata
 editing, retained replacement history, and child/parent Trash/restore. Its exact
 D1/R2 postflight matches every planned count and all nine retained objects.
-iOS/iPadOS compatibility, observed per-Scan orientation, and mobile pinch-zoom
-refinement remain explicit later work. The local logout hardening now places a
+iOS/iPadOS compatibility and observed per-Scan orientation remain explicit
+later work. Scan-viewer gesture containment is deployed for owner acceptance:
+the viewer modal suppresses browser-level touch zoom while open, and a native
+non-passive wheel boundary converts trackpad pinch into bounded image zoom
+without scaling the controls. The local logout hardening now places a
 persistent privacy barrier before clearing, invalidates other tabs, prevents
 stale sync commits, verifies IndexedDB/CacheStorage removal, requests browser
 HTTP-cache clearing, and keeps Cloudflare Access control paths outside the
@@ -76,19 +79,31 @@ regenerate its mappings, or garbage-collect the retained history. Production and
 the unresolved cases remain separately owner-gated; see
 [scan-original-recovery.md](scan-original-recovery.md).
 
+Protected-staging Worker version `a59e5bb8-2d4c-4797-a536-e8dfe9e50f75`
+contains the Scan-viewer gesture refinement with client/service-worker build
+`f7da29dcff69`. Verification passes at 46 Vitest files / 326 tests, all 90
+Python audio tests, all three TypeScript projects, production bundles, and
+whitespace checks. Access still returns the expected unauthenticated redirect,
+no migration is pending, and aggregate D1/foreign-key postflight is unchanged
+with zero rows written. Android Chrome and macOS Safari manual interaction
+acceptance remains the next gate; iOS/iPadOS remains deferred.
+
 ## Current execution order
 
 The core read/edit/recovery/search flows and safe Scan/Recording create/replace
 pipelines now work in staging. Continue in this order:
 
-1. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
+1. complete the deployed Scan-viewer gesture gate on Android Chrome and macOS
+   Safari, including a relatively small Scan; keep browser zoom outside the
+   viewer unaffected;
+2. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
    any deletion executor and every physical delete remain separately designed
    and owner-approved; at the next genuine Recording finalization/replacement,
    verify its bounded immediate-dispatch record as ordinary postflight;
-2. investigate the two issue-marked Scan mappings, the deferred unmatched cases,
+3. investigate the two issue-marked Scan mappings, the deferred unmatched cases,
    or the reserved later manual uploads only when the owner prioritizes them;
-3. add sharing or further search/product polish only from concrete feedback;
-4. begin production readiness and cutover only after the staging acceptance,
+4. add sharing or further search/product polish only from concrete feedback;
+5. begin production readiness and cutover only after the staging acceptance,
    reconciliation, backup, quota, and explicit owner-approval gates pass.
 
 This is a delivery order rather than a schema dependency. The accepted search and filter work remains independently testable while media workflows are added.

@@ -3,7 +3,6 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
 } from "react";
 import type { SongScan } from "./catalog";
 import {
@@ -13,6 +12,7 @@ import {
   fittedScanView,
   MAX_SCAN_ZOOM,
   MIN_SCAN_ZOOM,
+  scanViewAfterWheel,
   scanDisplayName,
   SCAN_ZOOM_STEP,
   type ScanPoint,
@@ -149,6 +149,35 @@ export function ScanViewer({
   }, [fittedSize.height, fittedSize.width, viewportSize.height, viewportSize.width]);
 
   useEffect(() => {
+    const overlay = overlayRef.current;
+    const stage = stageRef.current;
+    if (!overlay || !stage) return;
+    const wheelStage = stage;
+
+    function handleWheel(event: WheelEvent): void {
+      const target = event.target;
+      const isOverStage = target instanceof Node && wheelStage.contains(target);
+
+      if (!isOverStage) {
+        if (event.ctrlKey || event.metaKey) event.preventDefault();
+        return;
+      }
+
+      event.preventDefault();
+      applyView(scanViewAfterWheel(
+        viewRef.current,
+        event,
+        stagePoint(event.clientX, event.clientY),
+        fittedSize,
+        viewportSize,
+      ));
+    }
+
+    overlay.addEventListener("wheel", handleWheel, { passive: false });
+    return () => overlay.removeEventListener("wheel", handleWheel);
+  }, [fittedSize.height, fittedSize.width, viewportSize.height, viewportSize.width]);
+
+  useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     document.body.style.overflow = "hidden";
@@ -249,20 +278,6 @@ export function ScanViewer({
     beginGesture();
   }
 
-  function wheel(event: ReactWheelEvent<HTMLDivElement>): void {
-    event.preventDefault();
-    if (event.ctrlKey || event.metaKey) {
-      const multiplier = Math.exp(-event.deltaY * 0.004);
-      zoomTo(viewRef.current.zoom * multiplier, stagePoint(event.clientX, event.clientY));
-    } else {
-      applyView(clampScanView({
-        ...viewRef.current,
-        x: viewRef.current.x - event.deltaX,
-        y: viewRef.current.y - event.deltaY,
-      }, fittedSize, viewportSize));
-    }
-  }
-
   async function enterImageOnly(): Promise<void> {
     setIsImageOnly(true);
     const element = overlayRef.current as WebkitElement | null;
@@ -339,7 +354,6 @@ export function ScanViewer({
           onPointerUp={pointerEnd}
           onPointerCancel={pointerEnd}
           onLostPointerCapture={pointerEnd}
-          onWheel={wheel}
         >
           {loadFailed ? (
             <div className="scan-load-error" role="alert">
