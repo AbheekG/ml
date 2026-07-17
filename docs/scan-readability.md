@@ -1,7 +1,8 @@
 # Scan integrity and readability
 
-Status: implemented in protected staging, 2026-07-16; representative visual
-quality remains an owner/device acceptance gate.
+Status: implemented in protected staging, 2026-07-16. The owner accepted the ten
+highest-risk local visual candidates; real Safari/iOS and Chrome/Android checks
+remain pre-cutover gates.
 
 ## Policy
 

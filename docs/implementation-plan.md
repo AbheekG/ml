@@ -2,29 +2,44 @@
 
 Status: approved direction; execute iteratively and validate each phase on real data and devices.
 
-Current protected-staging checkpoint (2026-07-16): the vertical slice, online
+Current protected-staging checkpoint (2026-07-17): the vertical slice, online
 catalog/child editing, private Scan create/replace, and Recording
 create/replace are implemented. Audio finalization now records an immutable
 dispatch attempt and starts the bounded Cloud Run Job through keyless
 Cloudflare Access-to-Google Workload Identity Federation; the enabled
 15-minute Scheduler is a reliable/cost-bounded fallback. The old Cloudflare-held Google
 JSON key is deleted and the old trigger service account is disabled. Imported
-Scan sources are being reconciled into the global fingerprint registry and
-private 2400-pixel JPEG readability derivatives through bounded, leased daily
-maintenance. Production remains absent; real-device media/derivative acceptance
-and explicit review of historical pre-intent upload sessions remain gates.
+Scan sources are reconciled in the global fingerprint registry and have private
+2400-pixel JPEG readability derivatives; bounded, leased daily maintenance
+remains enabled for later repair needs. Production remains absent; real-device
+media/derivative acceptance and explicit review of historical pre-intent upload
+sessions remain gates.
+
+The owner-directed genuine Scan-source recovery is complete for the exact
+reviewed staging set. The local matcher inventoried both read-only trees, checked
+exact hashes first, combined transformation-tolerant content evidence with
+independent association evidence, and enforced one-to-one, quality, and
+hash-collision gates. The separately guarded executor activated new private
+source/readability pairs, retained every former pair through immutable Scan
+history, and used recoverable Trash for the rejected wrong-parent Scan. The
+owner accepted the final post-activation comparison PDF. Do not rerun the swap,
+regenerate its mappings, or garbage-collect the retained history. Production and
+the unresolved cases remain separately owner-gated; see
+[scan-original-recovery.md](scan-original-recovery.md).
 
 ## Current execution order
 
 The core read/edit/recovery/search flows and safe Scan/Recording create/replace
 pipelines now work in staging. Continue in this order:
 
-1. finish/reconcile imported Scan fingerprint and readability repair, then
-   visually accept representative derivatives on real devices;
-2. review/discard or recover historical upload sessions that predate immutable
+1. review/discard or recover historical upload sessions that predate immutable
    create/replace intents;
-3. run Safari/iOS and Chrome/Android offline, Scan, upload, and playback gates;
-4. add sharing or further search/product polish only from concrete feedback.
+2. run Safari/iOS and Chrome/Android offline, Scan, upload, and playback gates;
+3. investigate the two issue-marked Scan mappings, the deferred unmatched cases,
+   or the reserved later manual uploads only when the owner prioritizes them;
+4. add sharing or further search/product polish only from concrete feedback;
+5. begin production readiness and cutover only after the staging acceptance,
+   reconciliation, backup, quota, and explicit owner-approval gates pass.
 
 This is a delivery order rather than a schema dependency. The accepted search and filter work remains independently testable while media workflows are added.
 

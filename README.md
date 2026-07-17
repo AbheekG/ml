@@ -59,7 +59,7 @@ The private staging application is operational:
 - the Worker has a durable, editor-owned 8 MiB multipart intake for creating or replacing private Recording originals. Immutable upload intents bind each session to its exact operation, recovery controls expose resumable/stored/duplicate sessions without exposing storage identifiers, replacement preserves prior media history, and active processing/upload guards prevent conflicting Trash or source changes;
 - the deployed audio processor uses a separately authenticated claim/lease boundary, database-enforced global single-running-job gate, bounded lease recovery, operation-scoped transfer capabilities, immutable derivative attempts, independent byte verification, atomic provenance finalization, and explicit editor retry. Finalization records an immutable dispatch attempt and starts the bounded Cloud Run Job asynchronously through keyless Cloudflare Access-to-Google Workload Identity Federation; a 15-minute OAuth Scheduler remains enabled as the reliable/cost-bounded fallback, so a failed immediate trigger leaves durable pending work rather than losing it;
 - imported and newly uploaded Scans use a private derivative-or-original read path; a bounded daily repair task backfills fingerprints and derivatives with expiring per-media leases and privacy-safe failure records. Originals remain private and retained;
-- remaining acceptance work is real Safari/iOS and Chrome/Android media/scan testing, visual approval of representative Scan derivatives, and owner review of pre-intent historical upload sessions; broader contribution roles and later product expansion remain evidence-driven.
+- the owner accepted the representative local Scan-derivative visual review; remaining acceptance work is real Safari/iOS and Chrome/Android media/scan testing and owner review of pre-intent historical upload sessions; broader contribution roles and later product expansion remain evidence-driven.
 
 The exact Scan conversion, provenance, repair, and visual-acceptance rules are
 recorded in [the Scan integrity/readability policy](docs/scan-readability.md).
@@ -170,6 +170,24 @@ other cloud client. Never point it at a legacy tree. The completed staging
 backfill used the separately authorized bounded Worker repair path; this local
 tool still has no remote mode, and any future environment remains a separate
 reviewed operation.
+
+Genuine Scan-source recovery from the older read-only Drive collection has a
+separate aggregate-only local matcher:
+
+```bash
+npm run media:recover-scan-originals
+```
+
+It hashes exact bytes first, then combines orientation/rotation/crop-tolerant
+image evidence with folder/page corroboration and one-to-one conflict checks. It
+does not contact D1/R2 or write `legacy/`. Add `-- --write-report` to checkpoint
+resumable features and write the deterministic detailed mapping only under
+ignored `notes/private/`; add `--write-review` for private difference aids and
+contact sheets. This command never applies a replacement. The separately
+guarded staging activation is complete for the exact owner-reviewed set; do not
+rerun it, regenerate its mappings, or garbage-collect the retained former media.
+The recovery and history-preserving rollback design is in
+[the Scan original recovery record](docs/scan-original-recovery.md).
 
 After a plan has been reviewed, preview its execution locally. This re-hashes every
 planned derivative and reports only aggregate counts; it does not contact R2 or D1:
