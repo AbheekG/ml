@@ -112,16 +112,20 @@ Verification passes at 47 Vitest files / 327 tests, all 90 Python audio tests,
 all three TypeScript projects, production bundles, and whitespace checks. Access
 still returns the expected unauthenticated redirect, no migration is pending,
 and aggregate D1/foreign-key postflight is unchanged with zero rows written.
-Catalog restoration and feedback visibility are the next manual interaction
-gate; iOS/iPadOS remains deferred.
+Catalog restoration, Android native-Back behavior, and Song-detail top position
+are owner-accepted. macOS Safari's interactive Back gesture has a non-blocking
+temporary scroll-input lock after returning to the correct position; do not add
+timing workarounds without stronger application evidence. Feedback visibility
+may be observed during the next natural error or duplicate operation;
+iOS/iPadOS remains deferred.
 
 ## Current execution order
 
 The core read/edit/recovery/search flows and safe Scan/Recording create/replace
 pipelines now work in staging. Continue in this order:
 
-1. manually accept catalog search/filter/sort/scroll restoration and direct
-   action-feedback visibility in representative phone and desktop browsers;
+1. perform a read-only prioritization review when the owner starts the next
+   phase, then obtain approval for the smallest useful implementation slice;
 2. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
    any deletion executor and every physical delete remain separately designed
    and owner-approved; at the next genuine Recording finalization/replacement,
