@@ -62,6 +62,18 @@ import {
   createLatestConnectivityChecker,
   preserveSessionResolutionDuringRevalidation,
 } from "./app-lifecycle";
+import {
+  PRIVATE_CACHE_NAMESPACE_KEY,
+  PRIVATE_DATA_BARRIER_KEY,
+  PRIVATE_DATA_CHANNEL_NAME,
+  PENDING_ACCESS_LOGOUT_KEY,
+  completePendingAccessLogout,
+  isAccessLogoutPending,
+  isPrivateDataBlocked,
+  isPrivateDataClearedMessage,
+  logoutAndClearPrivateData,
+  reconcilePrivateDataSession,
+} from "./private-data";
 
 function useOnlineStatus(): boolean {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -1861,61 +1873,109 @@ export function App() {
   const isOnline = useOnlineStatus();
   const [session, setSession] = useState<AppSession | null>(null);
   const [sessionResolved, setSessionResolved] = useState(false);
-  const cacheNamespaceKey = "music-library-cache-namespace";
-  const privacyChannelName = "music-library-private-data";
+  const [privateDataBlocked, setPrivateDataBlocked] = useState(isPrivateDataBlocked);
+  const [accessLogoutPending, setAccessLogoutPending] = useState(isAccessLogoutPending);
+  const sessionGeneration = useRef(0);
+  const logoutCompletionActive = useRef(false);
 
   function notifyPrivateDataCleared(): void {
     if ("BroadcastChannel" in window) {
-      const channel = new BroadcastChannel(privacyChannelName);
+      const channel = new BroadcastChannel(PRIVATE_DATA_CHANNEL_NAME);
       channel.postMessage({ type: "private-data-cleared" });
       channel.close();
     }
   }
 
   async function logoutAndClear(): Promise<void> {
-    await clearPrivateLocalData();
-    localStorage.removeItem(cacheNamespaceKey);
-    notifyPrivateDataCleared();
-    window.location.assign("/cdn-cgi/access/logout");
+    sessionGeneration.current += 1;
+    setSession(null);
+    setSessionResolved(false);
+    setPrivateDataBlocked(true);
+    setAccessLogoutPending(true);
+    logoutCompletionActive.current = true;
+    try {
+      await logoutAndClearPrivateData({
+        clearPrivateLocalData,
+        notifyOtherTabs: notifyPrivateDataCleared,
+        navigate: (path) => window.location.replace(path),
+        online: isOnline,
+      });
+    } finally {
+      logoutCompletionActive.current = false;
+    }
   }
 
   useEffect(() => {
-    if (!("BroadcastChannel" in window)) return undefined;
-    const channel = new BroadcastChannel(privacyChannelName);
-    channel.addEventListener("message", (event) => {
-      if (event.data?.type !== "private-data-cleared") return;
-      localStorage.removeItem(cacheNamespaceKey);
+    const invalidatePrivateData = () => {
+      sessionGeneration.current += 1;
+      localStorage.removeItem(PRIVATE_CACHE_NAMESPACE_KEY);
       setSession(null);
       setSessionResolved(false);
-      void clearPrivateLocalData();
+      setPrivateDataBlocked(true);
+      setAccessLogoutPending(true);
+      void clearPrivateLocalData().catch(() => undefined);
+    };
+    const storageListener = (event: StorageEvent) => {
+      if (
+        (event.key === PRIVATE_DATA_BARRIER_KEY || event.key === PENDING_ACCESS_LOGOUT_KEY)
+        && event.newValue !== null
+      ) {
+        invalidatePrivateData();
+      }
+    };
+    window.addEventListener("storage", storageListener);
+    if (!("BroadcastChannel" in window)) {
+      return () => window.removeEventListener("storage", storageListener);
+    }
+    const channel = new BroadcastChannel(PRIVATE_DATA_CHANNEL_NAME);
+    channel.addEventListener("message", (event) => {
+      if (isPrivateDataClearedMessage(event.data)) invalidatePrivateData();
     });
-    return () => channel.close();
+    return () => {
+      window.removeEventListener("storage", storageListener);
+      channel.close();
+    };
   }, []);
 
   useEffect(() => {
+    if (!isOnline || !accessLogoutPending || logoutCompletionActive.current) return undefined;
     let cancelled = false;
-    if (!isOnline) return () => { cancelled = true; };
-    setSessionResolved(preserveSessionResolutionDuringRevalidation);
-    loadSession().then(async (user) => {
-      if (!cancelled) {
-        const previousNamespace = localStorage.getItem(cacheNamespaceKey);
-        if (previousNamespace && previousNamespace !== user.cacheNamespace) {
-          await clearPrivateLocalData();
-        }
-        localStorage.setItem(cacheNamespaceKey, user.cacheNamespace);
-      }
-      if (!cancelled) {
-        setSession(user);
-        setSessionResolved(true);
-      }
-    }).catch(() => {
-      if (!cancelled) {
-        setSession(null);
-        setSessionResolved(true);
-      }
+    logoutCompletionActive.current = true;
+    void completePendingAccessLogout({
+      navigate: (path) => window.location.replace(path),
+    }).then((navigating) => {
+      if (!cancelled && !navigating) setAccessLogoutPending(true);
+    }).finally(() => {
+      logoutCompletionActive.current = false;
     });
     return () => { cancelled = true; };
-  }, [isOnline]);
+  }, [isOnline, accessLogoutPending]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const generation = sessionGeneration.current;
+    if (!isOnline || accessLogoutPending || isAccessLogoutPending()) {
+      return () => { cancelled = true; };
+    }
+    setSessionResolved(preserveSessionResolutionDuringRevalidation);
+    void (async () => {
+      try {
+        const user = await loadSession();
+        if (cancelled || generation !== sessionGeneration.current) return;
+        await reconcilePrivateDataSession(user.cacheNamespace, clearPrivateLocalData);
+        if (cancelled || generation !== sessionGeneration.current) return;
+        setSession(user);
+        setSessionResolved(true);
+        setPrivateDataBlocked(false);
+      } catch {
+        if (!cancelled && generation === sessionGeneration.current) {
+          setSession(null);
+          setSessionResolved(true);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isOnline, accessLogoutPending]);
 
   const canEdit = !sessionResolved ? null : session?.role === "editor" || session?.role === "admin";
 
@@ -1933,7 +1993,9 @@ export function App() {
         </span>
       </header>
 
-      {isOnline && !sessionResolved
+      {privateDataBlocked
+        ? <main className="page-shell" id="main-content"><p>{accessLogoutPending ? "This device’s private library has been cleared. Cloudflare sign-out is pending and will finish automatically when this device reconnects." : "This device’s private library has been cleared. Reconnect and sign in to sync it again."}</p></main>
+        : isOnline && !sessionResolved
         ? <main className="page-shell" id="main-content"><p>Checking this device’s private session…</p></main>
         : <Routes>
         <Route path="/songs" element={<SongsPage isOnline={isOnline} canEdit={canEdit} />} />
@@ -1954,12 +2016,12 @@ export function App() {
         <Route path="*" element={<Navigate to="/songs" replace />} />
       </Routes>}
 
-      <nav className="bottom-nav" aria-label="Primary navigation">
+      {!privateDataBlocked && <nav className="bottom-nav" aria-label="Primary navigation">
         <Link to="/songs">Songs</Link>
         {canEdit === true && <Link to="/trash">Trash</Link>}
         {canEdit === true && <Link to="/manage">Lists</Link>}
         <Link to="/account">Account</Link>
-      </nav>
+      </nav>}
     </div>
   );
 }

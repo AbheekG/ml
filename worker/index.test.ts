@@ -219,6 +219,19 @@ describe("Worker API", () => {
     });
   });
 
+  it("prepares logout by clearing only browser caches without changing server state", async () => {
+    const response = await app.request(
+      "http://local.test/api/logout",
+      { method: "POST" },
+      localBindings(undefined, "viewer"),
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("Clear-Site-Data")).toBe('"cache"');
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(await response.text()).toBe("");
+  });
+
   it("prevents viewers from reaching Song write validation or the database", async () => {
     const response = await app.request(
       "http://local.test/api/songs",
@@ -1255,6 +1268,7 @@ describe("Worker API", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("audio/mpeg");
     expect(response.headers.get("accept-ranges")).toBe("bytes");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
     await expect(response.text()).resolves.toBe("audio");
   });
 
@@ -1286,6 +1300,7 @@ describe("Worker API", () => {
     expect(response.status).toBe(206);
     expect(response.headers.get("content-range")).toBe("bytes 0-1023/5000");
     expect(response.headers.get("content-length")).toBe("1024");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
   });
 
   it("rejects API requests that bypass Access without a signed assertion", async () => {

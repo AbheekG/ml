@@ -79,6 +79,11 @@ bound by plan SHA-256
 `f509bbf8bb0a0ac1d1651919f79152b7236d2f547d4597d564ecde72f2347f03`.
 No object or database row was changed.
 
+The owner accepted deferring another review until roughly 30 days have elapsed.
+Do not treat the current report as deletion authorization. Generate a fresh
+read-only report no earlier than 2026-08-16; the six pre-intent cases will still
+require explicit private owner evidence even after their grace period.
+
 ## Future deletion gate
 
 A future deletion executor is not implied or authorized. Its separate design

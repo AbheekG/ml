@@ -4,6 +4,10 @@ import {
   buildCatalogSearchFields,
   type CatalogSearchFields,
 } from "./catalog-search";
+import {
+  assertPrivateDataWritable,
+  isPrivateDataBlocked,
+} from "./private-data";
 
 export type CatalogSong = {
   id: string;
@@ -99,13 +103,17 @@ export async function readCachedCatalog(): Promise<{
   songs: CatalogSong[];
   syncedAt: string | null;
 }> {
+  if (isPrivateDataBlocked()) return { songs: [], syncedAt: null };
   const [songs, metadata] = await Promise.all([
     database.songs.orderBy("titleLatin").toArray(),
     database.metadata.get("catalog"),
   ]);
+  if (isPrivateDataBlocked()) return { songs: [], syncedAt: null };
 
   if (songs.every(hasExpandedCatalogFields)) {
-    return { songs: songs.map(normalizeStoredCatalogSong), syncedAt: metadata?.syncedAt ?? null };
+    return isPrivateDataBlocked()
+      ? { songs: [], syncedAt: null }
+      : { songs: songs.map(normalizeStoredCatalogSong), syncedAt: metadata?.syncedAt ?? null };
   }
 
   const songDetails = await database.songDetails.toArray();
@@ -114,8 +122,14 @@ export async function readCachedCatalog(): Promise<{
     const detail = detailsById.get(song.id);
     return detail ? createCatalogSongIndex(detail) : normalizeStoredCatalogSong(song);
   });
-  await database.songs.bulkPut(expandedSongs).catch(() => undefined);
-  return {
+  if (!isPrivateDataBlocked()) {
+    await database.transaction("rw", database.songs, async () => {
+      assertPrivateDataWritable();
+      await database.songs.bulkPut(expandedSongs);
+      assertPrivateDataWritable();
+    }).catch(() => undefined);
+  }
+  return isPrivateDataBlocked() ? { songs: [], syncedAt: null } : {
     songs: expandedSongs,
     syncedAt: metadata?.syncedAt ?? null,
   };
@@ -174,18 +188,23 @@ export async function refreshOfflineLibrary(): Promise<{
   const songs = payload.songs.map(createCatalogSongIndex);
   const syncedAt = new Date().toISOString();
   await database.transaction("rw", database.songs, database.songDetails, database.metadata, async () => {
+    assertPrivateDataWritable();
     await Promise.all([database.songs.clear(), database.songDetails.clear()]);
     await Promise.all([
       database.songs.bulkPut(songs),
       database.songDetails.bulkPut(payload.songs),
       database.metadata.put({ key: "catalog", syncedAt }),
     ]);
+    assertPrivateDataWritable();
   });
+  assertPrivateDataWritable();
   return { songs, syncedAt };
 }
 
 export async function readCachedSong(songId: string): Promise<SongDetail | undefined> {
-  return database.songDetails.get(songId);
+  if (isPrivateDataBlocked()) return undefined;
+  const song = await database.songDetails.get(songId);
+  return isPrivateDataBlocked() ? undefined : song;
 }
 
 export async function refreshSong(songId: string): Promise<SongDetail> {
@@ -196,11 +215,14 @@ export async function refreshSong(songId: string): Promise<SongDetail> {
 
   const payload = await response.json() as { song: SongDetail };
   await database.transaction("rw", database.songs, database.songDetails, async () => {
+    assertPrivateDataWritable();
     await Promise.all([
       database.songs.put(createCatalogSongIndex(payload.song)),
       database.songDetails.put(payload.song),
     ]);
+    assertPrivateDataWritable();
   });
+  assertPrivateDataWritable();
   return payload.song;
 }
 
@@ -401,6 +423,14 @@ export async function clearPrivateLocalData(): Promise<void> {
         database.songDetails.clear(),
         database.metadata.clear(),
       ]);
+      const counts = await Promise.all([
+        database.songs.count(),
+        database.songDetails.count(),
+        database.metadata.count(),
+      ]);
+      if (counts.some((count) => count !== 0)) {
+        throw new Error("Private IndexedDB data could not be cleared");
+      }
     },
   );
   if ("caches" in globalThis) {
@@ -408,6 +438,10 @@ export async function clearPrivateLocalData(): Promise<void> {
     await Promise.all(names
       .filter((name) => name.startsWith("music-library-"))
       .map((name) => caches.delete(name)));
+    const remaining = await caches.keys();
+    if (remaining.some((name) => name.startsWith("music-library-"))) {
+      throw new Error("Private CacheStorage data could not be cleared");
+    }
   }
 }
 

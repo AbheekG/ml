@@ -18,15 +18,30 @@ gate also passed Scan and Recording create/replace, multipart interruption and
 resume, exact duplicate rejection/dismissal, audio processing/playback, metadata
 editing, retained replacement history, and child/parent Trash/restore. Its exact
 D1/R2 postflight matches every planned count and all nine retained objects.
-iOS/iPadOS compatibility, logout/cache removal, observed per-Scan orientation,
-and mobile pinch-zoom refinement remain explicit later work. A local read-only
+iOS/iPadOS compatibility, observed per-Scan orientation, and mobile pinch-zoom
+refinement remain explicit later work. The local logout hardening now places a
+persistent privacy barrier before clearing, invalidates other tabs, prevents
+stale sync commits, verifies IndexedDB/CacheStorage removal, requests browser
+HTTP-cache clearing, and keeps Cloudflare Access control paths outside the
+service worker. Protected-staging Worker version
+`2e889cf3-f246-4651-ac09-20ee13b7936d` contains that hardening and durable
+offline-pending fix with build `0ad3cf28a474`; Access, migrations, and aggregate
+D1 postflight are clean. Online
+logout passed owner testing in macOS Safari and Android. Offline testing showed
+that local clearing worked but a later online visit could reuse the still-valid
+Access session. The local follow-up now persists a distinct pending Access
+logout, blocks session reconciliation while pending, reports the offline state
+accurately, and completes remote logout automatically on reconnect. Normal
+online logout and offline clearing followed by reconnect completion are now
+owner-accepted in macOS Safari and Android. A local read-only
 planner now inventories terminal unreferenced Recording-upload objects with a
 30-day default grace period, exact D1/R2 reference/hash/size guards,
 aggregate-only stdout, and a private digest-bound report; it has no deletion
 mode. Its first protected-staging dry run inspected seven terminal objects and
 classified all seven for manual review, with zero eligible for deletion: all
 seven were younger than the grace cutoff and six also predated immutable upload
-intents. One create
+intents. The owner accepted reviewing this again no earlier than 2026-08-16;
+the current report is not deletion authorization. One create
 upload's immediate Google identity exchange failed safely and the Scheduler
 fallback completed it; the subsequent replacement fast dispatch succeeded.
 Deployed diagnostic hardening now checks the verified assertion's Google-compatible
@@ -66,13 +81,10 @@ the unresolved cases remain separately owner-gated; see
 The core read/edit/recovery/search flows and safe Scan/Recording create/replace
 pipelines now work in staging. Continue in this order:
 
-1. review and accept the implemented guarded dry-run cleanup inventory for terminal
-   unreferenced upload objects; any deletion executor and every physical delete
-   remain separately designed and owner-approved; at the next genuine Recording
-   finalization/replacement, verify its bounded immediate-dispatch record as
-   ordinary postflight; keep logout/cache removal, iOS/iPadOS compatibility,
-   mobile pinch-zoom, and observed per-Scan orientation corrections as explicit
-   deferred work;
+1. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
+   any deletion executor and every physical delete remain separately designed
+   and owner-approved; at the next genuine Recording finalization/replacement,
+   verify its bounded immediate-dispatch record as ordinary postflight;
 2. investigate the two issue-marked Scan mappings, the deferred unmatched cases,
    or the reserved later manual uploads only when the owner prioritizes them;
 3. add sharing or further search/product polish only from concrete feedback;

@@ -1978,6 +1978,16 @@ app.get("/api/session", async (context) => {
   });
 });
 
+app.post("/api/logout", (context) => {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Cache-Control": "private, no-store",
+      "Clear-Site-Data": '"cache"',
+    },
+  });
+});
+
 app.get("/api/song-editor/options", requireRole("editor"), async (context) => {
   const [languages, tags, people] = await Promise.all([
     context.env.DB.prepare(`
@@ -5111,7 +5121,7 @@ app.get("/api/scans/:scanId/image", async (context) => {
   headers.set("Content-Type", scan.mimeType ?? "application/octet-stream");
   headers.set("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(scan.filename)}`);
   headers.set("Content-Length", String(object.size));
-  headers.set("Cache-Control", "private, max-age=3600");
+  headers.set("Cache-Control", "private, no-store");
   headers.set("ETag", object.httpEtag);
   headers.set("X-Scan-Representation", scan.isDerivative === 1 ? "readability" : "original");
   return new Response(object.body, { headers });
@@ -5166,7 +5176,7 @@ app.get("/api/media/:mediaId", async (context) => {
   headers.set("Content-Type", media.mimeType ?? "application/octet-stream");
   headers.set("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(media.filename)}`);
   headers.set("Accept-Ranges", "bytes");
-  headers.set("Cache-Control", "private, max-age=3600");
+  headers.set("Cache-Control", "private, no-store");
   headers.set("ETag", object.httpEtag);
 
   if (rangeHeader) {

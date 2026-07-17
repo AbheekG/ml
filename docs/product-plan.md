@@ -229,7 +229,12 @@ Cache locally:
 - people, credits, tags, languages, and notebooks;
 - enough authorization/session state to permit offline reading on a previously authorized device.
 
-Do not guarantee offline availability for scans or recordings. Previously opened browser media may happen to remain cached, but product behavior must not depend on it.
+Do not guarantee offline availability for scans or recordings. A browser may
+transiently buffer opened media for playback/viewing, but product behavior must
+not depend on those bytes remaining available.
+
+Private Scan and Recording responses use `private, no-store`; clients may keep
+only the transient bytes needed for the current viewer/player operation.
 
 On launch:
 
@@ -239,7 +244,11 @@ On launch:
 4. atomically update the local cache;
 5. show last successful sync and any error without blocking offline reading.
 
-Logout clears private local catalog data. Online session expiry prompts reauthentication when the next server operation is attempted.
+Logout first blocks new private-cache reads/writes, invalidates other open tabs,
+clears and verifies IndexedDB plus application CacheStorage, requests browser
+HTTP-cache clearing, and then terminates the Cloudflare Access session. A stale
+sync must not repopulate local data after clearing begins. Online session expiry
+prompts reauthentication when the next server operation is attempted.
 
 ## Initial release scope
 
