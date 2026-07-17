@@ -30,7 +30,8 @@
     "media:swap-scan-originals": "tsx scripts/scan-original-swap-executor.ts",
     "media:backfill-scan-fingerprints": "tsx scripts/scan-fingerprint-backfill-executor.ts",
     "media:integrate-audio": "tsx scripts/audio-integration-executor.ts",
-    "ops:processor-snapshot": "tsx scripts/processor-ops-snapshot.ts"
+    "ops:processor-snapshot": "tsx scripts/processor-ops-snapshot.ts",
+    "ops:plan-upload-cleanup": "tsx scripts/recording-upload-cleanup-plan.ts"
   },
   "dependencies": {
     "dexie": "4.4.4",

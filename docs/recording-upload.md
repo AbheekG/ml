@@ -62,7 +62,10 @@ no description was supplied, finalization chooses the first available stable
 If D1 finalization fails, the completed opaque R2 object stays private and
 unreferenced for explicit retry/reconciliation; it is never silently deleted.
 An incomplete multipart upload remains abortable and is also covered by R2's
-incomplete-upload lifecycle. Cleanup is a later deliberate administrator task.
+incomplete-upload lifecycle. The separate
+[upload-object cleanup policy](recording-upload-cleanup.md) now provides a
+read-only dry-run planner for exact terminal unreferenced objects. It has no
+delete capability; permanent deletion remains a later owner-approved operation.
 
 The hosted converter receives only the job-scoped transfer capabilities defined
 in [audio-processing.md](audio-processing.md). It prepares and verifies playback

@@ -19,8 +19,14 @@ resume, exact duplicate rejection/dismissal, audio processing/playback, metadata
 editing, retained replacement history, and child/parent Trash/restore. Its exact
 D1/R2 postflight matches every planned count and all nine retained objects.
 iOS/iPadOS compatibility, logout/cache removal, observed per-Scan orientation,
-mobile pinch-zoom refinement, and a deliberate garbage-collection policy for
-terminal unreferenced upload objects remain explicit later work. One create
+and mobile pinch-zoom refinement remain explicit later work. A local read-only
+planner now inventories terminal unreferenced Recording-upload objects with a
+30-day default grace period, exact D1/R2 reference/hash/size guards,
+aggregate-only stdout, and a private digest-bound report; it has no deletion
+mode. Its first protected-staging dry run inspected seven terminal objects and
+classified all seven for manual review, with zero eligible for deletion: all
+seven were younger than the grace cutoff and six also predated immutable upload
+intents. One create
 upload's immediate Google identity exchange failed safely and the Scheduler
 fallback completed it; the subsequent replacement fast dispatch succeeded.
 Deployed diagnostic hardening now checks the verified assertion's Google-compatible
@@ -60,12 +66,13 @@ the unresolved cases remain separately owner-gated; see
 The core read/edit/recovery/search flows and safe Scan/Recording create/replace
 pipelines now work in staging. Continue in this order:
 
-1. design the guarded dry-run-first cleanup policy/tool for terminal
-   unreferenced upload objects before production readiness; at the next genuine
-   Recording finalization/replacement, verify its bounded immediate-dispatch
-   record as ordinary postflight; keep logout/cache removal, iOS/iPadOS
-   compatibility, mobile pinch-zoom, and observed per-Scan orientation
-   corrections as explicit deferred work;
+1. review and accept the implemented guarded dry-run cleanup inventory for terminal
+   unreferenced upload objects; any deletion executor and every physical delete
+   remain separately designed and owner-approved; at the next genuine Recording
+   finalization/replacement, verify its bounded immediate-dispatch record as
+   ordinary postflight; keep logout/cache removal, iOS/iPadOS compatibility,
+   mobile pinch-zoom, and observed per-Scan orientation corrections as explicit
+   deferred work;
 2. investigate the two issue-marked Scan mappings, the deferred unmatched cases,
    or the reserved later manual uploads only when the owner prioritizes them;
 3. add sharing or further search/product polish only from concrete feedback;
