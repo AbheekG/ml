@@ -9,9 +9,9 @@ import {
   adjacentScanId,
   clampScanView,
   fitScanSize,
-  fittedScanView,
   MAX_SCAN_ZOOM,
   MIN_SCAN_ZOOM,
+  scanViewAfterLayoutChange,
   scanViewAfterWheel,
   scanDisplayName,
   SCAN_ZOOM_STEP,
@@ -67,6 +67,7 @@ export function ScanViewer({
   const stageRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const viewRef = useRef(view);
+  const fitNewImageRef = useRef(true);
   const pointersRef = useRef(new Map<number, ScanPoint>());
   const gestureRef = useRef<Gesture | null>(null);
   const currentScan = scans.find((scan) => scan.id === currentScanId) ?? scans[0];
@@ -125,6 +126,7 @@ export function ScanViewer({
   }
 
   useEffect(() => {
+    fitNewImageRef.current = true;
     setNaturalSize({ width: 0, height: 0 });
     setLoadFailed(false);
     pointersRef.current.clear();
@@ -143,7 +145,13 @@ export function ScanViewer({
 
   useEffect(() => {
     if (fittedSize.width === 0 || fittedSize.height === 0) return;
-    const next = fittedScanView(fittedSize, viewportSize);
+    const next = scanViewAfterLayoutChange(
+      viewRef.current,
+      fittedSize,
+      viewportSize,
+      fitNewImageRef.current,
+    );
+    fitNewImageRef.current = false;
     viewRef.current = next;
     setView(next);
   }, [fittedSize.height, fittedSize.width, viewportSize.height, viewportSize.width]);
@@ -380,10 +388,13 @@ export function ScanViewer({
                   height: fittedSize.height,
                   transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.zoom})`,
                 }}
-                onLoad={(event) => setNaturalSize({
-                  width: event.currentTarget.naturalWidth,
-                  height: event.currentTarget.naturalHeight,
-                })}
+                onLoad={(event) => {
+                  fitNewImageRef.current = true;
+                  setNaturalSize({
+                    width: event.currentTarget.naturalWidth,
+                    height: event.currentTarget.naturalHeight,
+                  });
+                }}
                 onError={() => setLoadFailed(true)}
               />
             </>

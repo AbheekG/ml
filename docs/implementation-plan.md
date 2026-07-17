@@ -29,11 +29,14 @@ follow-up now applies the simpler boundary documented in
 [`connectivity-and-online-media.md`](connectivity-and-online-media.md): global
 offline/read-only state follows browser connectivity events, operational health
 checks no longer drive UI state, individual request failures stay local, and an
-open viewer remains mounted with immediate loading feedback. Protected-staging
-Worker version `b9b5dd74-b052-4a0d-906c-638e008418e7` and
-client/service-worker build `c743da499d77` contain this follow-up; automated and
-cloud postflight checks pass, while real-device acceptance remains pending. The
-local logout hardening now places a persistent privacy barrier before clearing, invalidates
+open viewer remains mounted with immediate loading feedback. A subsequent
+Android-only reset was traced to browser chrome resizing the visual viewport;
+new images now fit once, while later layout changes preserve zoom and clamp pan.
+Protected-staging Worker version `b896f7f5-c666-49b7-b138-2cc1b2621b47` and
+client/service-worker build `fc7c39c255bc` contain both corrections; automated
+and cloud postflight checks pass, while final real-device acceptance remains
+pending. The local logout hardening now places a persistent privacy barrier
+before clearing, invalidates
 other tabs, prevents
 stale sync commits, verifies IndexedDB/CacheStorage removal, requests browser
 HTTP-cache clearing, and keeps Cloudflare Access control paths outside the

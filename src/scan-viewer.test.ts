@@ -5,6 +5,7 @@ import {
   clampScanZoom,
   fitScanSize,
   fittedScanView,
+  scanViewAfterLayoutChange,
   scanViewAfterWheel,
   scanDisplayName,
   zoomScanAtPoint,
@@ -53,6 +54,24 @@ describe("scan viewer helpers", () => {
       zoom: 3,
       x: 0,
       y: -1200,
+    });
+  });
+
+  it("fits a newly loaded image but preserves zoom across later viewport changes", () => {
+    const fitted = { width: 300, height: 600 };
+    const initialViewport = { width: 800, height: 600 };
+    const resizedViewport = { width: 760, height: 560 };
+    const zoomed = { zoom: 3, x: -40, y: -500 };
+
+    expect(scanViewAfterLayoutChange(zoomed, fitted, initialViewport, true)).toEqual({
+      zoom: 1,
+      x: 250,
+      y: 0,
+    });
+    expect(scanViewAfterLayoutChange(zoomed, fitted, resizedViewport, false)).toEqual({
+      zoom: 3,
+      x: -40,
+      y: -500,
     });
   });
 

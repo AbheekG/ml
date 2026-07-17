@@ -66,6 +66,17 @@ export function fittedScanView(fitted: ScanSize, viewport: ScanSize): ScanView {
   return clampScanView({ zoom: MIN_SCAN_ZOOM, x: 0, y: 0 }, fitted, viewport);
 }
 
+export function scanViewAfterLayoutChange(
+  current: ScanView,
+  fitted: ScanSize,
+  viewport: ScanSize,
+  fitNewImage: boolean,
+): ScanView {
+  return fitNewImage
+    ? fittedScanView(fitted, viewport)
+    : clampScanView(current, fitted, viewport);
+}
+
 export function zoomScanAtPoint(
   current: ScanView,
   nextZoom: number,

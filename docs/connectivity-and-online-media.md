@@ -1,8 +1,9 @@
 # Connectivity and online-only media
 
 Status: deployed to protected staging on 2026-07-17 as Worker version
-`b9b5dd74-b052-4a0d-906c-638e008418e7`, client/service-worker build
-`c743da499d77`; real-device acceptance remains pending.
+`b896f7f5-c666-49b7-b138-2cc1b2621b47`, client/service-worker build
+`fc7c39c255bc`; real-device acceptance of the viewport-resize correction remains
+pending.
 
 ## Boundary
 
@@ -36,6 +37,11 @@ An already-open viewer is not closed by a later connectivity transition. A
 loaded image may remain visible in memory, while a request still in progress may
 either finish or show the existing bounded load error. Once the browser reports
 offline, opening another online-only Scan remains disabled.
+
+A newly loaded Scan starts fitted to the viewer at 100%. Later visual-viewport
+changes—including mobile browser chrome changing when connectivity changes—keep
+the current zoom and clamp only the pan position needed to keep the image
+reachable. Layout changes do not silently reset the user's view.
 
 This separation keeps gesture state local: pinch, pan, reset, navigation, and
 image-only mode do not start connectivity checks or change application session
