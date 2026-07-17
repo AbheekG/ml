@@ -23,8 +23,20 @@ mobile pinch-zoom refinement, and a deliberate garbage-collection policy for
 terminal unreferenced upload objects remain explicit later work. One create
 upload's immediate Google identity exchange failed safely and the Scheduler
 fallback completed it; the subsequent replacement fast dispatch succeeded.
-Diagnose that transient fast-path failure before production readiness rather
-than weakening or removing the fallback. Separately, the owner
+Deployed diagnostic hardening now checks the verified assertion's Google-compatible
+temporal bounds and retains bounded STS status categories without recording a
+token, identity claim, or response body. Read-only inspection confirmed that
+the application and inheriting human Allow policy
+permitted one-month application tokens, while the global session also inherited
+that duration. With owner approval, staging now has an explicit one-month global
+duration and a 24-hour application duration; the human policy still inherits the
+application, and existing application tokens were revoked. Protected-staging
+access then passed without a new identity-provider prompt. Protected-staging
+version `c2ea5df7-e011-4429-b07f-9f75a691b098` contains the hardening. Because
+only a successful Recording finalization or replacement exercises immediate
+dispatch, the owner accepted checking it during the next genuine operation
+rather than creating retained staging state only for a test. Do not weaken or
+remove the Scheduler fallback. Separately, the owner
 reviewed all six recoverable historical pre-intent Recording upload
 sessions, confirmed they were test uploads, and discarded them recoverably in
 protected staging without deleting the six retained private objects. The two
@@ -48,11 +60,12 @@ the unresolved cases remain separately owner-gated; see
 The core read/edit/recovery/search flows and safe Scan/Recording create/replace
 pipelines now work in staging. Continue in this order:
 
-1. complete the separately deferred logout/cache-removal gate when prioritized;
-   diagnose the observed transient fast-dispatch identity-exchange failure and
-   define guarded cleanup for terminal unreferenced upload objects before
-   production readiness; keep iOS/iPadOS compatibility, mobile pinch-zoom, and
-   observed per-Scan orientation corrections as explicit deferred work;
+1. design the guarded dry-run-first cleanup policy/tool for terminal
+   unreferenced upload objects before production readiness; at the next genuine
+   Recording finalization/replacement, verify its bounded immediate-dispatch
+   record as ordinary postflight; keep logout/cache removal, iOS/iPadOS
+   compatibility, mobile pinch-zoom, and observed per-Scan orientation
+   corrections as explicit deferred work;
 2. investigate the two issue-marked Scan mappings, the deferred unmatched cases,
    or the reserved later manual uploads only when the owner prioritizes them;
 3. add sharing or further search/product polish only from concrete feedback;
@@ -271,11 +284,13 @@ Before implementing write forms, confirm the field-level business rules in [edit
    - calculate SHA-256 before creation and reject duplicate content with a link to the existing record;
    - preserve recording originals and generate canonical playback derivatives;
    - make upload finalization atomic so failed validation or conversion cannot create orphan records;
-   - current staging status: the online-only Add Recording form and resumable multipart
-     orchestration are deployed, automated tests pass, and the protected screen is
-     manually accepted without a real file/upload; real upload and device checks remain;
-     the Song view also exposes the revision-guarded editor retry for failed audio
-     preparation without disclosing its job ID or internal failure code;
+   - current staging status: the online-only Add Recording form and resumable
+     multipart orchestration are deployed and owner-accepted with real create,
+     replacement, interruption/resume, duplicate handling, processing, playback,
+     metadata edit, and recoverable Trash/restore checks on macOS Safari and
+     Android Chrome; the Song view also exposes the revision-guarded editor retry
+     for failed audio preparation without disclosing its job ID or internal
+     failure code;
 4. Add actor/timestamp audit metadata.
 5. Enforce no-orphan foreign keys and no-cascade Song deletion.
 6. Refuse Song deletion while any Lyric text, Scan, or Recording exists and link the editor to those dependencies.

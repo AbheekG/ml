@@ -37,6 +37,15 @@ The invocation model has two complementary triggers:
 1. **On-demand trigger (primary UX path):** successful upload/replacement finalization and editor retry create an immutable D1 dispatch attempt. In `waitUntil`, the Worker exchanges the already verified Cloudflare Access application JWT through Google Security Token Service using a narrowly scoped Workload Identity Federation provider. The provider principal set has Invoker only on this Job; there is no Google service-account JSON key in Cloudflare. The attempt becomes `accepted` or a bounded `failed` record without delaying the editor response or changing the pending job.
 2. **Cloud Scheduler trigger (reliability fallback):** the existing Scheduler job runs every 15 minutes and calls the same fixed `jobs.run` API through its dedicated OAuth service account. It has zero platform retries. This recovers a pending job when immediate federation, Google API delivery, or the asynchronous Worker task fails while keeping the idle cadence inside the reviewed free-allowance estimate.
 
+Before contacting STS, the Worker examines only `iat`, optional `nbf`, and `exp`
+from the Access JWT that the authentication middleware has already verified. It
+rejects malformed assertions, lifetimes over Google's 24-hour OIDC maximum,
+not-yet-valid or expired assertions, and assertions with less than 60 seconds
+remaining. Rejection records only a bounded error code. Non-successful STS
+responses are classified by safe HTTP status category; response bodies and all
+identity claims remain excluded from D1 and logs. Every such failure leaves the
+processing job pending for Scheduler recovery.
+
 Both paths may start overlapping no-work executions, but the D1 global running-job gate allows only one claim. The design therefore provides quick expected pickup without depending on an embedded long-lived key, and durable bounded polling without making browser Play start processing.
 
 The container entrypoint loads bounded configuration, calls `run_hosted_job_once()` exactly once, emits one aggregate outcome, and exits.
@@ -247,6 +256,29 @@ application stdout remains aggregate-only. The Scheduler identity plus the WIF
 principal set are the only Job invokers. The former JSON-key trigger identity is
 disabled, its user-managed key is deleted, and Cloudflare no longer stores that
 key. D1 is still the sole processing state authority.
+
+One Android create upload later received a bounded STS rejection while an
+unchanged macOS replacement dispatch succeeded. The historical record lacks the
+HTTP status and Google project logs contain no STS audit event for that window,
+so its exact upstream cause is not recoverable. Read-only dashboard inspection
+later found that the application duration is one month, the sole human Allow
+policy inherits it, and the global duration also inherits the application. The
+configuration therefore permits application assertions that Google WIF cannot
+accept, strongly explaining the device-dependent failure without proving the
+historical token's exact claims. The owner then set the global duration
+explicitly to one month, reduced the application duration to 24 hours, retained
+the inheriting Allow policy, and revoked existing tokens for this application.
+This keeps infrequent identity-provider sign-in while bounding newly issued
+application tokens for WIF. Diagnostic hardening that distinguishes assertion
+timing and STS status categories is deployed to protected staging as Worker
+version `c2ea5df7-e011-4429-b07f-9f75a691b098`. Protected-staging access passed
+without another identity-provider prompt, consistent with the longer global
+token silently authorizing a fresh application token. There is no non-mutating
+immediate-dispatch smoke endpoint: only successful Recording upload finalization
+or replacement invokes this path. The owner accepted deferring its live recheck
+to the next genuine editor operation rather than creating retained staging data
+only for a test. Keep Scheduler enabled, and inspect the bounded dispatch record
+as part of that operation's normal postflight.
 
 ## Aggregate-only observability
 

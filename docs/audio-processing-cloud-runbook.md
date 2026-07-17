@@ -51,6 +51,32 @@ Stop before cloud creation unless all of these are true:
    Worker bearer header. Never substitute a persistent Bypass policy.
 5. The remote migration list and zero-job inventory match the expected state.
    Never use a staging catalog record as a disposable processing fixture.
+6. The Access application and every human Allow policy that can reach Recording
+   mutations have been inspected for their effective session duration. Google
+   WIF accepts an OIDC assertion only when `exp - iat` is at most 24 hours. If an
+   effective Access application-token duration is longer, stop and obtain owner
+   approval before reducing it. Keep a longer global session where appropriate
+   so Access can refresh a shorter application token without needlessly
+   prompting a trusted user to authenticate again.
+
+The 2026-07-17 read-only staging inspection found a one-month application
+duration, one human Allow policy set to inherit it, and a global duration also
+set to inherit the application. With explicit owner approval, the global
+duration was set to one month first, the application duration was reduced to 24
+hours, the human policy was left inheriting the application, and existing tokens
+were revoked for this application. The dashboard confirmed both saved duration
+values and successful application-token revocation. No policy rule, service-auth
+setting, or account-wide user session changed. Expect a delay of up to one
+minute before a user can start a replacement session after any future
+revocation. After the wait, the owner reopened protected staging without another
+identity-provider prompt and confirmed normal application access; this is the
+expected longer-global/shorter-application refresh behavior.
+
+The owner accepted deferring a live immediate-dispatch recheck to the next
+genuine Recording upload or replacement. Do not create retained catalog/media
+state solely to exercise WIF. At that next operation, include the immutable
+dispatch attempt and resulting job outcome in the ordinary bounded postflight;
+the enabled Scheduler remains the reliability fallback.
 
 Cloud Run Jobs always use the second-generation execution environment. Its
 secret volume is root-owned, so each new non-root file mount needs a read smoke;
@@ -612,6 +638,8 @@ Official facts and commands were rechecked against
 [Artifact Registry pricing](https://cloud.google.com/artifact-registry/pricing),
 [Artifact Analysis pricing](https://cloud.google.com/artifact-analysis/pricing),
 [Premium network pricing](https://cloud.google.com/vpc/pricing),
+[Google WIF with OIDC providers](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-other-providers),
+[Cloudflare Access session management](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/),
 [Cloudflare Access service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/),
 and [Cloudflare Access Service Auth policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/).
 
