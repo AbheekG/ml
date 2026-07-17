@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { ScanViewer } from "./ScanViewer";
 import { CatalogControls } from "./CatalogControls";
 import { RecordingUploadPage } from "./RecordingUploadPage";
 import { CreditRows } from "./CreditRows";
+import { FeedbackMessage, useRevealFeedback } from "./FeedbackMessage";
 import { pauseOtherAudioPlayers } from "./audio-playback";
 import { copyTextBlock, shareTextBlock, supportsSystemTextShare } from "./text-sharing";
 import {
@@ -54,7 +55,11 @@ import {
   type TrashedScan,
   type TrashedSong,
 } from "./catalog";
-import { emptyCatalogFilters, filterAndSortCatalog, type CatalogSort } from "./catalog-view";
+import {
+  filterAndSortCatalog,
+  initialCatalogViewState,
+  type CatalogViewState,
+} from "./catalog-view";
 import { findSimilarLookupItems } from "./lookup-similarity";
 import { shouldOfferDirectCameraCapture } from "./device-capabilities";
 import { scanDisplayName } from "./scan-viewer";
@@ -83,14 +88,24 @@ function useOnlineStatus(): boolean {
   return isOnline;
 }
 
-function SongsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
+function SongsPage({
+  isOnline,
+  canEdit,
+  view,
+  onViewChange,
+  scrollPosition,
+}: {
+  isOnline: boolean;
+  canEdit: boolean | null;
+  view: CatalogViewState;
+  onViewChange: (view: CatalogViewState) => void;
+  scrollPosition: { current: number };
+}) {
   const [songs, setSongs] = useState<CatalogSong[]>([]);
-  const [query, setQuery] = useState("");
-  const [filters, setFilters] = useState(emptyCatalogFilters);
-  const [sort, setSort] = useState<CatalogSort>("latin-asc");
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const restoredScroll = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -122,7 +137,19 @@ function SongsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
     return () => { cancelled = true; };
   }, [isOnline]);
 
-  const visibleSongs = filterAndSortCatalog(songs, query, filters, sort);
+  useLayoutEffect(() => {
+    if (restoredScroll.current || (isLoading && songs.length === 0)) return;
+    restoredScroll.current = true;
+    window.scrollTo({ top: scrollPosition.current, left: 0, behavior: "auto" });
+  }, [isLoading, scrollPosition, songs.length]);
+
+  useEffect(() => {
+    const rememberScroll = () => { scrollPosition.current = window.scrollY; };
+    window.addEventListener("scroll", rememberScroll, { passive: true });
+    return () => window.removeEventListener("scroll", rememberScroll);
+  }, [scrollPosition]);
+
+  const visibleSongs = filterAndSortCatalog(songs, view.query, view.filters, view.sort);
 
   return (
     <main className="page-shell" id="main-content">
@@ -141,12 +168,12 @@ function SongsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
 
       <CatalogControls
         songs={songs}
-        query={query}
-        filters={filters}
-        sort={sort}
-        onQueryChange={setQuery}
-        onFiltersChange={setFilters}
-        onSortChange={setSort}
+        query={view.query}
+        filters={view.filters}
+        sort={view.sort}
+        onQueryChange={(query) => onViewChange({ ...view, query })}
+        onFiltersChange={(filters) => onViewChange({ ...view, filters })}
+        onSortChange={(sort) => onViewChange({ ...view, sort })}
       />
 
       {error && <p className="catalog-message error-message" role="alert">{error}</p>}
@@ -158,7 +185,11 @@ function SongsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
         <ol className="song-list" aria-label="Songs">
           {visibleSongs.map((song) => (
             <li key={song.id}>
-              <Link className="song-row" to={`/songs/${encodeURIComponent(song.id)}`}>
+              <Link
+                className="song-row"
+                to={`/songs/${encodeURIComponent(song.id)}`}
+                onClick={() => { scrollPosition.current = window.scrollY; }}
+              >
                 <span className="song-titles">
                   <strong>{song.titleLatin}</strong>
                   {song.titleNative && <span lang="und">{song.titleNative}</span>}
@@ -600,7 +631,7 @@ function LyricEditorPage({
         <p className="lede">Spaces, blank lines, capitalization, and script are saved exactly as entered.</p>
         {isLegacyImport && <p className="editor-note">This is an imported combined block. It remains marked for the later split-and-review workflow.</p>}
       </header>
-      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <FeedbackMessage message={error} />
       <form className="song-form" onSubmit={(event) => { void submit(event); }}>
         <section className="form-card">
           <label className="form-field">
@@ -661,6 +692,7 @@ function ScanEditorPage({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [duplicateScan, setDuplicateScan] = useState<DuplicateScanDetails | null>(null);
+  const duplicateScanNoticeRef = useRevealFeedback(duplicateScan);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isTrashing, setIsTrashing] = useState(false);
@@ -798,11 +830,17 @@ function ScanEditorPage({
         <h1>{mode === "create" ? "Add Scan" : mode === "replace" ? "Replace Scan Image" : "Edit Scan"}</h1>
         <p className="lede">{mode === "create" ? "Upload a private image, then optionally identify its Notebook and Page." : mode === "replace" ? "Upload a new private image to replace the current file. The previous image is preserved in history." : "Choose a Notebook and optional Page, or leave both empty for an external Scan."}</p>
       </header>
-      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <FeedbackMessage message={duplicateScan ? null : error} />
       {duplicateScan && (
-        <section className="duplicate-scan-notice" aria-labelledby="duplicate-scan-title">
+        <section
+          className="duplicate-scan-notice"
+          ref={duplicateScanNoticeRef}
+          role="alert"
+          aria-labelledby="duplicate-scan-title"
+        >
           <div>
             <strong id="duplicate-scan-title">Existing Scan details</strong>
+            {error && <span>{error}</span>}
             <span>Song: {duplicateScan.songTitle}</span>
             <span>File: {duplicateScan.filename}</span>
             {duplicateScan.notebookName ? <span>Notebook: {duplicateScan.notebookName}</span> : <span>Type: External Scan</span>}
@@ -1027,7 +1065,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
         <h1>Edit Recording</h1>
         <p className="lede">Describe this take, optionally record its date, and select any known vocalists.</p>
       </header>
-      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <FeedbackMessage message={error} />
       <form className="song-form" onSubmit={(event) => { void submit(event); }}>
         <section className="form-card">
           <div className="form-file-summary">
@@ -1193,7 +1231,7 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
           <p className="lede">Removed items stay here indefinitely unless a future permanent-cleanup policy is approved.</p>
         </div>
       </header>
-      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <FeedbackMessage message={error} />
       {isLoading ? (
         <section className="empty-state"><p>Loading Trash…</p></section>
       ) : songs.length === 0 && lyrics.length === 0 && scans.length === 0 && recordings.length === 0 ? (
@@ -1482,7 +1520,7 @@ function SongEditorPage({
         <h1>{mode === "create" ? "Add song" : "Edit song"}</h1>
         <p className="lede">Required fields are marked. Changes are saved immediately to the private library.</p>
       </header>
-      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <FeedbackMessage message={error} />
       <form className="song-form" onSubmit={(event) => { void submit(event); }}>
         <section className="form-card">
           <label className="form-field">
@@ -1741,7 +1779,7 @@ function ManageLookupsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: 
         ))}
       </div>
 
-      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <FeedbackMessage message={error} />
       {!collections ? (
         <section className="empty-state"><p>Loading library lists…</p></section>
       ) : (
@@ -1830,6 +1868,8 @@ function ManageLookupsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: 
 
 export function App() {
   const isOnline = useOnlineStatus();
+  const [catalogView, setCatalogView] = useState(initialCatalogViewState);
+  const catalogScrollPosition = useRef(0);
   const [session, setSession] = useState<AppSession | null>(null);
   const [sessionResolved, setSessionResolved] = useState(false);
   const [privateDataBlocked, setPrivateDataBlocked] = useState(isPrivateDataBlocked);
@@ -1846,6 +1886,8 @@ export function App() {
   }
 
   async function logoutAndClear(): Promise<void> {
+    setCatalogView(initialCatalogViewState());
+    catalogScrollPosition.current = 0;
     sessionGeneration.current += 1;
     setSession(null);
     setSessionResolved(false);
@@ -1866,6 +1908,8 @@ export function App() {
 
   useEffect(() => {
     const invalidatePrivateData = () => {
+      setCatalogView(initialCatalogViewState());
+      catalogScrollPosition.current = 0;
       sessionGeneration.current += 1;
       localStorage.removeItem(PRIVATE_CACHE_NAMESPACE_KEY);
       setSession(null);
@@ -1957,7 +2001,15 @@ export function App() {
         : isOnline && !sessionResolved
         ? <main className="page-shell" id="main-content"><p>Checking this device’s private session…</p></main>
         : <Routes>
-        <Route path="/songs" element={<SongsPage isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs" element={(
+          <SongsPage
+            isOnline={isOnline}
+            canEdit={canEdit}
+            view={catalogView}
+            onViewChange={setCatalogView}
+            scrollPosition={catalogScrollPosition}
+          />
+        )} />
         <Route path="/songs/new" element={<SongEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/edit" element={<SongEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/lyrics/new" element={<LyricEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />

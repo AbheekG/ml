@@ -448,6 +448,7 @@ button:disabled {
 .catalog-message {
   padding: 0.8rem 1rem;
   border-radius: 0.75rem;
+  scroll-margin-block: 5.25rem 1rem;
 }
 
 .error-message {
@@ -1057,6 +1058,7 @@ button:disabled {
 
 .recording-upload-notice {
   margin-bottom: 1rem;
+  scroll-margin-block: 5.25rem 1rem;
 }
 
 .recording-upload-notice-actions {
@@ -1077,6 +1079,7 @@ button:disabled {
   border: 1px solid #ddbd78;
   border-radius: 0.8rem;
   background: #fff4d8;
+  scroll-margin-block: 5.25rem 1rem;
 }
 
 .duplicate-scan-notice > div {

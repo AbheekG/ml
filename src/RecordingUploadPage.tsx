@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { CreditRows } from "./CreditRows";
+import { FeedbackMessage, useRevealFeedback } from "./FeedbackMessage";
 import {
   loadRecordingEditorOptions,
   refreshOfflineLibrary,
@@ -50,6 +51,7 @@ export function RecordingUploadPage({
   const [upload, setUpload] = useState<RecordingUploadSession | null>(null);
   const [progress, setProgress] = useState<RecordingUploadProgress | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateRecording | null>(null);
+  const duplicateNoticeRef = useRevealFeedback(duplicate);
   const [descriptionConflict, setDescriptionConflict] = useState<{
     existingId: string;
     existingSongId: string;
@@ -377,8 +379,8 @@ export function RecordingUploadPage({
         </p>
       </header>
 
-      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
-      {notice && <p className="catalog-message" role="status">{notice}</p>}
+      <FeedbackMessage message={error} />
+      <FeedbackMessage message={notice} tone="status" />
 
       {!attempt && recoverableUploads.length > 0 && (
         <section className="form-card" aria-labelledby="recover-recording-uploads-title">
@@ -426,7 +428,12 @@ export function RecordingUploadPage({
       )}
 
       {duplicate && (
-        <section className="recording-upload-notice" aria-labelledby="duplicate-recording-title">
+        <section
+          className="recording-upload-notice"
+          ref={duplicateNoticeRef}
+          role="alert"
+          aria-labelledby="duplicate-recording-title"
+        >
           <div>
             <strong id="duplicate-recording-title">This exact audio original is already stored</strong>
             <span>No new Recording or processing job was created.</span>

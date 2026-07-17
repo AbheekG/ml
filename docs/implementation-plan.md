@@ -19,7 +19,7 @@ resume, exact duplicate rejection/dismissal, audio processing/playback, metadata
 editing, retained replacement history, and child/parent Trash/restore. Its exact
 D1/R2 postflight matches every planned count and all nine retained objects.
 iOS/iPadOS compatibility and observed per-Scan orientation remain explicit
-later work. Scan-viewer gesture containment is deployed for owner acceptance:
+later work. Scan-viewer gesture containment is owner-accepted:
 the viewer modal suppresses browser-level touch zoom while open, and a native
 non-passive wheel boundary converts trackpad pinch into bounded image zoom
 without scaling the controls. Android Brave testing then exposed that a single
@@ -34,8 +34,8 @@ Android-only reset was traced to browser chrome resizing the visual viewport;
 new images now fit once, while later layout changes preserve zoom and clamp pan.
 Protected-staging Worker version `b896f7f5-c666-49b7-b138-2cc1b2621b47` and
 client/service-worker build `fc7c39c255bc` contain both corrections; automated
-and cloud postflight checks pass, while final real-device acceptance remains
-pending. The local logout hardening now places a persistent privacy barrier
+and cloud postflight checks pass, and Android Chrome/Brave plus macOS Safari
+acceptance is complete. The local logout hardening now places a persistent privacy barrier
 before clearing, invalidates
 other tabs, prevents
 stale sync commits, verifies IndexedDB/CacheStorage removal, requests browser
@@ -81,6 +81,14 @@ protected staging without deleting the six retained private objects. The two
 already-finalized historical rows were unchanged; no recoverable pre-intent
 sessions remain.
 
+The deployed navigation and feedback follow-up now retains catalog query, filters,
+sort, and scroll only in mounted App memory across Song navigation. It resets on
+reload, logout, or private-data invalidation and never places private queries in
+URLs or browser storage. Direct action-wide feedback and duplicate panels reveal
+themselves with nearest-position scrolling, while field and background-refresh
+messages stay in context. The boundary and manual gate are recorded in
+[navigation-and-feedback.md](navigation-and-feedback.md).
+
 The owner-directed genuine Scan-source recovery is complete for the exact
 reviewed staging set. The local matcher inventoried both read-only trees, checked
 exact hashes first, combined transformation-tolerant content evidence with
@@ -93,23 +101,23 @@ regenerate its mappings, or garbage-collect the retained history. Production and
 the unresolved cases remain separately owner-gated; see
 [scan-original-recovery.md](scan-original-recovery.md).
 
-Protected-staging Worker version `a59e5bb8-2d4c-4797-a536-e8dfe9e50f75`
-contains the Scan-viewer gesture refinement with client/service-worker build
-`f7da29dcff69`. Verification passes at 46 Vitest files / 326 tests, all 90
-Python audio tests, all three TypeScript projects, production bundles, and
-whitespace checks. Access still returns the expected unauthenticated redirect,
-no migration is pending, and aggregate D1/foreign-key postflight is unchanged
-with zero rows written. Android Chrome and macOS Safari manual interaction
-acceptance remains the next gate; iOS/iPadOS remains deferred.
+Protected-staging Worker version `b999a18b-4661-48ea-ab44-46397fa98fb4`
+contains the accepted Scan-viewer refinements and the catalog-navigation/action-
+feedback follow-up with client/service-worker build `b5e43351a8c3`.
+Verification passes at 47 Vitest files / 327 tests, all 90 Python audio tests,
+all three TypeScript projects, production bundles, and whitespace checks. Access
+still returns the expected unauthenticated redirect, no migration is pending,
+and aggregate D1/foreign-key postflight is unchanged with zero rows written.
+Catalog restoration and feedback visibility are the next manual interaction
+gate; iOS/iPadOS remains deferred.
 
 ## Current execution order
 
 The core read/edit/recovery/search flows and safe Scan/Recording create/replace
 pipelines now work in staging. Continue in this order:
 
-1. complete the deployed Scan-viewer gesture gate on Android Chrome and macOS
-   Safari, including a relatively small Scan; keep browser zoom outside the
-   viewer unaffected;
+1. manually accept catalog search/filter/sort/scroll restoration and direct
+   action-feedback visibility in representative phone and desktop browsers;
 2. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
    any deletion executor and every physical delete remain separately designed
    and owner-approved; at the next genuine Recording finalization/replacement,

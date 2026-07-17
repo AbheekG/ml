@@ -5,12 +5,23 @@ import {
   createCatalogSongIndex,
   emptyCatalogFilters,
   filterAndSortCatalog,
+  initialCatalogViewState,
   matchesCatalogFilters,
   matchesCatalogQuery,
   sortCatalogSongs,
 } from "./catalog-view";
 import type { SongDetail } from "./catalog";
 import { buildCatalogSearchFields } from "./catalog-search";
+
+describe("catalog view state", () => {
+  it("starts with an unfiltered private in-memory view", () => {
+    expect(initialCatalogViewState()).toEqual({
+      query: "",
+      filters: emptyCatalogFilters(),
+      sort: "latin-asc",
+    });
+  });
+});
 
 function song(overrides: Partial<CatalogSong> & Pick<CatalogSong, "id" | "titleLatin">): CatalogSong {
   return {

@@ -32,6 +32,12 @@ export type CatalogFilters = {
   hasRecordings: boolean;
 };
 
+export type CatalogViewState = {
+  query: string;
+  filters: CatalogFilters;
+  sort: CatalogSort;
+};
+
 export type CatalogFilterOption = {
   id: string;
   name: string;
@@ -55,6 +61,14 @@ export function emptyCatalogFilters(): CatalogFilters {
     hasLyrics: false,
     hasScans: false,
     hasRecordings: false,
+  };
+}
+
+export function initialCatalogViewState(): CatalogViewState {
+  return {
+    query: "",
+    filters: emptyCatalogFilters(),
+    sort: "latin-asc",
   };
 }
 
