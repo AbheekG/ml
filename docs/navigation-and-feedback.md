@@ -1,8 +1,8 @@
 # Catalog navigation and action feedback
 
 Status: deployed to protected staging for manual acceptance on 2026-07-17.
-Worker version `b999a18b-4661-48ea-ab44-46397fa98fb4`; client/service-worker
-build `b5e43351a8c3`.
+Worker version `795a565c-bf06-46b8-ae92-78e7a93a65eb`; client/service-worker
+build `9f2997c62527`.
 
 ## Catalog Back behavior
 
@@ -10,6 +10,11 @@ Search text, filters, sort order, and the latest catalog scroll position live in
 the mounted `App` only. Opening a Song may unmount the catalog route, but going
 Back—or returning through an in-app Songs link—reuses that in-memory view and
 restores the scroll position after cached catalog rows are available.
+
+Some Android browsers emit their own Back-navigation scroll event while the
+cached catalog is still temporarily empty. That provisional position is ignored
+until the catalog has completed its one explicit restoration, so it cannot
+replace the remembered position with the top of the page.
 
 This state is deliberately absent from URLs, `localStorage`, and
 `sessionStorage`. Search text may contain private catalog information; it should

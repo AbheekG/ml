@@ -144,7 +144,10 @@ function SongsPage({
   }, [isLoading, scrollPosition, songs.length]);
 
   useEffect(() => {
-    const rememberScroll = () => { scrollPosition.current = window.scrollY; };
+    const rememberScroll = () => {
+      if (!restoredScroll.current) return;
+      scrollPosition.current = window.scrollY;
+    };
     window.addEventListener("scroll", rememberScroll, { passive: true });
     return () => window.removeEventListener("scroll", rememberScroll);
   }, [scrollPosition]);
