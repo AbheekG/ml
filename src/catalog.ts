@@ -67,6 +67,7 @@ export type SongDetail = {
     id: string;
     originalMediaId: string;
     playbackMediaId: string | null;
+    playbackByteSize?: number;
     description: string;
     recordedOn: string | null;
     revision: number;

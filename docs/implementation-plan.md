@@ -142,13 +142,31 @@ audio tests, all three TypeScript projects, production build, and whitespace
 checks. Access, migrations, aggregate D1, and foreign-key postflight are clean
 with zero rows written.
 
+The next slice adds reader-facing Recording playback sharing. A read-only
+staging inventory found all 829 active Recordings ready with valid private MP3
+playback: 193 derivative-backed and 636 already-canonical-original-backed, with a
+24,420,114-byte maximum. The owner selected a 50 MiB Recording-sharing safety
+bound for future headroom. The Recording-scoped route resolves the
+current playback relationship server-side, verifies exact D1/R2 size, returns a
+generic private no-store MP3, and never accepts a media/storage identifier from
+the client. Capability-gated row sharing independently validates representation,
+MIME, exact length, and size, with accepted cancellation/second-tap semantics.
+It is committed and deployed as Worker
+`c9db96fd-3028-457b-867a-482143732672`, client/service-worker build
+`9f78a8f53da9`, and remains pending the real-device gates recorded in
+[recording-sharing.md](recording-sharing.md).
+Automated verification passes at 51 Vitest files / 354 tests, all 90 Python
+audio tests, all three TypeScript projects, production build, service-worker
+build `9f78a8f53da9`, whitespace checks, and a zero-result/zero-write query probe
+against the real staging D1 engine.
+
 ## Current execution order
 
 The core read/edit/recovery/search flows and safe Scan/Recording create/replace
 pipelines now work in staging. Continue in this order:
 
-1. perform normal real-device acceptance of the deployed broader action-icon
-   consistency pass and record any concrete feedback;
+1. perform the Android and iPadOS acceptance gates for deployed Recording
+   playback sharing and record concrete feedback;
 2. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
    any deletion executor and every physical delete remain separately designed
    and owner-approved; at the next genuine Recording finalization/replacement,
@@ -404,7 +422,8 @@ Deliverable: safe online maintenance by the primary editor.
 - one-tap system sharing of an individual Scan's authenticated readability JPEG
   is deployed with capability and representation checks and no public media URL;
   the owner reports that it works well without naming the tested device/browser,
-  while Recording sharing remains later;
+  Recording playback sharing is deployed with its separate bounded privacy
+  contract and awaits device acceptance;
 - copy for an individual typed-lyric block plus capability-gated system text
   sharing are now implemented locally for all readers and remain available while
   offline; real Safari/iOS and Chrome/Android clipboard/share-sheet checks remain;

@@ -80,8 +80,10 @@ Recording/Scan actions use a plus symbol but retain their text at every width,
 and Replace Image/Audio uses a bidirectional replacement symbol with text. Save,
 Cancel, Trash, Restore, file selection, and unusual recovery actions deliberately
 remain text-first because consequence and clarity matter more than compactness.
-A future Recording Share action should reuse the existing share symbol and
-optimized/private-file rules approved for that feature.
+The deployed Recording-sharing slice reuses the existing share symbol beside Edit
+for every reader with a ready playback source. It retains the same compact target,
+nearby feedback, quiet cancellation, and second-tap behavior; Edit remains
+online and editor-only.
 
 ## Acceptance reference
 

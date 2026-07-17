@@ -40,6 +40,7 @@ The private staging application is operational:
 - the complete catalog, metadata, and typed lyrics are atomically cached in IndexedDB, while the production app shell and hashed assets are precached by a service worker;
 - private scans open in an in-app zoom/pan viewer and recordings stream with seeking; starting one Recording pauses any other Recording playing on that Song without changing its verified stored source;
 - capable online browsers can share the authenticated optimized JPEG for an individual Scan directly from its Song row or from the viewer through the native system share sheet; original Scan bytes, public URLs, and persistent media caches are not involved, and the owner reports that the deployed behavior works well;
+- private Recording playback sharing is deployed with a Recording-scoped ready-MP3 route, a 50 MiB safety bound, generic filenames, and no client-selected storage identifier or public URL; device acceptance remains pending;
 - repeated Song, typed-lyric, Recording, and Scan actions use accessible symbols with text on wider layouts and 44-pixel icon-only touch targets where compactness helps on narrow layouts; Add, Replace, and higher-consequence actions retain descriptive text;
 - the global offline/read-only indicator follows browser connectivity rather than treating one slow API request as proof that the whole app is offline; online-only media handles request failures locally, and an open Scan viewer remains mounted with immediate loading feedback; the Scan/connectivity behavior is owner-accepted in Android Chrome/Brave and macOS Safari;
 - catalog search, filters, sorting, and scroll position survive in-app Song navigation and Back in private memory, while reload/logout intentionally resets them; Song details open at the top, and the navigation behavior is owner-accepted on Android and macOS; action-wide errors and duplicate outcomes reveal themselves without moving background-refresh messages or field-level validation away from their context;
@@ -67,6 +68,8 @@ The private staging application is operational:
 
 The exact Scan conversion, provenance, repair, and visual-acceptance rules are
 recorded in [the Scan integrity/readability policy](docs/scan-readability.md).
+The playback-source selection, size bound, privacy contract, and device gates for
+Recording sharing are recorded in [the Recording sharing policy](docs/recording-sharing.md).
 The browser-connectivity boundary and online-only media behavior are recorded in
 [the connectivity and online-media policy](docs/connectivity-and-online-media.md).
 The private in-memory catalog restoration and action-feedback rules are recorded

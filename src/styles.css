@@ -715,7 +715,7 @@ button:disabled {
   gap: 0.45rem;
 }
 
-.scan-row-share-status {
+.media-row-share-status {
   flex-basis: 100%;
   margin: 0.1rem 0 0;
   color: var(--muted);

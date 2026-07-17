@@ -72,6 +72,14 @@ import {
   supportsOptimizedScanSharing,
 } from "./scan-sharing";
 import {
+  isRecordingShareTooLarge,
+  loadRecordingShareFile,
+  MAX_RECORDING_SHARE_BYTES,
+  RecordingSharingError,
+  shareRecordingFile,
+  supportsRecordingSharing,
+} from "./recording-sharing";
+import {
   preserveSessionResolutionDuringRevalidation,
   subscribeToBrowserConnectivity,
 } from "./app-lifecycle";
@@ -275,6 +283,13 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
   const [scanShareFeedback, setScanShareFeedback] = useState<{ scanId: string; message: string; isError: boolean } | null>(null);
   const scanShareAbortRef = useRef<AbortController | null>(null);
   const scanShareGenerationRef = useRef(0);
+  const [recordingShareBusy, setRecordingShareBusy] = useState<{ recordingId: string; phase: "preparing" | "sharing" } | null>(null);
+  const [preparedRecordingShare, setPreparedRecordingShare] = useState<{ recordingId: string; file: File } | null>(null);
+  const [recordingShareFeedback, setRecordingShareFeedback] = useState<{ recordingId: string; message: string; isError: boolean } | null>(null);
+  const recordingShareAbortRef = useRef<AbortController | null>(null);
+  const recordingShareGenerationRef = useRef(0);
+  const recordingSharingAvailable = typeof navigator !== "undefined"
+    && supportsRecordingSharing();
   const recordingPlayers = useRef(new Map<string, HTMLAudioElement>());
   const [retryingRecordingId, setRetryingRecordingId] = useState<string | null>(null);
   const [processingRetryError, setProcessingRetryError] = useState<string | null>(null);
@@ -330,6 +345,20 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
   useEffect(() => () => {
     scanShareGenerationRef.current += 1;
     scanShareAbortRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    recordingShareGenerationRef.current += 1;
+    recordingShareAbortRef.current?.abort();
+    recordingShareAbortRef.current = null;
+    setRecordingShareBusy(null);
+    setPreparedRecordingShare(null);
+    setRecordingShareFeedback(null);
+  }, [songId, isOnline]);
+
+  useEffect(() => () => {
+    recordingShareGenerationRef.current += 1;
+    recordingShareAbortRef.current?.abort();
   }, []);
 
   if (isLoading && !song) {
@@ -467,6 +496,60 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
     }
   }
 
+  async function shareRecording(recordingId: string): Promise<void> {
+    if (!isOnline || recordingShareBusy !== null) return;
+    const generation = recordingShareGenerationRef.current;
+    setRecordingShareFeedback(null);
+
+    let file = preparedRecordingShare?.recordingId === recordingId
+      ? preparedRecordingShare.file
+      : null;
+    try {
+      if (!file) {
+        setRecordingShareBusy({ recordingId, phase: "preparing" });
+        const controller = new AbortController();
+        recordingShareAbortRef.current?.abort();
+        recordingShareAbortRef.current = controller;
+        file = await loadRecordingShareFile(recordingId, controller.signal);
+        if (generation !== recordingShareGenerationRef.current) return;
+        if (recordingShareAbortRef.current === controller) recordingShareAbortRef.current = null;
+        setPreparedRecordingShare({ recordingId, file });
+      }
+
+      setRecordingShareBusy({ recordingId, phase: "sharing" });
+      const outcome = await shareRecordingFile(file);
+      if (generation !== recordingShareGenerationRef.current) return;
+      if (outcome === "retry_required") {
+        setPreparedRecordingShare({ recordingId, file });
+        setRecordingShareFeedback({
+          recordingId,
+          message: "The playback recording is ready. Tap Share again.",
+          isError: false,
+        });
+      } else {
+        setPreparedRecordingShare(null);
+        setRecordingShareFeedback(outcome === "shared"
+          ? { recordingId, message: "Playback recording shared.", isError: false }
+          : null);
+      }
+    } catch (shareError) {
+      if (isShareAbort(shareError) || generation !== recordingShareGenerationRef.current) return;
+      setPreparedRecordingShare(null);
+      const code = shareError instanceof RecordingSharingError ? shareError.code : "share_failed";
+      setRecordingShareFeedback({
+        recordingId,
+        message: code === "file_too_large"
+          ? "This playback recording is too large to share."
+          : code === "share_unavailable"
+            ? "File sharing is not available in this browser."
+            : "The playback recording could not be shared right now.",
+        isError: true,
+      });
+    } finally {
+      if (generation === recordingShareGenerationRef.current) setRecordingShareBusy(null);
+    }
+  }
+
   return (
     <main className="page-shell detail-page" id="main-content">
       <Link className="back-link" to="/songs">← All songs</Link>
@@ -541,7 +624,11 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
               <h2 id="recordings-title">Recordings <span>{song.recordings.length}</span></h2>
               {processingRetryError && <p className="catalog-message error-message" role="alert">{processingRetryError}</p>}
               <ul className="media-list">
-                {song.recordings.map((recording) => (
+                {song.recordings.map((recording) => {
+                  const recordingShareTooLarge = isRecordingShareTooLarge(
+                    recording.playbackByteSize,
+                  );
+                  return (
                   <li key={recording.id}>
                     <div className="recording-item">
                       <strong>{recording.description}</strong>
@@ -562,9 +649,43 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                           />
                         : <span>{recording.processingState === "processing" ? "Preparing audio…" : "Audio needs attention"}</span>}
                     </div>
-                    {isOnline && canEdit === true && (
+                    {((recording.processingState === "ready"
+                      && recording.hasPlaybackMedia
+                      && recordingSharingAvailable)
+                      || (isOnline && canEdit === true)) && (
                       <div className="media-item-actions">
-                        {recording.processingState === "failed" && (
+                        {recording.processingState === "ready"
+                          && recording.hasPlaybackMedia
+                          && recordingSharingAvailable && (
+                          <button
+                            className="media-action compact-action"
+                            type="button"
+                            disabled={!isOnline || recordingShareBusy !== null || recordingShareTooLarge}
+                            aria-label={recordingShareTooLarge
+                              ? "Recording is too large to share"
+                              : recordingShareBusy?.recordingId === recording.id
+                                ? recordingShareBusy.phase === "preparing" ? "Preparing Recording" : "Sharing Recording"
+                                : "Share Recording"}
+                            aria-busy={recordingShareBusy?.recordingId === recording.id || undefined}
+                            aria-describedby={recordingShareTooLarge
+                              ? `recording-share-size-${recording.id}`
+                              : recordingShareFeedback?.recordingId === recording.id
+                                ? `recording-share-${recording.id}`
+                                : undefined}
+                            title={recordingShareTooLarge
+                              ? "This Recording is larger than 50 MiB"
+                              : isOnline ? "Share the playback recording" : "Recording sharing requires an internet connection"}
+                            onClick={() => { void shareRecording(recording.id); }}
+                          ><ActionContent
+                              kind="share"
+                              label={recordingShareTooLarge
+                                ? "Too large"
+                                : recordingShareBusy?.recordingId === recording.id
+                                  ? recordingShareBusy.phase === "preparing" ? "Preparing…" : "Sharing…"
+                                  : "Share"}
+                            /></button>
+                        )}
+                        {isOnline && canEdit === true && recording.processingState === "failed" && (
                           <button
                             className="media-action icon-text-action"
                             type="button"
@@ -574,16 +695,32 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                             <ActionContent kind="retry" label={retryingRecordingId === recording.id ? "Retrying…" : "Retry preparation"} />
                           </button>
                         )}
-                        <Link
-                          className="media-action compact-action"
-                          to={`/songs/${encodeURIComponent(song.id)}/recordings/${encodeURIComponent(recording.id)}/edit`}
-                          aria-label="Edit Recording"
-                          title="Edit Recording"
-                        ><ActionContent kind="edit" label="Edit" /></Link>
+                        {isOnline && canEdit === true && (
+                          <Link
+                            className="media-action compact-action"
+                            to={`/songs/${encodeURIComponent(song.id)}/recordings/${encodeURIComponent(recording.id)}/edit`}
+                            aria-label="Edit Recording"
+                            title="Edit Recording"
+                          ><ActionContent kind="edit" label="Edit" /></Link>
+                        )}
+                        {recordingShareFeedback?.recordingId === recording.id && (
+                          <p
+                            className={`media-row-share-status${recordingShareFeedback.isError ? " error-message" : ""}`}
+                            id={`recording-share-${recording.id}`}
+                            role={recordingShareFeedback.isError ? "alert" : "status"}
+                          >{recordingShareFeedback.message}</p>
+                        )}
+                        {recordingShareTooLarge && (
+                          <p
+                            className="media-row-share-status"
+                            id={`recording-share-size-${recording.id}`}
+                          >Playback is larger than {MAX_RECORDING_SHARE_BYTES / 1_048_576} MiB and cannot be shared here.</p>
+                        )}
                       </div>
                     )}
                   </li>
-                ))}
+                  );
+                })}
               </ul>
               <p className="media-note">Some legacy formats may need a playback conversion.</p>
             </section>
@@ -637,7 +774,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                       )}
                       {scanShareFeedback?.scanId === scan.id && (
                         <p
-                          className={`scan-row-share-status${scanShareFeedback.isError ? " error-message" : ""}`}
+                          className={`media-row-share-status${scanShareFeedback.isError ? " error-message" : ""}`}
                           id={`scan-share-${scan.id}`}
                           role={scanShareFeedback.isError ? "alert" : "status"}
                         >{scanShareFeedback.message}</p>

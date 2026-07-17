@@ -5026,6 +5026,10 @@ app.get("/api/songs/:songId", async (context) => {
         recordings.id,
         recordings.original_media_id AS originalMediaId,
         recordings.playback_media_id AS playbackMediaId,
+        CASE
+          WHEN recordings.playback_media_id IS NULL THEN media_objects.byte_size
+          ELSE playback_media.byte_size
+        END AS playbackByteSize,
         recordings.description,
         recordings.recorded_on AS recordedOn,
         recordings.revision,
@@ -5034,12 +5038,15 @@ app.get("/api/songs/:songId", async (context) => {
         CASE WHEN recordings.playback_media_id IS NULL THEN 0 ELSE 1 END AS hasPlaybackMedia
       FROM recordings
       JOIN media_objects ON media_objects.id = recordings.original_media_id
+      LEFT JOIN media_objects AS playback_media
+        ON playback_media.id = recordings.playback_media_id
       WHERE recordings.song_id = ? AND recordings.trashed_at IS NULL
       ORDER BY recordings.recorded_on, recordings.id
     `).bind(songId).all<{
       id: string;
       originalMediaId: string;
       playbackMediaId: string | null;
+      playbackByteSize: number;
       description: string;
       recordedOn: string | null;
       revision: number;
@@ -5124,6 +5131,67 @@ app.get("/api/scans/:scanId/image", async (context) => {
   headers.set("Cache-Control", "private, no-store");
   headers.set("ETag", object.httpEtag);
   headers.set("X-Scan-Representation", scan.isDerivative === 1 ? "readability" : "original");
+  return new Response(object.body, { headers });
+});
+
+const MAX_RECORDING_SHARE_BYTES = 52_428_800;
+
+app.get("/api/recordings/:recordingId/playback", async (context) => {
+  const recording = await context.env.DB.prepare(`
+    SELECT
+      CASE
+        WHEN recordings.playback_media_id IS NULL THEN original_media.object_key
+        ELSE playback_media.object_key
+      END AS objectKey,
+      CASE
+        WHEN recordings.playback_media_id IS NULL THEN original_media.mime_type
+        ELSE playback_media.mime_type
+      END AS mimeType,
+      CASE
+        WHEN recordings.playback_media_id IS NULL THEN original_media.byte_size
+        ELSE playback_media.byte_size
+      END AS byteSize
+    FROM recordings
+    JOIN songs ON songs.id = recordings.song_id
+    JOIN media_objects AS original_media ON original_media.id = recordings.original_media_id
+    LEFT JOIN media_objects AS playback_media ON playback_media.id = recordings.playback_media_id
+    WHERE recordings.id = ?
+      AND recordings.trashed_at IS NULL
+      AND songs.trashed_at IS NULL
+      AND recordings.processing_state = 'ready'
+      AND (
+        (recordings.playback_media_id IS NULL
+          AND original_media.state = 'active'
+          AND original_media.mime_type = 'audio/mpeg')
+        OR
+        (recordings.playback_media_id IS NOT NULL
+          AND playback_media.state = 'active'
+          AND playback_media.mime_type = 'audio/mpeg')
+      )
+  `).bind(context.req.param("recordingId")).first<{
+    objectKey: string;
+    mimeType: string;
+    byteSize: number;
+  }>();
+  if (!recording) return context.json({ error: "recording_playback_not_found" }, 404);
+  if (recording.byteSize > MAX_RECORDING_SHARE_BYTES) {
+    return context.json({ error: "recording_playback_too_large_to_share" }, 413);
+  }
+
+  const object = await context.env.MEDIA.get(recording.objectKey);
+  if (!object) return context.json({ error: "recording_playback_unavailable" }, 404);
+  if (object.size !== recording.byteSize || object.size < 1) {
+    return context.json({ error: "recording_playback_invalid" }, 409);
+  }
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("Content-Type", recording.mimeType);
+  headers.set("Content-Disposition", "attachment; filename=recording.mp3");
+  headers.set("Content-Length", String(object.size));
+  headers.set("Cache-Control", "private, no-store");
+  headers.set("ETag", object.httpEtag);
+  headers.set("X-Recording-Representation", "playback");
   return new Response(object.body, { headers });
 });
 
