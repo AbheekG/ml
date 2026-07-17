@@ -1,6 +1,7 @@
 # Recording original upload
 
-Status: approved implementation boundary; cloud configuration remains separately approved.
+Status: implemented, deployed to protected staging, and manually accepted with
+exact D1/R2 postflight; production remains separately approval-gated.
 
 ## Decision
 
@@ -75,9 +76,11 @@ source URL into a derivative/result URL fails authentication. Only the lease
 hash is retained in D1. Derivative upload uses a deterministic attempt-specific
 private key with create-only semantics: a lost response can be retried without
 overwriting the first stored bytes, and a new lease receives a new attempt key.
-The hosted HTTP adapter and local browser orchestration are implemented. Hosted
-secrets, runtime resources, scheduling, deployment, and manual staging acceptance
-remain separate owner-gated work.
+The hosted HTTP adapter, browser orchestration, keyless runtime resources, and
+fallback scheduling are deployed in protected staging. Manual acceptance passed
+create and replace uploads, processing, playback, interruption/resume, duplicate
+rejection/dismissal, and retained former history. Production resources remain
+separately owner-gated.
 
 ## Upload-session API shape
 
@@ -99,7 +102,10 @@ selected file and metadata after the first intentional attempt, uploads sequenti
 state while the original `File` remains selected. It shows aggregate progress,
 stops on duplicate content, preserves a verified `stored` session for an explicit
 description override, and offers revision-bound abort only before storage
-completion. It has no offline queue and has not been deployed or manually tested.
+completion. It has no offline queue and is deployed and manually accepted in
+protected staging on macOS Safari and Android Chrome. Recoverable sessions are
+scoped to their creating account, so the same account may resume from another
+device while a different editor account cannot see or take over the upload.
 A client retry supplies only the current session revision and, when resolving a
 description conflict, an explicit replacement description. It never supplies an
 ETag, object key, multipart ID, claimed fingerprint, media ID, Recording ID, or

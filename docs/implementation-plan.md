@@ -13,9 +13,18 @@ Scan sources are reconciled in the global fingerprint registry and have private
 2400-pixel JPEG readability derivatives; bounded, leased daily maintenance
 remains enabled for later repair needs. Production remains absent. macOS Safari
 and Android Chrome/Brave read-only, offline, Scan-viewer, playback, and unsaved
-editor-form checks are owner-accepted. iOS/iPadOS compatibility, staging-mutating
-upload/replace/recovery checks, logout/cache removal, and observed per-Scan
-orientation corrections remain explicit later work. Separately, the owner
+editor-form checks are owner-accepted. A separately bounded synthetic mutation
+gate also passed Scan and Recording create/replace, multipart interruption and
+resume, exact duplicate rejection/dismissal, audio processing/playback, metadata
+editing, retained replacement history, and child/parent Trash/restore. Its exact
+D1/R2 postflight matches every planned count and all nine retained objects.
+iOS/iPadOS compatibility, logout/cache removal, observed per-Scan orientation,
+mobile pinch-zoom refinement, and a deliberate garbage-collection policy for
+terminal unreferenced upload objects remain explicit later work. One create
+upload's immediate Google identity exchange failed safely and the Scheduler
+fallback completed it; the subsequent replacement fast dispatch succeeded.
+Diagnose that transient fast-path failure before production readiness rather
+than weakening or removing the fallback. Separately, the owner
 reviewed all six recoverable historical pre-intent Recording upload
 sessions, confirmed they were test uploads, and discarded them recoverably in
 protected staging without deleting the six retained private objects. The two
@@ -39,9 +48,11 @@ the unresolved cases remain separately owner-gated; see
 The core read/edit/recovery/search flows and safe Scan/Recording create/replace
 pipelines now work in staging. Continue in this order:
 
-1. complete separately owner-authorized staging upload/replace/recovery and
-   logout/cache-removal gates when prioritized; keep iOS/iPadOS compatibility
-   and observed per-Scan orientation corrections as explicit deferred work;
+1. complete the separately deferred logout/cache-removal gate when prioritized;
+   diagnose the observed transient fast-dispatch identity-exchange failure and
+   define guarded cleanup for terminal unreferenced upload objects before
+   production readiness; keep iOS/iPadOS compatibility, mobile pinch-zoom, and
+   observed per-Scan orientation corrections as explicit deferred work;
 2. investigate the two issue-marked Scan mappings, the deferred unmatched cases,
    or the reserved later manual uploads only when the owner prioritizes them;
 3. add sharing or further search/product polish only from concrete feedback;
