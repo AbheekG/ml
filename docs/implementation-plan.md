@@ -120,16 +120,19 @@ may be observed during the next natural error or duplicate operation;
 iOS/iPadOS remains deferred.
 
 The next approved slice adds capability-gated native sharing from the Scan viewer
-and its Song row of only an authenticated Scan readability JPEG. Its viewer action is deployed as protected-staging Worker
-version `24c078b3-530f-48f1-8707-6d5e7a5b90aa`, client/service-worker build
-`c91b8ffdc1b2`. The client verifies the private representation, JPEG type, exact
+and its Song row of only an authenticated Scan readability JPEG. Both actions and
+responsive accessible row icons are deployed as protected-staging Worker version
+`b3ccdca7-683b-4881-b4aa-1a85dd4d892a`, client/service-worker build
+`b4de0994f09e`. The client verifies the private representation, JPEG type, exact
 length, and 20 MiB bound before sharing a generic file-only payload; it never
-shares the original fallback or a public URL. Verification passes at 48 Vitest
-files / 335 tests, all 90 Python audio tests, all three TypeScript projects,
+shares the original fallback or a public URL. Verification passes at 49 Vitest
+files / 338 tests, all 90 Python audio tests, all three TypeScript projects,
 production build, and whitespace checks. Access still returns the expected
 unauthenticated redirect, no migration is pending, and aggregate D1/foreign-key
 postflight is unchanged with zero rows written. Android and iPadOS native-share
-acceptance of the direct row action remains the exact next gate.
+acceptance of the direct row action and responsive icons remains the exact next
+gate. The in-app browser runtime failed during setup before opening the local
+page, so automated checks are not treated as rendered-browser acceptance.
 
 ## Current execution order
 

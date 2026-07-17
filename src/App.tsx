@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { ScanViewer } from "./ScanViewer";
+import { ScanActionContent } from "./ScanAction";
 import { CatalogControls } from "./CatalogControls";
 import { RecordingUploadPage } from "./RecordingUploadPage";
 import { CreditRows } from "./CreditRows";
@@ -576,20 +577,41 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                   <li key={scan.id}>
                     <div><strong>{scanDisplayName(scan)}</strong><span>{scan.filename}</span></div>
                     <div className="media-item-actions">
-                      <button className="media-action" type="button" disabled={!isOnline} title={isOnline ? "View scan" : "Scans require an internet connection"} onClick={() => setViewerScanId(scan.id)}>View</button>
+                      <button
+                        className="media-action scan-action"
+                        type="button"
+                        disabled={!isOnline}
+                        aria-label="View Scan"
+                        title={isOnline ? "View Scan" : "Scans require an internet connection"}
+                        onClick={() => setViewerScanId(scan.id)}
+                      ><ScanActionContent kind="view" label="View" /></button>
                       {supportsOptimizedScanSharing() && (
                         <button
-                          className="media-action"
+                          className="media-action scan-action"
                           type="button"
                           disabled={!isOnline || scanShareBusy !== null}
+                          aria-label={scanShareBusy?.scanId === scan.id
+                            ? scanShareBusy.phase === "preparing" ? "Preparing Scan" : "Sharing Scan"
+                            : "Share Scan"}
+                          aria-busy={scanShareBusy?.scanId === scan.id || undefined}
                           aria-describedby={scanShareFeedback?.scanId === scan.id ? `scan-share-${scan.id}` : undefined}
                           title={isOnline ? "Share the optimized scan image" : "Scan sharing requires an internet connection"}
                           onClick={() => { void shareScan(scan.id); }}
-                        >{scanShareBusy?.scanId === scan.id
-                            ? scanShareBusy.phase === "preparing" ? "Preparing…" : "Sharing…"
-                            : "Share"}</button>
+                        ><ScanActionContent
+                            kind="share"
+                            label={scanShareBusy?.scanId === scan.id
+                              ? scanShareBusy.phase === "preparing" ? "Preparing…" : "Sharing…"
+                              : "Share"}
+                          /></button>
                       )}
-                      {isOnline && canEdit === true && <Link className="media-action" to={`/songs/${encodeURIComponent(song.id)}/scans/${encodeURIComponent(scan.id)}/edit`}>Edit</Link>}
+                      {isOnline && canEdit === true && (
+                        <Link
+                          className="media-action scan-action"
+                          to={`/songs/${encodeURIComponent(song.id)}/scans/${encodeURIComponent(scan.id)}/edit`}
+                          aria-label="Edit Scan"
+                          title="Edit Scan"
+                        ><ScanActionContent kind="edit" label="Edit" /></Link>
+                      )}
                       {scanShareFeedback?.scanId === scan.id && (
                         <p
                           className={`scan-row-share-status${scanShareFeedback.isError ? " error-message" : ""}`}

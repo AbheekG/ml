@@ -745,6 +745,19 @@ button:disabled {
   text-decoration: none;
 }
 
+.scan-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.scan-action-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+}
+
 .recording-item {
   width: 100%;
 }
@@ -1809,6 +1822,21 @@ button:disabled {
 }
 
 @media (max-width: 37rem) {
+  .scan-action {
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+  }
+
+  .scan-action-label {
+    display: none;
+  }
+
+  .scan-action-icon {
+    width: 1.15rem;
+    height: 1.15rem;
+  }
+
   .scan-source-options {
     grid-template-columns: 1fr;
   }

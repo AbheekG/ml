@@ -1,9 +1,10 @@
 # Scan integrity and readability
 
-Status: implemented in protected staging, 2026-07-17. The owner accepted the ten
-highest-risk local visual candidates. Optimized-Scan system sharing is deployed
-as Worker version `24c078b3-530f-48f1-8707-6d5e7a5b90aa`, client/service-worker
-build `c91b8ffdc1b2`; its Android and iPadOS manual gate remains pending.
+Status: implemented in protected staging, 2026-07-18. The owner accepted the ten
+highest-risk local visual candidates. Viewer and direct Song-row optimized-Scan
+sharing are deployed as Worker version `b3ccdca7-683b-4881-b4aa-1a85dd4d892a`,
+client/service-worker build `b4de0994f09e`; the new row action and responsive
+icons await Android and iPadOS acceptance.
 
 ## Policy
 

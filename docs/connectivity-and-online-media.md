@@ -2,8 +2,9 @@
 
 Status: connectivity and Scan-viewer behavior are deployed and owner-accepted on
 Android Chrome/Brave and macOS Safari. Current protected staging is Worker
-version `24c078b3-530f-48f1-8707-6d5e7a5b90aa`, client/service-worker build
-`c91b8ffdc1b2`; optimized-Scan sharing awaits Android and iPadOS acceptance.
+version `b3ccdca7-683b-4881-b4aa-1a85dd4d892a`, client/service-worker build
+`b4de0994f09e`; direct optimized-Scan sharing and responsive row actions await
+Android and iPadOS acceptance.
 
 ## Boundary
 

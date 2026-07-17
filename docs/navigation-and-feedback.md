@@ -1,8 +1,9 @@
 # Catalog navigation and action feedback
 
-Status: deployed and owner-accepted on 2026-07-17.
-Worker version `3e6ac24e-93d3-4704-9fd8-a6bbb0b75efc`; client/service-worker
-build `0a1a445e3ce3`.
+Status: navigation behavior is deployed and owner-accepted. Current protected
+staging is Worker version `b3ccdca7-683b-4881-b4aa-1a85dd4d892a`;
+client/service-worker build `b4de0994f09e`. Direct Scan-row sharing and its
+responsive action presentation await Android and iPadOS acceptance.
 
 ## Catalog Back behavior
 
@@ -64,6 +65,12 @@ Scan sharing follows the same local rule: preparation and bounded errors remain
 inside the viewer toolbar or individual Song-row action, native share-sheet
 cancellation is quiet, and an expired activation asks for one explicit second
 tap without moving the page.
+
+Each Song-row Scan action pairs its text with an eye, connected-share, or pencil
+symbol on wider layouts. Below 37 rem the visible text is removed to preserve the
+media title and filename, while the 44-pixel icon button retains an explicit
+accessible name and disabled state. View and Share remain reader actions; Edit
+remains online and editor-only.
 
 ## Acceptance reference
 
