@@ -1,6 +1,8 @@
 # Audio processing and playback
 
-Status: approved implementation decision, 2026-07-14.
+Status: implemented, deployed, and accepted in protected staging. Imported and
+new Recording playback uses this policy; production remains separately approval-
+gated.
 
 ## Goals
 
@@ -56,7 +58,10 @@ The conversion core is a small Python module that invokes FFmpeg without contain
 - A dry-run-by-default executor consumes only that exact plan. Its R2 phase compares any existing deterministic object by size and SHA-256, uploads only a missing object, verifies the stored bytes, and atomically checkpoints each completed object in ignored private state. A rerun reuses verified objects and refuses conflicting bytes.
 - The separately authorized D1 phase requires the reviewed plan hash, complete upload state, a fresh verification of every planned R2 object, and the already-applied derivative-provenance migration. It submits one guarded import whose live row/revision preconditions and final relationship reconciliation fail the whole database transaction if the catalog has diverged. It never applies schema migrations automatically.
 - R2 and D1 cannot share one cross-service transaction. If upload succeeds but D1 is rejected, the new objects remain private and unreferenced; the saved state and idempotent guards make review and retry safe without deleting or replacing source media.
-- A provider-neutral local HTTP adapter now handles one claimed job per call around the same conversion core. The proposed invocation boundary uses a single-task scheduled Cloud Run Job with no HTTP server; its local prerequisites and still-unapproved cloud gates are defined in [audio-processing-invocation.md](audio-processing-invocation.md).
+- A provider-neutral HTTP adapter handles one claimed job per call around the
+  same conversion core. Protected staging invokes it as a single-task Cloud Run
+  Job with no HTTP server; its deployed authentication, scheduling, and recovery
+  boundaries are defined in [audio-processing-invocation.md](audio-processing-invocation.md).
 - The Cloudflare Worker now implements the local control-plane half: separate processor authentication, FIFO pending-job claim, a database-enforced global single-running-job gate, one-hour leases, automatic recovery of the first two expired attempts, a durable failure on the third expiry, operation-scoped transfer authorization, immutable derivative attempts, independent R2 byte verification, privacy-safe failure state, explicit editor retry, and atomic finalization. The local online Song UI exposes retry only for a failed Recording and submits its current Recording revision; it never receives a job ID or raw failure code.
 - The hosted service receives no permanent public media URL and should not require broad R2 credentials.
 
@@ -74,7 +79,10 @@ capabilities must name different paths, and the eventual HTTP transfer client
 must reject or revalidate every redirect against the same allowlist rather than
 following an allowlisted URL to an arbitrary host.
 
-Cloud Run project creation, billing activation, secrets, scheduling, and deployment remain separate owner-approved external actions after the remaining local container/resource behavior is tested.
+The protected-staging Cloud Run project, bounded Job, secret-file credentials,
+keyless immediate invocation, and Scheduler fallback are deployed and accepted.
+A production project and every production rollout action remain separately
+owner-approved.
 
 ## Worker processing control plane
 
@@ -103,8 +111,8 @@ one D1 batch whose final job guard rolls every catalog change back unless the
 Recording, playback media, and provenance graph is complete. A response lost
 after commit is reconciled from the succeeded job and returns idempotently.
 
-The local processor adapter remains independent of the proposed scale-to-zero
-Job invocation. It never retries claim, so one invocation cannot strand one
+The processor adapter remains independent of the scale-to-zero Job invocation
+transport. It never retries claim, so one invocation cannot strand one
 lease and then claim a second job after an ambiguous response. Source and
 derivative transfers plus result/failure callbacks reject redirects; exact
 source length/hash and selected derivative length/hash are checked again before
@@ -115,9 +123,9 @@ repeated lease-expiry recovery. The adapter enforces a monotonic 45-minute soft
 deadline across transfer, FFmpeg, hashing, upload, and result delivery, requires
 at least 55 minutes of lease remaining, and kills FFmpeg if its generated output
 exceeds the configured ceiling while it is writing. No
-processor token/origin is configured in staging. The run-once entrypoint reads
-the token only from a secret file, rejects unknown processor-prefixed settings,
-emits one aggregate-only JSON record, and uses nonzero exits for durable failure
-or reconciliation. No HTTP server, Cloud Run
-Job, scheduler, credentials, infrastructure, or deployment is part of this
-local design.
+processor credentials are embedded in the image or tracked configuration. The
+run-once entrypoint reads the fixed-version credentials only from secret files,
+rejects unknown processor-prefixed settings, emits one aggregate-only JSON
+record, and uses nonzero exits for durable failure or reconciliation. Protected
+staging runs the proved non-root image as a bounded single-task Cloud Run Job;
+no HTTP server is added, and production infrastructure remains absent.

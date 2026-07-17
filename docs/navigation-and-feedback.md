@@ -1,10 +1,12 @@
 # Catalog navigation and action feedback
 
 Status: navigation behavior is deployed and owner-accepted. Current protected
-staging is Worker version `aa9630a7-0d56-4f21-b06e-873c80ef79d0`;
-client/service-worker build `d0f72594ac8b`. The owner reports that direct
-Scan-row sharing and its responsive action presentation work well. The broader
-action-icon consistency pass is deployed and awaits normal device acceptance.
+staging is Worker version `c9db96fd-3028-457b-867a-482143732672`;
+client/service-worker build `9f78a8f53da9`. The owner reports that direct
+Scan-row sharing, the responsive action presentation, the broader action-icon
+consistency pass, and Recording sharing work well. The specific device/browser
+was not recorded for the later UI/sharing acceptance, so no named-platform claim
+is inferred.
 
 ## Catalog Back behavior
 

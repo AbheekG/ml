@@ -3,8 +3,9 @@
 Status: implemented in protected staging, 2026-07-18. The owner accepted the ten
 highest-risk local visual candidates. Viewer and direct Song-row optimized-Scan
 sharing are deployed as Worker version `b3ccdca7-683b-4881-b4aa-1a85dd4d892a`,
-client/service-worker build `b4de0994f09e`; the new row action and responsive
-icons await Android and iPadOS acceptance.
+client/service-worker build `b4de0994f09e`; the owner reports that the deployed
+sharing and responsive actions work well. The specific device/browser was not
+recorded, and broader iPadOS compatibility remains a later non-blocking gate.
 
 ## Policy
 

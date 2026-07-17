@@ -1,8 +1,17 @@
 # Music Library implementation plan
 
-Status: approved direction; execute iteratively and validate each phase on real data and devices.
+Status: the necessary private-beta feature set is implemented and accepted in
+protected staging. Continue with optional UX refinement, audit/cleanup, and
+production readiness only as separately prioritized and approved.
 
-Current protected-staging checkpoint (2026-07-17): the vertical slice, online
+Current handoff checkpoint (2026-07-18): protected staging runs Worker
+`c9db96fd-3028-457b-867a-482143732672`, client/service-worker build
+`9f78a8f53da9`. The latest full verification passed 51 Vitest files / 354 tests,
+all 90 Python audio tests, all three TypeScript projects, production and service-
+worker builds, whitespace checks, and a zero-write staging-D1 contract probe.
+Production remains absent and separately approval-gated.
+
+Milestone history and operational detail: the vertical slice, online
 catalog/child editing, private Scan create/replace, and Recording
 create/replace are implemented. Audio finalization now records an immutable
 dispatch attempt and starts the bounded Cloud Run Job through keyless
@@ -119,9 +128,9 @@ timing workarounds without stronger application evidence. Feedback visibility
 may be observed during the next natural error or duplicate operation;
 iOS/iPadOS remains deferred.
 
-The next approved slice adds capability-gated native sharing from the Scan viewer
-and its Song row of only an authenticated Scan readability JPEG. Both actions and
-responsive accessible row icons are deployed as protected-staging Worker version
+The completed Scan-sharing slice adds capability-gated native sharing from the
+Scan viewer and its Song row of only an authenticated Scan readability JPEG.
+Both actions and responsive accessible row icons are deployed as protected-staging Worker version
 `b3ccdca7-683b-4881-b4aa-1a85dd4d892a`, client/service-worker build
 `b4de0994f09e`. The client verifies the private representation, JPEG type, exact
 length, and 20 MiB bound before sharing a generic file-only payload; it never
@@ -142,8 +151,8 @@ audio tests, all three TypeScript projects, production build, and whitespace
 checks. Access, migrations, aggregate D1, and foreign-key postflight are clean
 with zero rows written.
 
-The next slice adds reader-facing Recording playback sharing. A read-only
-staging inventory found all 829 active Recordings ready with valid private MP3
+The completed Recording-sharing slice adds reader-facing Recording playback
+sharing. A read-only staging inventory found all 829 active Recordings ready with valid private MP3
 playback: 193 derivative-backed and 636 already-canonical-original-backed, with a
 24,420,114-byte maximum. The owner selected a 50 MiB Recording-sharing safety
 bound for future headroom. The Recording-scoped route resolves the
@@ -153,8 +162,11 @@ the client. Capability-gated row sharing independently validates representation,
 MIME, exact length, and size, with accepted cancellation/second-tap semantics.
 It is committed and deployed as Worker
 `c9db96fd-3028-457b-867a-482143732672`, client/service-worker build
-`9f78a8f53da9`, and remains pending the real-device gates recorded in
-[recording-sharing.md](recording-sharing.md).
+`9f78a8f53da9`. The owner accepted the principal behavior after checking several
+Recordings, correct selection among multiple rows, quiet cancellation, and
+offline disabling; the device/browser was not recorded. Deliberately oversized
+and slow-download second-tap paths remain automatically covered and need not be
+forced with retained test media. See [recording-sharing.md](recording-sharing.md).
 Automated verification passes at 51 Vitest files / 354 tests, all 90 Python
 audio tests, all three TypeScript projects, production build, service-worker
 build `9f78a8f53da9`, whitespace checks, and a zero-result/zero-write query probe
@@ -162,20 +174,25 @@ against the real staging D1 engine.
 
 ## Current execution order
 
-The core read/edit/recovery/search flows and safe Scan/Recording create/replace
-pipelines now work in staging. Continue in this order:
+The core read/edit/recovery/search/sharing flows and safe Scan/Recording create/
+replace pipelines now work in staging. No necessary feature slice is currently
+open. Continue in this order:
 
-1. perform the Android and iPadOS acceptance gates for deployed Recording
-   playback sharing and record concrete feedback;
-2. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
+1. begin the next session with a read-only whole-application and workspace audit,
+   then prioritize any optional UX ideas against concrete user benefit, risk,
+   accessibility, and maintenance cost;
+2. implement approved optional improvements as separate small commits with the
+   existing automated and protected-staging device gates;
+3. at the next genuine Recording finalization/replacement, verify its bounded
+   immediate-dispatch record as ordinary postflight without creating retained
+   media solely for a test;
+4. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
    any deletion executor and every physical delete remain separately designed
-   and owner-approved; at the next genuine Recording finalization/replacement,
-   verify its bounded immediate-dispatch record as ordinary postflight;
-3. investigate the two issue-marked Scan mappings, the deferred unmatched cases,
-   or the reserved later manual uploads only when the owner prioritizes them;
-4. add sharing or further search/product polish only from concrete feedback;
-5. begin production readiness and cutover only after the staging acceptance,
-   reconciliation, backup, quota, and explicit owner-approval gates pass.
+   and owner-approved;
+5. investigate the two issue-marked Scan mappings, deferred unmatched cases,
+   per-Scan orientation, or reserved manual uploads only when prioritized; and
+6. begin production readiness and cutover only after reconciliation, backup,
+   quota, broader device-coverage, and explicit owner-approval gates pass.
 
 This is a delivery order rather than a schema dependency. The accepted search and filter work remains independently testable while media workflows are added.
 
@@ -421,9 +438,9 @@ Deliverable: safe online maintenance by the primary editor.
   manually accepted, while real-device accessibility remains;
 - one-tap system sharing of an individual Scan's authenticated readability JPEG
   is deployed with capability and representation checks and no public media URL;
-  the owner reports that it works well without naming the tested device/browser,
-  Recording playback sharing is deployed with its separate bounded privacy
-  contract and awaits device acceptance;
+  the owner reports that it works well without naming the tested device/browser;
+  Recording playback sharing is deployed and similarly accepted for principal
+  behavior with its separate bounded privacy contract;
 - copy for an individual typed-lyric block plus capability-gated system text
   sharing are now implemented locally for all readers and remain available while
   offline; real Safari/iOS and Chrome/Android clipboard/share-sheet checks remain;

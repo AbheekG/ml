@@ -1,6 +1,9 @@
 # Local search design
 
-Status: first ranking slice ready for protected-staging validation. This design intentionally favors transparent, deterministic rules over a trained transliteration model.
+Status: the first field-aware phonetic/transliteration ranking slice is deployed
+and owner-accepted in protected staging. This design intentionally favors
+transparent, deterministic rules over a trained transliteration model. Further
+tuning remains evidence-driven.
 
 ## Research basis
 

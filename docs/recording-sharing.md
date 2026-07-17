@@ -2,7 +2,10 @@
 
 Status: implemented and deployed to protected staging on 2026-07-18 as Worker
 `c9db96fd-3028-457b-867a-482143732672`, client/service-worker build
-`9f78a8f53da9`; device acceptance remains pending. Verification passes at 51
+`9f78a8f53da9`. The owner accepted the principal device behavior after checking
+several Recordings: the native sheet opens, cancellation is quiet, Share is
+disabled offline, and different Recordings on one Song share the correct audio.
+The specific device/browser was not recorded. Verification passes at 51
 Vitest files / 354 tests,
 all 90 Python audio tests, all three TypeScript projects, production build,
 production/service-worker build, whitespace checks, and a zero-result,
@@ -67,3 +70,11 @@ canonical-original-backed Recording, plus a larger file. Confirm the resulting
 Share is disabled, the correct row is shared, and a second tap works if a slow
 download consumes user activation. Processing or failed Recordings must not offer
 Share.
+
+The accepted manual checks cover the main interaction and correct-row behavior.
+No deliberately oversized playback file was identified and the tested downloads
+were too fast to require the second tap. Those conditional paths are covered by
+the aggregate size inventory and automated tests and are not release blockers;
+do not create retained media solely to force them. Named Android/iPadOS coverage
+can be recorded during normal future use rather than inferred from the current
+device-unspecified acceptance report.

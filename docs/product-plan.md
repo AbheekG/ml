@@ -1,6 +1,9 @@
 # Music Library product plan
 
-Status: approved starting direction, intentionally refined through real-device feedback. This document defines the replacement product, not an AppSheet screen-for-screen copy.
+Status: approved product direction. The necessary private-beta feature set is
+implemented in protected staging and has been iteratively refined through real-
+device feedback. This document defines the replacement product, not an AppSheet
+screen-for-screen copy.
 
 ## Product goal
 
@@ -57,9 +60,16 @@ At the current and expected scale, the complete locally cached catalog can be fi
 
 ### Search
 
-The first release includes immediate local substring search over Latin title, native title, aliases, and typed lyrics. Advanced typo-tolerant phonetic/transliteration ranking is a later phase based on the woodchime and AppSheet experiments plus owner-provided expected results.
+The implemented release searches Latin and native titles, aliases, typed lyrics,
+Language, Tag, Person/role, Notebook, and Recording-description text entirely
+from the offline cache. Field-aware relevance gives exact and phonetic title or
+alias matches priority over metadata and lyric-only matches. Bounded Indic-roman
+normalization, typo tolerance, later-title matching, and conservative joined/
+split-word alignment were developed from owner-provided acceptance examples.
 
-The initial multi-field substring implementation also indexes relevant Language, Tag, Person/role, Notebook, and Recording-description text and treats every indexed field equally. This is an accepted baseline, but typed lyrics contain much more text than the other fields and can therefore produce too many low-value matches. The later ranking/design phase must test stronger priority for title and alias matches, lower weight for metadata and lyric-only matches, and whether an explicit scope control such as All, Titles, or Lyrics improves real use. Choose among those approaches using owner-provided queries rather than adding a speculative control now.
+An explicit field-scope control such as All, Titles, or Lyrics was not needed
+for the accepted slice. Reconsider it, or add further language-specific ranking,
+only when concrete real-use queries expose a gap.
 
 Search and filters operate together on the same catalog. A separate search-results page is unnecessary unless later usability testing shows a benefit.
 
@@ -264,12 +274,13 @@ Included:
 - online create/edit/trash/restore for songs, lyric texts, scans, and recordings;
 - audit identity/timestamps;
 - AppSheet importer with dry-run reconciliation;
-- migration and real-device acceptance checks.
+- migration and real-device acceptance checks;
+- capability-gated private sharing of optimized Scan JPEGs and ready Recording
+  MP3 playback through the native system share sheet, without public URLs.
 
 Deferred:
 
 - offline editing and conflict resolution;
-- advanced phonetic/transliteration ranking;
 - OCR, transcription, automatic transliteration, or authoritative automatic language detection;
 - push notifications;
 - playlists/set lists/favorites unless requested;
@@ -284,23 +295,23 @@ Deferred:
 
 Use the approved catalog-first design, structured Lyric-text children, guarded deletion, and iterative feedback model as the starting direction. Do not reproduce AppSheet's visual design.
 
-### Phase 1 — migration foundation
+### Phase 1 — migration foundation (complete in staging)
 
 Define the runtime schema and build an idempotent, dry-run importer. Reconcile every table and media reference while applying known lookup-case mappings. No legacy data is edited.
 
-### Phase 2 — read-only vertical slice
+### Phase 2 — read-only vertical slice (complete in staging)
 
 Build authentication, installation, local catalog cache, list/filter/basic-search experience, song detail, scan viewing, and recording playback using a copy of real data. Validate on Safari/iPhone or iPad and Chrome/Android.
 
-### Phase 3 — online editing
+### Phase 3 — online editing (complete in staging)
 
 Add roles, song forms, typed-lyric editing, child add/edit/upload, trash/restore, guarded Song deletion, audit metadata, validation, and failure-safe media replacement.
 
-### Phase 4 — private beta and migration
+### Phase 4 — private beta and migration (private beta active; cutover deferred)
 
 Invite the small user group, reconcile final data, test backups/recovery, freeze AppSheet writes, perform final import, and retain AppSheet/Drive as a read-only fallback.
 
-### Phase 5 — search improvement
+### Phase 5 — search improvement (accepted baseline complete)
 
 Turn real queries into automated ranking tests. Port and correct the useful normalization, Bengali transliteration, phonetic, token, and n-gram ideas from both legacy attempts. Keep all ranking local.
 

@@ -2,9 +2,10 @@
 
 Status: connectivity and Scan-viewer behavior are deployed and owner-accepted on
 Android Chrome/Brave and macOS Safari. Current protected staging is Worker
-version `b3ccdca7-683b-4881-b4aa-1a85dd4d892a`, client/service-worker build
-`b4de0994f09e`; direct optimized-Scan sharing and responsive row actions await
-Android and iPadOS acceptance.
+version `c9db96fd-3028-457b-867a-482143732672`, client/service-worker build
+`9f78a8f53da9`; direct optimized-Scan sharing, responsive row actions, and
+Recording sharing are owner-accepted without a recorded device/browser for
+those later checks. Broader iPadOS compatibility remains deferred.
 
 ## Boundary
 
@@ -75,5 +76,6 @@ On Android Brave and Chrome:
    work without a refresh.
 
 Repeat the core open/zoom/wait/close flow in macOS Safari. The connectivity and
-viewer behavior are accepted there and on Android; iPadOS compatibility and the
-separate optimized-Scan share-sheet gate remain pending.
+viewer behavior are accepted there and on Android. Optimized-Scan sharing is
+also accepted, while broader iPadOS compatibility remains a later non-blocking
+gate.
