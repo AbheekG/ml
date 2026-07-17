@@ -119,13 +119,25 @@ timing workarounds without stronger application evidence. Feedback visibility
 may be observed during the next natural error or duplicate operation;
 iOS/iPadOS remains deferred.
 
+The next approved slice adds capability-gated native sharing from the Scan viewer
+and its Song row of only an authenticated Scan readability JPEG. Its viewer action is deployed as protected-staging Worker
+version `24c078b3-530f-48f1-8707-6d5e7a5b90aa`, client/service-worker build
+`c91b8ffdc1b2`. The client verifies the private representation, JPEG type, exact
+length, and 20 MiB bound before sharing a generic file-only payload; it never
+shares the original fallback or a public URL. Verification passes at 48 Vitest
+files / 335 tests, all 90 Python audio tests, all three TypeScript projects,
+production build, and whitespace checks. Access still returns the expected
+unauthenticated redirect, no migration is pending, and aggregate D1/foreign-key
+postflight is unchanged with zero rows written. Android and iPadOS native-share
+acceptance of the direct row action remains the exact next gate.
+
 ## Current execution order
 
 The core read/edit/recovery/search flows and safe Scan/Recording create/replace
 pipelines now work in staging. Continue in this order:
 
-1. perform a read-only prioritization review when the owner starts the next
-   phase, then obtain approval for the smallest useful implementation slice;
+1. complete Android and iPadOS manual acceptance of optimized-Scan sharing, then
+   record concrete feedback before selecting another implementation slice;
 2. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
    any deletion executor and every physical delete remain separately designed
    and owner-approved; at the next genuine Recording finalization/replacement,
@@ -378,7 +390,9 @@ Deliverable: safe online maintenance by the primary editor.
   searchable existing-Person input, controlled Role dropdown, duplicate-pair
   prevention, and per-row remove control; protected-staging interaction is
   manually accepted, while real-device accessibility remains;
-- one-tap system sharing for an individual scan or recording by sharing authenticated file bytes rather than exposing a public media URL, with capability-aware fallback behavior;
+- one-tap system sharing of an individual Scan's authenticated readability JPEG
+  is deployed with capability and representation checks and no public media URL;
+  Android/iPadOS acceptance is pending, while Recording sharing remains later;
 - copy for an individual typed-lyric block plus capability-gated system text
   sharing are now implemented locally for all readers and remain available while
   offline; real Safari/iOS and Chrome/Android clipboard/share-sheet checks remain;

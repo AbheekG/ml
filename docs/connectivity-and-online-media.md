@@ -1,9 +1,9 @@
 # Connectivity and online-only media
 
-Status: deployed to protected staging on 2026-07-17 as Worker version
-`b896f7f5-c666-49b7-b138-2cc1b2621b47`, client/service-worker build
-`fc7c39c255bc`; real-device acceptance of the viewport-resize correction remains
-pending.
+Status: connectivity and Scan-viewer behavior are deployed and owner-accepted on
+Android Chrome/Brave and macOS Safari. Current protected staging is Worker
+version `24c078b3-530f-48f1-8707-6d5e7a5b90aa`, client/service-worker build
+`c91b8ffdc1b2`; optimized-Scan sharing awaits Android and iPadOS acceptance.
 
 ## Boundary
 
@@ -51,6 +51,9 @@ state.
 
 - No private media is added to the service-worker or application cache.
 - No unauthenticated or permanent media URL is introduced.
+- Optimized-Scan sharing reads authenticated `private, no-store` bytes for the
+  immediate native share action; it does not share an original fallback or add
+  media to browser or service-worker storage.
 - Logout still clears and blocks private local data first. An explicit browser
   reconnection still triggers completion of a pending Cloudflare Access logout.
 - Session revalidation after a real browser connectivity transition keeps an
@@ -70,5 +73,6 @@ On Android Brave and Chrome:
 5. Reconnect and confirm the app returns online and normal authenticated reads
    work without a refresh.
 
-Repeat the core open/zoom/wait/close flow in macOS Safari. iOS/iPadOS remains a
-separate deferred compatibility gate.
+Repeat the core open/zoom/wait/close flow in macOS Safari. The connectivity and
+viewer behavior are accepted there and on Android; iPadOS compatibility and the
+separate optimized-Scan share-sheet gate remain pending.

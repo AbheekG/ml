@@ -60,6 +60,11 @@ Background catalog-refresh and Song-refresh errors do not move the reader's
 viewport. They are not direct outcomes of the user's current action. Field-level
 duplicate/similarity warnings also remain beside their inputs.
 
+Scan sharing follows the same local rule: preparation and bounded errors remain
+inside the viewer toolbar or individual Song-row action, native share-sheet
+cancellation is quiet, and an expired activation asks for one explicit second
+tap without moving the page.
+
 ## Acceptance reference
 
 1. On Songs, enter a search, select several filters and a non-default sort, then

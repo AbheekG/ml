@@ -20,6 +20,13 @@ import {
   type ScanView,
   zoomScanAtPoint,
 } from "./scan-viewer";
+import {
+  isShareAbort,
+  loadOptimizedScanShareFile,
+  ScanSharingError,
+  shareOptimizedScanFile,
+  supportsOptimizedScanSharing,
+} from "./scan-sharing";
 
 type WebkitDocument = Document & {
   webkitFullscreenElement?: Element | null;
@@ -51,10 +58,12 @@ function activeFullscreenElement(): Element | null {
 export function ScanViewer({
   scans,
   initialScanId,
+  isOnline,
   onClose,
 }: {
   scans: SongScan[];
   initialScanId: string;
+  isOnline: boolean;
   onClose: () => void;
 }) {
   const [currentScanId, setCurrentScanId] = useState(initialScanId);
@@ -63,6 +72,9 @@ export function ScanViewer({
   const [view, setView] = useState<ScanView>({ zoom: MIN_SCAN_ZOOM, x: 0, y: 0 });
   const [loadFailed, setLoadFailed] = useState(false);
   const [isImageOnly, setIsImageOnly] = useState(false);
+  const [shareBusy, setShareBusy] = useState<"preparing" | "sharing" | null>(null);
+  const [preparedShare, setPreparedShare] = useState<{ scanId: string; file: File } | null>(null);
+  const [shareFeedback, setShareFeedback] = useState<{ message: string; isError: boolean } | null>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -70,6 +82,8 @@ export function ScanViewer({
   const fitNewImageRef = useRef(true);
   const pointersRef = useRef(new Map<number, ScanPoint>());
   const gestureRef = useRef<Gesture | null>(null);
+  const shareAbortRef = useRef<AbortController | null>(null);
+  const shareGenerationRef = useRef(0);
   const currentScan = scans.find((scan) => scan.id === currentScanId) ?? scans[0];
   const previousId = currentScan ? adjacentScanId(scans, currentScan.id, -1) : null;
   const nextId = currentScan ? adjacentScanId(scans, currentScan.id, 1) : null;
@@ -84,6 +98,8 @@ export function ScanViewer({
     || "webkitRequestFullscreen" in HTMLElement.prototype
     || typeof (overlayRef.current as WebkitElement | null)?.webkitRequestFullscreen === "function"
   );
+  const sharingAvailable = typeof navigator !== "undefined"
+    && supportsOptimizedScanSharing();
 
   function applyView(next: ScanView): void {
     viewRef.current = next;
@@ -132,6 +148,20 @@ export function ScanViewer({
     pointersRef.current.clear();
     gestureRef.current = null;
   }, [currentScanId]);
+
+  useEffect(() => {
+    shareGenerationRef.current += 1;
+    shareAbortRef.current?.abort();
+    shareAbortRef.current = null;
+    setPreparedShare(null);
+    setShareBusy(null);
+    setShareFeedback(null);
+  }, [currentScanId, isOnline]);
+
+  useEffect(() => () => {
+    shareGenerationRef.current += 1;
+    shareAbortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -301,6 +331,59 @@ export function ScanViewer({
     }
   }
 
+  async function shareCurrentScan(): Promise<void> {
+    if (!isOnline || shareBusy !== null) return;
+    const scanId = currentScan.id;
+    const generation = shareGenerationRef.current;
+    setShareFeedback(null);
+
+    let file = preparedShare?.scanId === scanId ? preparedShare.file : null;
+    try {
+      if (!file) {
+        setShareBusy("preparing");
+        const controller = new AbortController();
+        shareAbortRef.current?.abort();
+        shareAbortRef.current = controller;
+        file = await loadOptimizedScanShareFile(scanId, controller.signal);
+        if (generation !== shareGenerationRef.current) return;
+        if (shareAbortRef.current === controller) shareAbortRef.current = null;
+        setPreparedShare({ scanId, file });
+      }
+
+      setShareBusy("sharing");
+      const outcome = await shareOptimizedScanFile(file);
+      if (generation !== shareGenerationRef.current) return;
+      if (outcome === "retry_required") {
+        setPreparedShare({ scanId, file });
+        setShareFeedback({
+          message: "The optimized scan is ready. Tap Share again.",
+          isError: false,
+        });
+      } else {
+        setPreparedShare(null);
+        setShareFeedback(outcome === "shared"
+          ? { message: "Optimized scan shared.", isError: false }
+          : null);
+      }
+    } catch (error) {
+      if (isShareAbort(error) || generation !== shareGenerationRef.current) return;
+      setPreparedShare(null);
+      const code = error instanceof ScanSharingError ? error.code : "share_failed";
+      setShareFeedback({
+        message: code === "optimized_unavailable"
+          ? "An optimized copy is not available for sharing."
+          : code === "file_too_large"
+            ? "This optimized scan is too large to share."
+            : code === "share_unavailable"
+              ? "File sharing is not available in this browser."
+              : "The optimized scan could not be shared right now.",
+        isError: true,
+      });
+    } finally {
+      if (generation === shareGenerationRef.current) setShareBusy(null);
+    }
+  }
+
   function closeViewer(): void {
     const webkitDoc = document as WebkitDocument;
     if (activeFullscreenElement() === overlayRef.current) {
@@ -349,8 +432,24 @@ export function ScanViewer({
             </div>
             <div>
               <a href={originalMediaUrl} target="_blank" rel="noreferrer">Open original</a>
+              {sharingAvailable && (
+                <button
+                  type="button"
+                  disabled={!isOnline || shareBusy !== null}
+                  aria-describedby={shareFeedback ? "scan-share-status" : undefined}
+                  title={isOnline ? "Share the optimized scan image" : "Scan sharing requires an internet connection"}
+                  onClick={() => { void shareCurrentScan(); }}
+                >{shareBusy === "preparing" ? "Preparing…" : shareBusy === "sharing" ? "Sharing…" : "Share"}</button>
+              )}
               <button type="button" onClick={() => { void enterImageOnly(); }} title="Hide controls and use device fullscreen when available">Image only</button>
             </div>
+            {shareFeedback && (
+              <p
+                className={`scan-share-status${shareFeedback.isError ? " scan-share-error" : ""}`}
+                id="scan-share-status"
+                role={shareFeedback.isError ? "alert" : "status"}
+              >{shareFeedback.message}</p>
+            )}
           </div>
         )}
 

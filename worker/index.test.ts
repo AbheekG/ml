@@ -1272,6 +1272,44 @@ describe("Worker API", () => {
     await expect(response.text()).resolves.toBe("audio");
   });
 
+  it("streams the private Scan readability representation with a bounded file contract", async () => {
+    const database = {
+      prepare: () => ({ bind: () => ({ first: async () => ({
+        objectKey: "scans/readability/media-1.jpg",
+        filename: "private-page.png",
+        mimeType: "image/jpeg",
+        isDerivative: 1,
+      }) }) }),
+    } as unknown as D1Database;
+    let requestedKey = "";
+    const image = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    const media = {
+      get: async (key: string) => {
+        requestedKey = key;
+        return {
+          body: image,
+          size: image.byteLength,
+          httpEtag: '"etag"',
+          writeHttpMetadata: () => undefined,
+        };
+      },
+    } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/scans/scan-1/image",
+      undefined,
+      { ...localBindings(database), MEDIA: media },
+    );
+
+    expect(response.status).toBe(200);
+    expect(requestedKey).toBe("scans/readability/media-1.jpg");
+    expect(response.headers.get("content-type")).toBe("image/jpeg");
+    expect(response.headers.get("content-length")).toBe(String(image.byteLength));
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("x-scan-representation")).toBe("readability");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(image);
+  });
+
   it("returns valid partial-content headers for audio seeking", async () => {
     const database = {
       prepare: () => ({ bind: () => ({ first: async () => ({

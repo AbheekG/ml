@@ -64,6 +64,13 @@ import { findSimilarLookupItems } from "./lookup-similarity";
 import { shouldOfferDirectCameraCapture } from "./device-capabilities";
 import { scanDisplayName } from "./scan-viewer";
 import {
+  isShareAbort,
+  loadOptimizedScanShareFile,
+  ScanSharingError,
+  shareOptimizedScanFile,
+  supportsOptimizedScanSharing,
+} from "./scan-sharing";
+import {
   preserveSessionResolutionDuringRevalidation,
   subscribeToBrowserConnectivity,
 } from "./app-lifecycle";
@@ -262,6 +269,11 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [viewerScanId, setViewerScanId] = useState<string | null>(null);
+  const [scanShareBusy, setScanShareBusy] = useState<{ scanId: string; phase: "preparing" | "sharing" } | null>(null);
+  const [preparedScanShare, setPreparedScanShare] = useState<{ scanId: string; file: File } | null>(null);
+  const [scanShareFeedback, setScanShareFeedback] = useState<{ scanId: string; message: string; isError: boolean } | null>(null);
+  const scanShareAbortRef = useRef<AbortController | null>(null);
+  const scanShareGenerationRef = useRef(0);
   const recordingPlayers = useRef(new Map<string, HTMLAudioElement>());
   const [retryingRecordingId, setRetryingRecordingId] = useState<string | null>(null);
   const [processingRetryError, setProcessingRetryError] = useState<string | null>(null);
@@ -304,6 +316,20 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
     void load();
     return () => { cancelled = true; };
   }, [songId, isOnline]);
+
+  useEffect(() => {
+    scanShareGenerationRef.current += 1;
+    scanShareAbortRef.current?.abort();
+    scanShareAbortRef.current = null;
+    setScanShareBusy(null);
+    setPreparedScanShare(null);
+    setScanShareFeedback(null);
+  }, [songId, isOnline]);
+
+  useEffect(() => () => {
+    scanShareGenerationRef.current += 1;
+    scanShareAbortRef.current?.abort();
+  }, []);
 
   if (isLoading && !song) {
     return <main className="page-shell" id="main-content"><p>Loading song…</p></main>;
@@ -383,6 +409,60 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
         message: "Sharing is not available right now.",
         isError: true,
       });
+    }
+  }
+
+  async function shareScan(scanId: string): Promise<void> {
+    if (!isOnline || scanShareBusy !== null) return;
+    const generation = scanShareGenerationRef.current;
+    setScanShareFeedback(null);
+
+    let file = preparedScanShare?.scanId === scanId ? preparedScanShare.file : null;
+    try {
+      if (!file) {
+        setScanShareBusy({ scanId, phase: "preparing" });
+        const controller = new AbortController();
+        scanShareAbortRef.current?.abort();
+        scanShareAbortRef.current = controller;
+        file = await loadOptimizedScanShareFile(scanId, controller.signal);
+        if (generation !== scanShareGenerationRef.current) return;
+        if (scanShareAbortRef.current === controller) scanShareAbortRef.current = null;
+        setPreparedScanShare({ scanId, file });
+      }
+
+      setScanShareBusy({ scanId, phase: "sharing" });
+      const outcome = await shareOptimizedScanFile(file);
+      if (generation !== scanShareGenerationRef.current) return;
+      if (outcome === "retry_required") {
+        setPreparedScanShare({ scanId, file });
+        setScanShareFeedback({
+          scanId,
+          message: "The optimized scan is ready. Tap Share again.",
+          isError: false,
+        });
+      } else {
+        setPreparedScanShare(null);
+        setScanShareFeedback(outcome === "shared"
+          ? { scanId, message: "Optimized scan shared.", isError: false }
+          : null);
+      }
+    } catch (shareError) {
+      if (isShareAbort(shareError) || generation !== scanShareGenerationRef.current) return;
+      setPreparedScanShare(null);
+      const code = shareError instanceof ScanSharingError ? shareError.code : "share_failed";
+      setScanShareFeedback({
+        scanId,
+        message: code === "optimized_unavailable"
+          ? "An optimized copy is not available for sharing."
+          : code === "file_too_large"
+            ? "This optimized scan is too large to share."
+            : code === "share_unavailable"
+              ? "File sharing is not available in this browser."
+              : "The optimized scan could not be shared right now.",
+        isError: true,
+      });
+    } finally {
+      if (generation === scanShareGenerationRef.current) setScanShareBusy(null);
     }
   }
 
@@ -497,7 +577,26 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                     <div><strong>{scanDisplayName(scan)}</strong><span>{scan.filename}</span></div>
                     <div className="media-item-actions">
                       <button className="media-action" type="button" disabled={!isOnline} title={isOnline ? "View scan" : "Scans require an internet connection"} onClick={() => setViewerScanId(scan.id)}>View</button>
+                      {supportsOptimizedScanSharing() && (
+                        <button
+                          className="media-action"
+                          type="button"
+                          disabled={!isOnline || scanShareBusy !== null}
+                          aria-describedby={scanShareFeedback?.scanId === scan.id ? `scan-share-${scan.id}` : undefined}
+                          title={isOnline ? "Share the optimized scan image" : "Scan sharing requires an internet connection"}
+                          onClick={() => { void shareScan(scan.id); }}
+                        >{scanShareBusy?.scanId === scan.id
+                            ? scanShareBusy.phase === "preparing" ? "Preparing…" : "Sharing…"
+                            : "Share"}</button>
+                      )}
                       {isOnline && canEdit === true && <Link className="media-action" to={`/songs/${encodeURIComponent(song.id)}/scans/${encodeURIComponent(scan.id)}/edit`}>Edit</Link>}
+                      {scanShareFeedback?.scanId === scan.id && (
+                        <p
+                          className={`scan-row-share-status${scanShareFeedback.isError ? " error-message" : ""}`}
+                          id={`scan-share-${scan.id}`}
+                          role={scanShareFeedback.isError ? "alert" : "status"}
+                        >{scanShareFeedback.message}</p>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -510,7 +609,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
         </div>
         <aside><MetadataList song={song} /></aside>
       </div>
-      {viewerScanId && <ScanViewer scans={song.scans} initialScanId={viewerScanId} onClose={() => setViewerScanId(null)} />}
+      {viewerScanId && <ScanViewer scans={song.scans} initialScanId={viewerScanId} isOnline={isOnline} onClose={() => setViewerScanId(null)} />}
     </main>
   );
 }

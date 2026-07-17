@@ -1,8 +1,9 @@
 # Scan integrity and readability
 
-Status: implemented in protected staging, 2026-07-16. The owner accepted the ten
-highest-risk local visual candidates; real Safari/iOS and Chrome/Android checks
-remain pre-cutover gates.
+Status: implemented in protected staging, 2026-07-17. The owner accepted the ten
+highest-risk local visual candidates. Optimized-Scan system sharing is deployed
+as Worker version `24c078b3-530f-48f1-8707-6d5e7a5b90aa`, client/service-worker
+build `c91b8ffdc1b2`; its Android and iPadOS manual gate remains pending.
 
 ## Policy
 
@@ -20,6 +21,21 @@ The derivative and original stay in private R2. The authenticated Scan viewer
 uses the derivative when provenance exists and otherwise falls back to the
 original. “Open original” deliberately continues to request the retained source.
 No public bucket, delivery URL, or unauthenticated cache is introduced.
+
+## Optimized-Scan sharing
+
+On capable online browsers, the Song row or viewer can fetch the authenticated
+readability route and pass its exact bytes to the native system share sheet as a
+generic `scan.jpg` file. The client accepts only a successful private response explicitly
+marked `readability`, with JPEG type, a positive exact length, and a 20 MiB
+maximum. An original fallback is rejected rather than shared.
+
+The share payload contains only the file: it adds no title, catalog text, or
+public URL. The bytes are held only for the immediate action. If the fetch makes
+the browser's user-activation window expire, the prepared file remains in viewer
+memory and a second tap completes the share without another download. Canceling
+the native sheet is quiet; unsupported browsers do not show the action, and the
+action is disabled while offline.
 
 ## Integrity and replacement
 
