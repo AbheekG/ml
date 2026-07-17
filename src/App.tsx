@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { ScanViewer } from "./ScanViewer";
-import { ScanActionContent } from "./ScanAction";
+import { ActionContent } from "./ActionContent";
 import { CatalogControls } from "./CatalogControls";
 import { RecordingUploadPage } from "./RecordingUploadPage";
 import { CreditRows } from "./CreditRows";
@@ -173,8 +173,8 @@ function SongsPage({
           </p>
         </div>
         {isOnline && canEdit === true
-          ? <Link className="primary-action action-link" to="/songs/new">Add song</Link>
-          : <button className="primary-action" type="button" disabled title={isOnline ? "Editor access is required" : "Go online to add a song"}>Add song</button>}
+          ? <Link className="primary-action action-link icon-text-action" to="/songs/new"><ActionContent kind="add" label="Add song" /></Link>
+          : <button className="primary-action icon-text-action" type="button" disabled title={isOnline ? "Editor access is required" : "Go online to add a song"}><ActionContent kind="add" label="Add song" /></button>}
       </section>
 
       <CatalogControls
@@ -473,7 +473,14 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
       <header className="detail-heading">
         <div className="heading-actions">
           <p className="eyebrow">Song</p>
-          {isOnline && canEdit === true && <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(song.id)}/edit`}>Edit song</Link>}
+          {isOnline && canEdit === true && (
+            <Link
+              className="secondary-action action-link compact-action"
+              to={`/songs/${encodeURIComponent(song.id)}/edit`}
+              aria-label="Edit Song"
+              title="Edit Song"
+            ><ActionContent kind="edit" label="Edit song" /></Link>
+          )}
         </div>
         <h1>{song.titleLatin}</h1>
         {song.titleNative && <p className="native-title" lang="und">{song.titleNative}</p>}
@@ -488,20 +495,31 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                 <h2 id={`${lyrics.id}-title`}>Typed lyrics</h2>
                 <div className="lyric-actions">
                   <button
-                    className="secondary-action"
+                    className="secondary-action compact-action"
                     type="button"
                     disabled={lyricAction?.busy === true}
+                    aria-label="Copy typed lyrics"
+                    title="Copy typed lyrics"
                     onClick={() => { void copyLyrics(lyrics.id, lyrics.content); }}
-                  >Copy</button>
+                  ><ActionContent kind="copy" label="Copy" /></button>
                   {supportsSystemTextShare() && (
                     <button
-                      className="secondary-action"
+                      className="secondary-action compact-action"
                       type="button"
                       disabled={lyricAction?.busy === true}
+                      aria-label="Share typed lyrics"
+                      title="Share typed lyrics"
                       onClick={() => { void shareLyrics(lyrics.id, lyrics.content); }}
-                    >Share</button>
+                    ><ActionContent kind="share" label="Share" /></button>
                   )}
-                  {isOnline && canEdit === true && <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(song.id)}/lyrics/${encodeURIComponent(lyrics.id)}/edit`}>Edit</Link>}
+                  {isOnline && canEdit === true && (
+                    <Link
+                      className="secondary-action action-link compact-action"
+                      to={`/songs/${encodeURIComponent(song.id)}/lyrics/${encodeURIComponent(lyrics.id)}/edit`}
+                      aria-label="Edit typed lyrics"
+                      title="Edit typed lyrics"
+                    ><ActionContent kind="edit" label="Edit" /></Link>
+                  )}
                 </div>
               </div>
               {lyricAction?.lyricId === lyrics.id && lyricAction.message && (
@@ -515,7 +533,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
           ))}
 
           {isOnline && canEdit === true && (
-            <Link className="secondary-action action-link add-child-action" to={`/songs/${encodeURIComponent(song.id)}/lyrics/new`}>Add typed lyrics</Link>
+            <Link className="secondary-action action-link add-child-action icon-text-action" to={`/songs/${encodeURIComponent(song.id)}/lyrics/new`}><ActionContent kind="add" label="Add typed lyrics" /></Link>
           )}
 
           {song.recordings.length > 0 && (
@@ -548,15 +566,20 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                       <div className="media-item-actions">
                         {recording.processingState === "failed" && (
                           <button
-                            className="media-action"
+                            className="media-action icon-text-action"
                             type="button"
                             disabled={retryingRecordingId !== null}
                             onClick={() => { void retryFailedRecording(recording); }}
                           >
-                            {retryingRecordingId === recording.id ? "Retrying…" : "Retry preparation"}
+                            <ActionContent kind="retry" label={retryingRecordingId === recording.id ? "Retrying…" : "Retry preparation"} />
                           </button>
                         )}
-                        <Link className="media-action" to={`/songs/${encodeURIComponent(song.id)}/recordings/${encodeURIComponent(recording.id)}/edit`}>Edit</Link>
+                        <Link
+                          className="media-action compact-action"
+                          to={`/songs/${encodeURIComponent(song.id)}/recordings/${encodeURIComponent(recording.id)}/edit`}
+                          aria-label="Edit Recording"
+                          title="Edit Recording"
+                        ><ActionContent kind="edit" label="Edit" /></Link>
                       </div>
                     )}
                   </li>
@@ -566,7 +589,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
             </section>
           )}
           {isOnline && canEdit === true && (
-            <Link className="secondary-action action-link add-child-action" to={`/songs/${encodeURIComponent(song.id)}/recordings/new`}>Add Recording</Link>
+            <Link className="secondary-action action-link add-child-action icon-text-action" to={`/songs/${encodeURIComponent(song.id)}/recordings/new`}><ActionContent kind="add" label="Add Recording" /></Link>
           )}
 
           {song.scans.length > 0 && (
@@ -578,16 +601,16 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                     <div><strong>{scanDisplayName(scan)}</strong><span>{scan.filename}</span></div>
                     <div className="media-item-actions">
                       <button
-                        className="media-action scan-action"
+                        className="media-action compact-action"
                         type="button"
                         disabled={!isOnline}
                         aria-label="View Scan"
                         title={isOnline ? "View Scan" : "Scans require an internet connection"}
                         onClick={() => setViewerScanId(scan.id)}
-                      ><ScanActionContent kind="view" label="View" /></button>
+                      ><ActionContent kind="view" label="View" /></button>
                       {supportsOptimizedScanSharing() && (
                         <button
-                          className="media-action scan-action"
+                          className="media-action compact-action"
                           type="button"
                           disabled={!isOnline || scanShareBusy !== null}
                           aria-label={scanShareBusy?.scanId === scan.id
@@ -597,7 +620,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                           aria-describedby={scanShareFeedback?.scanId === scan.id ? `scan-share-${scan.id}` : undefined}
                           title={isOnline ? "Share the optimized scan image" : "Scan sharing requires an internet connection"}
                           onClick={() => { void shareScan(scan.id); }}
-                        ><ScanActionContent
+                        ><ActionContent
                             kind="share"
                             label={scanShareBusy?.scanId === scan.id
                               ? scanShareBusy.phase === "preparing" ? "Preparing…" : "Sharing…"
@@ -606,11 +629,11 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                       )}
                       {isOnline && canEdit === true && (
                         <Link
-                          className="media-action scan-action"
+                          className="media-action compact-action"
                           to={`/songs/${encodeURIComponent(song.id)}/scans/${encodeURIComponent(scan.id)}/edit`}
                           aria-label="Edit Scan"
                           title="Edit Scan"
-                        ><ScanActionContent kind="edit" label="Edit" /></Link>
+                        ><ActionContent kind="edit" label="Edit" /></Link>
                       )}
                       {scanShareFeedback?.scanId === scan.id && (
                         <p
@@ -626,7 +649,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
             </section>
           )}
           {isOnline && canEdit === true && (
-            <Link className="secondary-action action-link add-child-action" to={`/songs/${encodeURIComponent(song.id)}/scans/new`}>Add Scan</Link>
+            <Link className="secondary-action action-link add-child-action icon-text-action" to={`/songs/${encodeURIComponent(song.id)}/scans/new`}><ActionContent kind="add" label="Add Scan" /></Link>
           )}
         </div>
         <aside><MetadataList song={song} /></aside>
@@ -1036,7 +1059,7 @@ function ScanEditorPage({
                 <span>Private file</span>
                 <strong>{filename}</strong>
               </div>
-              <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(songId)}/scans/${encodeURIComponent(scanId)}/replace`}>Replace image</Link>
+              <Link className="secondary-action action-link icon-text-action" to={`/songs/${encodeURIComponent(songId)}/scans/${encodeURIComponent(scanId)}/replace`}><ActionContent kind="replace" label="Replace image" /></Link>
             </div>
           )}
           {mode !== "replace" && (
@@ -1203,7 +1226,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
             </div>
             {processingState === "processing"
               ? <span className="media-note">Replacement is available after processing finishes.</span>
-              : <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(songId)}/recordings/${encodeURIComponent(recordingId)}/replace`}>Replace audio</Link>}
+              : <Link className="secondary-action action-link icon-text-action" to={`/songs/${encodeURIComponent(songId)}/recordings/${encodeURIComponent(recordingId)}/replace`}><ActionContent kind="replace" label="Replace audio" /></Link>}
           </div>
           <label className="form-field">
             <span>Recording description <strong aria-hidden="true">*</strong></span>

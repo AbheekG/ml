@@ -1,16 +1,23 @@
-export type ScanActionKind = "view" | "share" | "edit";
+export type ActionIconKind =
+  | "add"
+  | "copy"
+  | "edit"
+  | "replace"
+  | "retry"
+  | "share"
+  | "view";
 
-export function ScanActionContent({
+export function ActionContent({
   kind,
   label,
 }: {
-  kind: ScanActionKind;
+  kind: ActionIconKind;
   label: string;
 }) {
   return (
     <>
       <svg
-        className="scan-action-icon"
+        className="action-icon"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -40,8 +47,29 @@ export function ScanActionContent({
             <path d="m8.2 10.8 7.6-4.5M8.2 13.2l7.6 4.5" />
           </>
         )}
+        {kind === "copy" && (
+          <>
+            <rect x="8" y="8" width="11" height="11" rx="2" />
+            <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+          </>
+        )}
+        {kind === "add" && <path d="M12 5v14M5 12h14" />}
+        {kind === "retry" && (
+          <>
+            <path d="M20 7v5h-5" />
+            <path d="M19 12a7 7 0 1 0-2.1 5" />
+          </>
+        )}
+        {kind === "replace" && (
+          <>
+            <path d="m16 3 4 4-4 4" />
+            <path d="M4 7h16" />
+            <path d="m8 21-4-4 4-4" />
+            <path d="M20 17H4" />
+          </>
+        )}
       </svg>
-      <span className="scan-action-label">{label}</span>
+      <span className="action-label">{label}</span>
     </>
   );
 }

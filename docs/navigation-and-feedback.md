@@ -1,9 +1,10 @@
 # Catalog navigation and action feedback
 
 Status: navigation behavior is deployed and owner-accepted. Current protected
-staging is Worker version `b3ccdca7-683b-4881-b4aa-1a85dd4d892a`;
-client/service-worker build `b4de0994f09e`. Direct Scan-row sharing and its
-responsive action presentation await Android and iPadOS acceptance.
+staging is Worker version `aa9630a7-0d56-4f21-b06e-873c80ef79d0`;
+client/service-worker build `d0f72594ac8b`. The owner reports that direct
+Scan-row sharing and its responsive action presentation work well. The broader
+action-icon consistency pass is deployed and awaits normal device acceptance.
 
 ## Catalog Back behavior
 
@@ -71,6 +72,16 @@ symbol on wider layouts. Below 37 rem the visible text is removed to preserve th
 media title and filename, while the 44-pixel icon button retains an explicit
 accessible name and disabled state. View and Share remain reader actions; Edit
 remains online and editor-only.
+
+The deployed follow-up generalizes that same pattern to repeated compact actions:
+Edit Song; typed-lyric Copy, Share, and Edit; and Recording Edit. Recording retry
+adds a retry symbol but retains its descriptive text. Add Song/typed lyrics/
+Recording/Scan actions use a plus symbol but retain their text at every width,
+and Replace Image/Audio uses a bidirectional replacement symbol with text. Save,
+Cancel, Trash, Restore, file selection, and unusual recovery actions deliberately
+remain text-first because consequence and clarity matter more than compactness.
+A future Recording Share action should reuse the existing share symbol and
+optimized/private-file rules approved for that feature.
 
 ## Acceptance reference
 

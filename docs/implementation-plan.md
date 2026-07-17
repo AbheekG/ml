@@ -130,17 +130,25 @@ files / 338 tests, all 90 Python audio tests, all three TypeScript projects,
 production build, and whitespace checks. Access still returns the expected
 unauthenticated redirect, no migration is pending, and aggregate D1/foreign-key
 postflight is unchanged with zero rows written. Android and iPadOS native-share
-acceptance of the direct row action and responsive icons remains the exact next
-gate. The in-app browser runtime failed during setup before opening the local
-page, so automated checks are not treated as rendered-browser acceptance.
+acceptance of the direct row action and responsive icons was subsequently
+reported successful by the owner, without a named device/browser. The in-app
+browser runtime failed during setup before opening the local page, so automated
+checks are not treated as rendered-browser acceptance. The follow-up extending
+the accessible icon/text pattern to compact Song, typed-lyric, and Recording
+actions plus text-retaining Add and Replace actions is deployed as Worker
+version `aa9630a7-0d56-4f21-b06e-873c80ef79d0`, client/service-worker build
+`d0f72594ac8b`. Verification passes at 50 Vitest files / 343 tests, all 90 Python
+audio tests, all three TypeScript projects, production build, and whitespace
+checks. Access, migrations, aggregate D1, and foreign-key postflight are clean
+with zero rows written.
 
 ## Current execution order
 
 The core read/edit/recovery/search flows and safe Scan/Recording create/replace
 pipelines now work in staging. Continue in this order:
 
-1. complete Android and iPadOS manual acceptance of optimized-Scan sharing, then
-   record concrete feedback before selecting another implementation slice;
+1. perform normal real-device acceptance of the deployed broader action-icon
+   consistency pass and record any concrete feedback;
 2. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
    any deletion executor and every physical delete remain separately designed
    and owner-approved; at the next genuine Recording finalization/replacement,
@@ -395,7 +403,8 @@ Deliverable: safe online maintenance by the primary editor.
   manually accepted, while real-device accessibility remains;
 - one-tap system sharing of an individual Scan's authenticated readability JPEG
   is deployed with capability and representation checks and no public media URL;
-  Android/iPadOS acceptance is pending, while Recording sharing remains later;
+  the owner reports that it works well without naming the tested device/browser,
+  while Recording sharing remains later;
 - copy for an individual typed-lyric block plus capability-gated system text
   sharing are now implemented locally for all readers and remain available while
   offline; real Safari/iOS and Chrome/Android clipboard/share-sheet checks remain;

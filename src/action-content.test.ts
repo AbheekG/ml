@@ -1,18 +1,22 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ScanActionContent, type ScanActionKind } from "./ScanAction";
+import { ActionContent, type ActionIconKind } from "./ActionContent";
 
-describe("Scan action presentation", () => {
-  it.each<[ScanActionKind, string]>([
+describe("action presentation", () => {
+  it.each<[ActionIconKind, string]>([
     ["view", "View"],
     ["share", "Share"],
     ["edit", "Edit"],
+    ["copy", "Copy"],
+    ["add", "Add"],
+    ["retry", "Retry"],
+    ["replace", "Replace"],
   ])("renders a decorative %s icon alongside its text label", (kind, label) => {
-    const markup = renderToStaticMarkup(createElement(ScanActionContent, { kind, label }));
+    const markup = renderToStaticMarkup(createElement(ActionContent, { kind, label }));
 
     expect(markup).toContain(`>${label}</span>`);
-    expect(markup).toContain('class="scan-action-icon"');
+    expect(markup).toContain('class="action-icon"');
     expect(markup).toContain('aria-hidden="true"');
     expect(markup).toContain('focusable="false"');
   });

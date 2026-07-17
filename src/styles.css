@@ -745,14 +745,15 @@ button:disabled {
   text-decoration: none;
 }
 
-.scan-action {
+.compact-action,
+.icon-text-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
 }
 
-.scan-action-icon {
+.action-icon {
   width: 1rem;
   height: 1rem;
   flex: 0 0 auto;
@@ -1822,17 +1823,23 @@ button:disabled {
 }
 
 @media (max-width: 37rem) {
-  .scan-action {
+  .compact-action {
     width: 2.75rem;
     height: 2.75rem;
     padding: 0;
   }
 
-  .scan-action-label {
+  .heading-actions .compact-action,
+  .lyric-actions .compact-action,
+  .media-list .compact-action {
+    padding: 0;
+  }
+
+  .compact-action .action-label {
     display: none;
   }
 
-  .scan-action-icon {
+  .compact-action .action-icon {
     width: 1.15rem;
     height: 1.15rem;
   }
