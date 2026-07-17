@@ -1,105 +1,54 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  createLatestConnectivityChecker,
   preserveSessionResolutionDuringRevalidation,
-  type ConnectivityProbe,
+  subscribeToBrowserConnectivity,
+  type BrowserConnectivityTarget,
 } from "./app-lifecycle";
 
-type PendingProbe = {
-  signal: AbortSignal;
-  resolve: (isOnline: boolean) => void;
-  reject: (error: Error) => void;
-};
-
-function controlledProbe(options: { rejectOnAbort?: boolean } = {}): {
-  probe: ConnectivityProbe;
-  pending: PendingProbe[];
-} {
-  const pending: PendingProbe[] = [];
+function connectivityTarget(): BrowserConnectivityTarget & { dispatch: (type: "online" | "offline" | "pageshow") => void } {
+  const listeners = new Map<string, Set<EventListener>>();
   return {
-    pending,
-    probe: (signal) => new Promise<boolean>((resolve, reject) => {
-      const item = { signal, resolve, reject };
-      pending.push(item);
-      if (options.rejectOnAbort !== false) {
-        signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
-      }
-    }),
+    addEventListener(type, listener) {
+      const registered = listeners.get(type) ?? new Set<EventListener>();
+      registered.add(listener);
+      listeners.set(type, registered);
+    },
+    removeEventListener(type, listener) {
+      listeners.get(type)?.delete(listener);
+    },
+    dispatch(type) {
+      for (const listener of listeners.get(type) ?? []) listener(new Event(type));
+    },
   };
 }
 
 describe("application lifecycle connectivity", () => {
-  it("lets only the latest clustered resume check publish status", async () => {
-    const source = controlledProbe();
+  it("publishes the browser-reported state on connectivity changes and page restore", () => {
+    const target = connectivityTarget();
+    let online = true;
     const statuses: boolean[] = [];
-    const checker = createLatestConnectivityChecker(source.probe, (status) => statuses.push(status));
-
-    const first = checker.check();
-    const second = checker.check();
-    const third = checker.check();
-
-    expect(source.pending).toHaveLength(3);
-    expect(source.pending[0].signal.aborted).toBe(true);
-    expect(source.pending[1].signal.aborted).toBe(true);
-    source.pending[2].resolve(true);
-    await Promise.all([first, second, third]);
-
-    expect(statuses).toEqual([true]);
-  });
-
-  it("still reports a genuine failure from the newest check", async () => {
-    const statuses: boolean[] = [];
-    const checker = createLatestConnectivityChecker(
-      async () => { throw new Error("unreachable"); },
+    const unsubscribe = subscribeToBrowserConnectivity(
+      target,
+      () => online,
       (status) => statuses.push(status),
     );
 
-    await checker.check();
-    expect(statuses).toEqual([false]);
+    online = false;
+    target.dispatch("offline");
+    online = true;
+    target.dispatch("online");
+    target.dispatch("pageshow");
+
+    expect(statuses).toEqual([false, true, true]);
+    unsubscribe();
   });
 
-  it("keeps an explicit offline event authoritative over a stale success", async () => {
-    const source = controlledProbe({ rejectOnAbort: false });
+  it("stops publishing after cleanup", () => {
+    const target = connectivityTarget();
     const statuses: boolean[] = [];
-    const checker = createLatestConnectivityChecker(source.probe, (status) => statuses.push(status));
-
-    const checking = checker.check();
-    checker.markOffline();
-    source.pending[0].resolve(true);
-    await checking;
-
-    expect(statuses).toEqual([false]);
-  });
-
-  it("reports a timeout from the current check as offline", async () => {
-    vi.useFakeTimers();
-    try {
-      const source = controlledProbe();
-      const statuses: boolean[] = [];
-      const checker = createLatestConnectivityChecker(
-        source.probe,
-        (status) => statuses.push(status),
-        50,
-      );
-
-      const checking = checker.check();
-      await vi.advanceTimersByTimeAsync(50);
-      await checking;
-      expect(statuses).toEqual([false]);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("publishes nothing after disposal", async () => {
-    const source = controlledProbe({ rejectOnAbort: false });
-    const statuses: boolean[] = [];
-    const checker = createLatestConnectivityChecker(source.probe, (status) => statuses.push(status));
-
-    const checking = checker.check();
-    checker.dispose();
-    source.pending[0].resolve(true);
-    await checking;
+    const unsubscribe = subscribeToBrowserConnectivity(target, () => false, (status) => statuses.push(status));
+    unsubscribe();
+    target.dispatch("offline");
 
     expect(statuses).toEqual([]);
   });

@@ -39,6 +39,7 @@ The private staging application is operational:
 - song detail displays metadata, typed lyrics, scan records, and recording records;
 - the complete catalog, metadata, and typed lyrics are atomically cached in IndexedDB, while the production app shell and hashed assets are precached by a service worker;
 - private scans open in an in-app zoom/pan viewer and recordings stream with seeking; starting one Recording pauses any other Recording playing on that Song without changing its verified stored source;
+- the global offline/read-only indicator follows browser connectivity rather than treating one slow API request as proof that the whole app is offline; online-only media handles request failures locally, and an open Scan viewer remains mounted with immediate loading feedback; this follow-up is deployed to protected staging for real-device acceptance;
 - type checks, importer/schema/API tests, production builds, and local end-to-end API smoke tests pass.
 
 - a reconciled forward migration enforces normalized active Song titles, statuses, controlled lookup keys, simplified typed lyrics, Recording descriptions, and Trash safety;
@@ -63,6 +64,8 @@ The private staging application is operational:
 
 The exact Scan conversion, provenance, repair, and visual-acceptance rules are
 recorded in [the Scan integrity/readability policy](docs/scan-readability.md).
+The browser-connectivity boundary and online-only media behavior are recorded in
+[the connectivity and online-media policy](docs/connectivity-and-online-media.md).
 The logout/cache guarantees and remaining real-browser gate are recorded in
 [the private local-data policy](docs/logout-and-local-data.md).
 

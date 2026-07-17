@@ -22,8 +22,19 @@ iOS/iPadOS compatibility and observed per-Scan orientation remain explicit
 later work. Scan-viewer gesture containment is deployed for owner acceptance:
 the viewer modal suppresses browser-level touch zoom while open, and a native
 non-passive wheel boundary converts trackpad pinch into bounded image zoom
-without scaling the controls. The local logout hardening now places a
-persistent privacy barrier before clearing, invalidates other tabs, prevents
+without scaling the controls. Android Brave testing then exposed that a single
+five-second application health timeout could falsely mark the whole app offline
+and close the viewer even though the Scan request itself succeeded. The deployed
+follow-up now applies the simpler boundary documented in
+[`connectivity-and-online-media.md`](connectivity-and-online-media.md): global
+offline/read-only state follows browser connectivity events, operational health
+checks no longer drive UI state, individual request failures stay local, and an
+open viewer remains mounted with immediate loading feedback. Protected-staging
+Worker version `b9b5dd74-b052-4a0d-906c-638e008418e7` and
+client/service-worker build `c743da499d77` contain this follow-up; automated and
+cloud postflight checks pass, while real-device acceptance remains pending. The
+local logout hardening now places a persistent privacy barrier before clearing, invalidates
+other tabs, prevents
 stale sync commits, verifies IndexedDB/CacheStorage removal, requests browser
 HTTP-cache clearing, and keeps Cloudflare Access control paths outside the
 service worker. Protected-staging Worker version

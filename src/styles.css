@@ -1473,7 +1473,8 @@ button:disabled {
   touch-action: none;
 }
 
-.scan-load-error {
+.scan-load-error,
+.scan-loading {
   position: absolute;
   inset: 0;
   display: grid;
@@ -1483,6 +1484,27 @@ button:disabled {
   justify-items: center;
   color: #fffaf1;
   text-align: center;
+}
+
+.scan-loading {
+  pointer-events: none;
+}
+
+.scan-loading span {
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid rgb(255 255 255 / 24%);
+  border-top-color: #fffaf1;
+  border-radius: 50%;
+  animation: scan-loading-spin 0.8s linear infinite;
+}
+
+@keyframes scan-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-loading span { animation: none; }
 }
 
 .scan-load-error a {

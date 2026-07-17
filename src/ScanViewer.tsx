@@ -349,6 +349,7 @@ export function ScanViewer({
         <div
           className="scan-viewer-stage"
           ref={stageRef}
+          aria-busy={!loadFailed && naturalSize.width === 0}
           onPointerDown={pointerDown}
           onPointerMove={pointerMove}
           onPointerUp={pointerEnd}
@@ -361,21 +362,31 @@ export function ScanViewer({
               <a href={originalMediaUrl} target="_blank" rel="noreferrer">Open the original file</a>
             </div>
           ) : (
-            <img
-              src={mediaUrl}
-              alt={scanDisplayName(currentScan)}
-              draggable="false"
-              style={{
-                width: fittedSize.width,
-                height: fittedSize.height,
-                transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.zoom})`,
-              }}
-              onLoad={(event) => setNaturalSize({
-                width: event.currentTarget.naturalWidth,
-                height: event.currentTarget.naturalHeight,
-              })}
-              onError={() => setLoadFailed(true)}
-            />
+            <>
+              {naturalSize.width === 0 && (
+                <div className="scan-loading" role="status">
+                  <span aria-hidden="true" />
+                  Loading scan…
+                </div>
+              )}
+              <img
+                src={mediaUrl}
+                alt={scanDisplayName(currentScan)}
+                draggable="false"
+                fetchPriority="high"
+                loading="eager"
+                style={{
+                  width: fittedSize.width,
+                  height: fittedSize.height,
+                  transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.zoom})`,
+                }}
+                onLoad={(event) => setNaturalSize({
+                  width: event.currentTarget.naturalWidth,
+                  height: event.currentTarget.naturalHeight,
+                })}
+                onError={() => setLoadFailed(true)}
+              />
+            </>
           )}
         </div>
 

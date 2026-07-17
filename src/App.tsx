@@ -59,8 +59,8 @@ import { findSimilarLookupItems } from "./lookup-similarity";
 import { shouldOfferDirectCameraCapture } from "./device-capabilities";
 import { scanDisplayName } from "./scan-viewer";
 import {
-  createLatestConnectivityChecker,
   preserveSessionResolutionDuringRevalidation,
+  subscribeToBrowserConnectivity,
 } from "./app-lifecycle";
 import {
   PRIVATE_CACHE_NAMESPACE_KEY,
@@ -78,44 +78,7 @@ import {
 function useOnlineStatus(): boolean {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
 
-  useEffect(() => {
-    const checker = createLatestConnectivityChecker(
-      async (signal) => {
-        const response = await fetch(`/api/health?connectivity=${Date.now()}`, {
-          cache: "no-store",
-          headers: { Accept: "application/json" },
-          signal,
-        });
-        return response.ok
-          && response.headers.get("content-type")?.includes("application/json") === true;
-      },
-      setIsOnline,
-    );
-
-    const goOnline = () => { void checker.check(); };
-    const goOffline = () => checker.markOffline();
-    const checkWhenVisible = () => {
-      if (document.visibilityState === "visible") void checker.check();
-    };
-
-    window.addEventListener("online", goOnline);
-    window.addEventListener("offline", goOffline);
-    window.addEventListener("focus", goOnline);
-    window.addEventListener("pageshow", goOnline);
-    document.addEventListener("visibilitychange", checkWhenVisible);
-    const interval = window.setInterval(() => { void checker.check(); }, 30000);
-    void checker.check();
-
-    return () => {
-      checker.dispose();
-      window.clearInterval(interval);
-      window.removeEventListener("online", goOnline);
-      window.removeEventListener("offline", goOffline);
-      window.removeEventListener("focus", goOnline);
-      window.removeEventListener("pageshow", goOnline);
-      document.removeEventListener("visibilitychange", checkWhenVisible);
-    };
-  }, []);
+  useEffect(() => subscribeToBrowserConnectivity(window, () => navigator.onLine, setIsOnline), []);
 
   return isOnline;
 }
@@ -274,10 +237,6 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
     message: string;
     isError: boolean;
   } | null>(null);
-
-  useEffect(() => {
-    if (!isOnline) setViewerScanId(null);
-  }, [isOnline]);
 
   useEffect(() => {
     let cancelled = false;
