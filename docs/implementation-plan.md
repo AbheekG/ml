@@ -11,9 +11,12 @@ Cloudflare Access-to-Google Workload Identity Federation; the enabled
 JSON key is deleted and the old trigger service account is disabled. Imported
 Scan sources are reconciled in the global fingerprint registry and have private
 2400-pixel JPEG readability derivatives; bounded, leased daily maintenance
-remains enabled for later repair needs. Production remains absent; real-device
-offline, media/derivative, upload, and playback acceptance remains a gate. The
-owner reviewed all six recoverable historical pre-intent Recording upload
+remains enabled for later repair needs. Production remains absent. macOS Safari
+and Android Chrome/Brave read-only, offline, Scan-viewer, playback, and unsaved
+editor-form checks are owner-accepted. iOS/iPadOS compatibility, staging-mutating
+upload/replace/recovery checks, logout/cache removal, and observed per-Scan
+orientation corrections remain explicit later work. Separately, the owner
+reviewed all six recoverable historical pre-intent Recording upload
 sessions, confirmed they were test uploads, and discarded them recoverably in
 protected staging without deleting the six retained private objects. The two
 already-finalized historical rows were unchanged; no recoverable pre-intent
@@ -36,7 +39,9 @@ the unresolved cases remain separately owner-gated; see
 The core read/edit/recovery/search flows and safe Scan/Recording create/replace
 pipelines now work in staging. Continue in this order:
 
-1. run Safari/iOS and Chrome/Android offline, Scan, upload, and playback gates;
+1. complete separately owner-authorized staging upload/replace/recovery and
+   logout/cache-removal gates when prioritized; keep iOS/iPadOS compatibility
+   and observed per-Scan orientation corrections as explicit deferred work;
 2. investigate the two issue-marked Scan mappings, the deferred unmatched cases,
    or the reserved later manual uploads only when the owner prioritizes them;
 3. add sharing or further search/product polish only from concrete feedback;
