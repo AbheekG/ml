@@ -143,7 +143,7 @@ function SongsPage({
     window.scrollTo({ top: scrollPosition.current, left: 0, behavior: "auto" });
   }, [isLoading, scrollPosition, songs.length]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const rememberScroll = () => {
       if (!restoredScroll.current) return;
       scrollPosition.current = window.scrollY;
@@ -271,6 +271,10 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
     message: string;
     isError: boolean;
   } | null>(null);
+
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [songId]);
 
   useEffect(() => {
     let cancelled = false;

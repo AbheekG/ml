@@ -1,8 +1,8 @@
 # Catalog navigation and action feedback
 
 Status: deployed to protected staging for manual acceptance on 2026-07-17.
-Worker version `795a565c-bf06-46b8-ae92-78e7a93a65eb`; client/service-worker
-build `9f2997c62527`.
+Worker version `3e6ac24e-93d3-4704-9fd8-a6bbb0b75efc`; client/service-worker
+build `0a1a445e3ce3`.
 
 ## Catalog Back behavior
 
@@ -15,6 +15,10 @@ Some Android browsers emit their own Back-navigation scroll event while the
 cached catalog is still temporarily empty. That provisional position is ignored
 until the catalog has completed its one explicit restoration, so it cannot
 replace the remembered position with the top of the page.
+
+Opening a Song is a forward navigation and starts its detail page at the top.
+The catalog listener is removed synchronously during that route transition, so
+the top reset cannot replace the separately remembered catalog position.
 
 This state is deliberately absent from URLs, `localStorage`, and
 `sessionStorage`. Search text may contain private catalog information; it should

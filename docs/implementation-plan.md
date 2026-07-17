@@ -101,11 +101,13 @@ regenerate its mappings, or garbage-collect the retained history. Production and
 the unresolved cases remain separately owner-gated; see
 [scan-original-recovery.md](scan-original-recovery.md).
 
-Protected-staging Worker version `795a565c-bf06-46b8-ae92-78e7a93a65eb`
+Protected-staging Worker version `3e6ac24e-93d3-4704-9fd8-a6bbb0b75efc`
 contains the accepted Scan-viewer refinements and the catalog-navigation/action-
-feedback follow-up with client/service-worker build `9f2997c62527`. Android's
+feedback follow-up with client/service-worker build `0a1a445e3ce3`. Android's
 provisional native Back scroll is ignored until the cached catalog completes its
 explicit restoration, so it cannot replace the saved position with page top.
+Forward navigation to a Song detail starts at the top without altering the
+catalog's separately remembered position.
 Verification passes at 47 Vitest files / 327 tests, all 90 Python audio tests,
 all three TypeScript projects, production bundles, and whitespace checks. Access
 still returns the expected unauthenticated redirect, no migration is pending,
