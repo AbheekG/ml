@@ -1,12 +1,13 @@
 # Catalog navigation and action feedback
 
 Status: navigation behavior is deployed and owner-accepted. Current protected
-staging is Worker version `c9db96fd-3028-457b-867a-482143732672`;
-client/service-worker build `9f78a8f53da9`. The owner reports that direct
+staging is Worker version `e150ba21-809e-4c26-acda-8c7dbde5d8ce`;
+client/service-worker build `90aa09dea66e`. The owner reports that direct
 Scan-row sharing, the responsive action presentation, the broader action-icon
 consistency pass, and Recording sharing work well. The specific device/browser
 was not recorded for the later UI/sharing acceptance, so no named-platform claim
-is inferred.
+is inferred. The newly deployed unsaved-editor guard described below is awaiting
+owner real-device acceptance.
 
 ## Catalog Back behavior
 
@@ -39,6 +40,20 @@ private-data barrier explicitly reset the in-memory catalog view as well.
 
 Reloading the application still starts from the normal unfiltered catalog at the
 top. This is an intentional boundary, not a durable preference system.
+
+## Unsaved editor navigation
+
+Song, typed-lyric, Scan, Recording-metadata, and Recording-upload/replacement
+screens register dirty state with one router-level guard. An in-app navigation
+attempt opens an accessible modal confirmation with trapped focus, Escape/Stay,
+and explicit Discard-and-leave actions. Reload, tab close, and external
+navigation retain the browser's native unsaved-change warning. Successful Save,
+Trash, upload finalization, and explicitly confirmed discard bypass the guard.
+
+Connectivity changes keep dirty fields and selected local files mounted. A
+reconnect does not refetch over dirty values; a clean form may refresh normally,
+and a different route identity always loads its own current server state. This
+does not queue or submit an offline mutation.
 
 ## Feedback visibility
 

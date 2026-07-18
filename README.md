@@ -47,7 +47,8 @@ cutover work:
 - repeated Song, typed-lyric, Recording, and Scan actions use accessible symbols with text on wider layouts and 44-pixel icon-only touch targets where compactness helps on narrow layouts; Add, Replace, and higher-consequence actions retain descriptive text;
 - the global offline/read-only indicator follows browser connectivity rather than treating one slow API request as proof that the whole app is offline; online-only media handles request failures locally, and an open Scan viewer remains mounted with immediate loading feedback; the Scan/connectivity behavior is owner-accepted in Android Chrome/Brave and macOS Safari;
 - catalog search, filters, sorting, and scroll position survive in-app Song navigation and Back in private memory, while reload/logout intentionally resets them; Song details open at the top, and the navigation behavior is owner-accepted on Android and macOS; action-wide errors and duplicate outcomes reveal themselves without moving background-refresh messages or field-level validation away from their context;
-- the latest checkpoint passes 51 Vitest files / 354 tests, all 90 Python audio tests, all three TypeScript projects, the production/service-worker build, whitespace checks, and a zero-write query-contract probe against staging D1.
+- the deployed audit follow-up gives focus and interactive controls at least 3:1 non-text contrast, completes keyboard/ARIA behavior for the Lists tabs, protects dirty editor state across navigation and reconnect, classifies terminal pre-intent upload history as informational, and uses the editor's local calendar date for Recording inputs; owner real-device acceptance of this follow-up is pending;
+- the latest checkpoint passes 54 Vitest files / 366 tests, all 90 Python audio tests, all three TypeScript projects, the production/service-worker build, whitespace checks, an exact dependency tree with zero reported npm vulnerabilities, and zero-write staging D1 postflight.
 
 - a reconciled forward migration enforces normalized active Song titles, statuses, controlled lookup keys, simplified typed lyrics, Recording descriptions, and Trash safety;
 - all imported row and media-reference counts remain unchanged, with legacy Scan/Recording metadata retained privately;
@@ -85,8 +86,8 @@ The private staging catalog is loaded into an APAC-primary D1 database for the a
 Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
 
 Current protected-staging deployment: Worker
-`c9db96fd-3028-457b-867a-482143732672`, client/service-worker build
-`9f78a8f53da9`. Production resources and DNS/cutover remain separately
+`e150ba21-809e-4c26-acda-8c7dbde5d8ce`, client/service-worker build
+`90aa09dea66e`. Production resources and DNS/cutover remain separately
 approval-gated.
 
 Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker also validates Access JWT signatures, issuer, and audience on every API request. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.
