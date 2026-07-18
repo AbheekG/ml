@@ -48,7 +48,7 @@ cutover work:
 - the global offline/read-only indicator follows browser connectivity rather than treating one slow API request as proof that the whole app is offline; online-only media handles request failures locally, and an open Scan viewer remains mounted with immediate loading feedback; the Scan/connectivity behavior is owner-accepted in Android Chrome/Brave and macOS Safari;
 - catalog search, filters, sorting, and scroll position survive in-app Song navigation and Back in private memory, while reload/logout intentionally resets them; Song details open at the top, and the navigation behavior is owner-accepted on Android and macOS; action-wide errors and duplicate outcomes reveal themselves without moving background-refresh messages or field-level validation away from their context;
 - the deployed audit follow-up gives focus and interactive controls at least 3:1 non-text contrast, completes keyboard/ARIA behavior for the Lists tabs, protects dirty editor state across navigation and reconnect, and classifies terminal pre-intent upload history as informational; the owner accepted its keyboard, unsaved-work, offline/reconnect, and date-input behavior on macOS;
-- an approved follow-up on the draft branch uses `Asia/Kolkata` as the shared Recording calendar while showing a compact India-date note only when the editor's device shows a different date; it is tested but not yet deployed;
+- the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date;
 - the latest branch checkpoint passes 55 Vitest files / 369 tests, all 90 Python audio tests, all three TypeScript projects, the production/service-worker build, whitespace checks, an exact dependency tree with zero reported npm vulnerabilities, and the prior zero-write staging D1 postflight.
 
 - a reconciled forward migration enforces normalized active Song titles, statuses, controlled lookup keys, simplified typed lyrics, Recording descriptions, and Trash safety;
@@ -87,8 +87,8 @@ The private staging catalog is loaded into an APAC-primary D1 database for the a
 Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
 
 Current protected-staging deployment: Worker
-`e150ba21-809e-4c26-acda-8c7dbde5d8ce`, client/service-worker build
-`90aa09dea66e`. Production resources and DNS/cutover remain separately
+`6f49167f-cd55-4981-8dbe-2245545e32df`, client/service-worker build
+`258dec2ffcd1`. Production resources and DNS/cutover remain separately
 approval-gated.
 
 Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker also validates Access JWT signatures, issuer, and audience on every API request. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.

@@ -1,8 +1,8 @@
 # Catalog navigation and action feedback
 
 Status: navigation behavior is deployed and owner-accepted. Current protected
-staging is Worker version `e150ba21-809e-4c26-acda-8c7dbde5d8ce`;
-client/service-worker build `90aa09dea66e`. The owner reports that direct
+staging is Worker version `6f49167f-cd55-4981-8dbe-2245545e32df`;
+client/service-worker build `258dec2ffcd1`. The owner reports that direct
 Scan-row sharing, the responsive action presentation, the broader action-icon
 consistency pass, and Recording sharing work well. The specific device/browser
 was not recorded for the later UI/sharing acceptance, so no named-platform claim

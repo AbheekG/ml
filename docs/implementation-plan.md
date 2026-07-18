@@ -5,8 +5,8 @@ protected staging. Continue with optional UX refinement, audit/cleanup, and
 production readiness only as separately prioritized and approved.
 
 Current handoff checkpoint (2026-07-18): protected staging runs Worker
-`e150ba21-809e-4c26-acda-8c7dbde5d8ce`, client/service-worker build
-`90aa09dea66e`. The latest branch verification passed 55 Vitest files / 369 tests,
+`6f49167f-cd55-4981-8dbe-2245545e32df`, client/service-worker build
+`258dec2ffcd1`. The latest branch verification passed 55 Vitest files / 369 tests,
 all 90 Python audio tests, all three TypeScript projects, production and service-
 worker builds, whitespace checks, an exact dependency tree with zero reported
 npm vulnerabilities, and zero-write staging-D1 postflight. The audit follow-up
@@ -14,8 +14,9 @@ adds accessible control contrast and complete Lists-tab semantics, dirty-form
 navigation/reconnect protection, accurate active-versus-historical upload alert
 classification, and Recording-date validation. Its deployed behavior passed the
 owner's macOS keyboard, unsaved-work, offline/reconnect, and date-input checks.
-The approved `Asia/Kolkata` shared-calendar refinement passes automated build
-`258dec2ffcd1` on the draft branch and is awaiting protected-staging deployment.
+The approved `Asia/Kolkata` shared-calendar refinement is included in protected
+staging; its deployment postflight retained Access protection, found no pending
+migration or integrity error, and wrote zero D1 rows.
 Production remains absent and separately approval-gated.
 
 Milestone history and operational detail: the vertical slice, online
