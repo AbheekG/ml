@@ -1,6 +1,6 @@
 # Editing and validation rules
 
-This document records the business rules that the owner confirms before online editing is implemented. The legacy AppSheet design and workbook are evidence, but existing completeness alone does not prove that a field should be required.
+This document records the implemented and owner-confirmed online-editing business rules. The legacy AppSheet design and workbook remain evidence, but existing completeness alone does not prove that a field should be required.
 
 Rules should be enforced at every relevant layer:
 
@@ -64,7 +64,12 @@ Rules should be enforced at every relevant layer:
 - When the editor supplies no description, generate the next available stable fallback such as `Recording 1`, `Recording 2`, and so on. Descriptions must be normalized-unique within one Song so every Recording remains distinguishable.
 - Trim surrounding whitespace but do not title-case or otherwise rewrite description content. Include the description in later search behavior and show it above the audio player.
 - Preserve every imported Version exactly. For the four imported Recording rows with separate Notes, append the Note to that Recording's description during the editing-schema migration without discarding either value.
-- Recorded date remains optional, cannot be in the future, and is hidden when absent.
+- Recorded date remains optional and is hidden when absent. The shared library
+  calendar is `Asia/Kolkata`: browser and server both use the current date in
+  India as the latest allowed date. The field keeps its short normal label; only
+  while the device and India have different dates does it show a compact India-
+  date note. Stored values remain timezone-free calendar dates and are not
+  converted or rewritten for viewers elsewhere.
 - Recording contributors remain optional and hidden when absent. The original audio is retained, with a compatible playback derivative generated when required.
 
 ### Media upload and playback
@@ -77,11 +82,18 @@ Rules should be enforced at every relevant layer:
 - The stored playback-media reference is the default browser source. Capability detection may verify or fall back among already prepared sources, but never changes the stored original or starts conversion.
 - Generate correctly oriented, readability-preserving Scan derivatives suitable for A4 pages. Retain Scan originals until derivative quality and backups are accepted; only then consider a deliberate archival/deletion policy.
 - The implemented Scan pipeline accepts browser-compatible JPEG, PNG, or WebP originals up to 20,000,000 bytes, verifies signatures and full decode, records SHA-256, rejects exact duplicates globally, retains immutable originals/replacement history, and prepares a private JPEG readability derivative before committing the new current media. The derivative is at most 2400 pixels on its longest edge at quality 85; the authenticated viewer falls back to the original only while historical repair is incomplete or has a recorded failure.
-- Future one-tap sharing sends authenticated file bytes through the device share interface where supported, with safe fallbacks; it does not create a permanent public media URL.
+- Implemented one-tap Scan and Recording sharing sends authenticated, bounded
+  derivative/playback bytes through the device share interface where supported,
+  with safe fallbacks; it does not expose originals or create a permanent public
+  media URL.
 
 ### General safety
 
 - Editing is online-only. Offline devices remain read-only.
+- Song, typed-lyric, Scan, Recording-metadata, and Recording-upload editors warn
+  before dirty local state is discarded. Dirty forms remain mounted through a
+  connectivity transition and are not overwritten on reconnect; this preserves
+  local inputs only and does not create an offline mutation queue.
 - Child records cannot exist without their parent Song.
 - Ordinary removal uses a confirmed `Move to Trash` action; permanent deletion is not present in normal user/editor workflows.
 - Trashed records disappear from ordinary views and remain recoverable from a dedicated Trash screen. Editors may restore them, and Trash is retained indefinitely until a later deliberate administrator cleanup policy is approved.

@@ -1272,6 +1272,152 @@ describe("Worker API", () => {
     await expect(response.text()).resolves.toBe("audio");
   });
 
+  it("streams the private Scan readability representation with a bounded file contract", async () => {
+    const database = {
+      prepare: () => ({ bind: () => ({ first: async () => ({
+        objectKey: "scans/readability/media-1.jpg",
+        filename: "private-page.png",
+        mimeType: "image/jpeg",
+        isDerivative: 1,
+      }) }) }),
+    } as unknown as D1Database;
+    let requestedKey = "";
+    const image = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    const media = {
+      get: async (key: string) => {
+        requestedKey = key;
+        return {
+          body: image,
+          size: image.byteLength,
+          httpEtag: '"etag"',
+          writeHttpMetadata: () => undefined,
+        };
+      },
+    } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/scans/scan-1/image",
+      undefined,
+      { ...localBindings(database), MEDIA: media },
+    );
+
+    expect(response.status).toBe(200);
+    expect(requestedKey).toBe("scans/readability/media-1.jpg");
+    expect(response.headers.get("content-type")).toBe("image/jpeg");
+    expect(response.headers.get("content-length")).toBe(String(image.byteLength));
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("x-scan-representation")).toBe("readability");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(image);
+  });
+
+  it("streams only the current private Recording playback source for sharing", async () => {
+    let playbackQuery = "";
+    let boundRecordingId = "";
+    const database = {
+      prepare: (query: string) => {
+        playbackQuery = query;
+        return {
+          bind: (recordingId: string) => {
+            boundRecordingId = recordingId;
+            return { first: async () => ({
+              objectKey: "recordings/playback/recording-1.mp3",
+              mimeType: "audio/mpeg",
+              byteSize: 6,
+            }) };
+          },
+        };
+      },
+    } as unknown as D1Database;
+    let requestedKey = "";
+    const audio = new Uint8Array([0x49, 0x44, 0x33, 1, 2, 3]);
+    const media = {
+      get: async (key: string) => {
+        requestedKey = key;
+        return {
+          body: audio,
+          size: audio.byteLength,
+          httpEtag: '"etag"',
+          writeHttpMetadata: () => undefined,
+        };
+      },
+    } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/recordings/recording-1/playback",
+      undefined,
+      { ...localBindings(database, "viewer"), MEDIA: media },
+    );
+
+    expect(response.status).toBe(200);
+    expect(boundRecordingId).toBe("recording-1");
+    expect(playbackQuery).toContain("recordings.playback_media_id IS NULL");
+    expect(playbackQuery).toContain("playback_media.id = recordings.playback_media_id");
+    expect(playbackQuery).toContain("recordings.processing_state = 'ready'");
+    expect(requestedKey).toBe("recordings/playback/recording-1.mp3");
+    expect(response.headers.get("content-type")).toBe("audio/mpeg");
+    expect(response.headers.get("content-disposition")).toBe("attachment; filename=recording.mp3");
+    expect(response.headers.get("content-length")).toBe(String(audio.byteLength));
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("x-recording-representation")).toBe("playback");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(audio);
+  });
+
+  it("rejects an oversized Recording playback source before reading private storage", async () => {
+    const database = {
+      prepare: () => ({ bind: () => ({ first: async () => ({
+        objectKey: "recordings/playback/large.mp3",
+        mimeType: "audio/mpeg",
+        byteSize: 52_428_801,
+      }) }) }),
+    } as unknown as D1Database;
+    let storageRead = false;
+    const media = {
+      get: async () => {
+        storageRead = true;
+        return null;
+      },
+    } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/recordings/recording-1/playback",
+      undefined,
+      { ...localBindings(database, "viewer"), MEDIA: media },
+    );
+
+    expect(response.status).toBe(413);
+    expect(storageRead).toBe(false);
+    await expect(response.json()).resolves.toEqual({
+      error: "recording_playback_too_large_to_share",
+    });
+  });
+
+  it("rejects a Recording playback object whose private size disagrees with D1", async () => {
+    const database = {
+      prepare: () => ({ bind: () => ({ first: async () => ({
+        objectKey: "recordings/playback/mismatch.mp3",
+        mimeType: "audio/mpeg",
+        byteSize: 6,
+      }) }) }),
+    } as unknown as D1Database;
+    const media = {
+      get: async () => ({
+        body: new Uint8Array([1, 2, 3]),
+        size: 3,
+        httpEtag: '"etag"',
+        writeHttpMetadata: () => undefined,
+      }),
+    } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/recordings/recording-1/playback",
+      undefined,
+      { ...localBindings(database, "viewer"), MEDIA: media },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "recording_playback_invalid" });
+  });
+
   it("returns valid partial-content headers for audio seeking", async () => {
     const database = {
       prepare: () => ({ bind: () => ({ first: async () => ({

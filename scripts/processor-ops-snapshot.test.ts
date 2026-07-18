@@ -152,6 +152,7 @@ const d1Json = [
         stale_dispatch_attempts: 0,
         recoverable_upload_sessions: 0,
         unclassified_upload_sessions: 0,
+        active_unclassified_upload_sessions: 0,
         missing_scan_hashes: 0,
         missing_scan_derivatives: 0,
         scan_maintenance_failures: 0,
@@ -217,6 +218,7 @@ describe("processor ops snapshot", () => {
     Object.assign(driftedD1[0].results[0], {
       stale_dispatch_attempts: 1,
       unclassified_upload_sessions: 2,
+      active_unclassified_upload_sessions: 2,
       missing_scan_hashes: 3,
       missing_scan_derivatives: 4,
       scan_maintenance_failures: 1,
@@ -255,6 +257,52 @@ describe("processor ops snapshot", () => {
       expect.objectContaining({ code: "d1_missing_scan_hashes", severity: "warning" }),
       expect.objectContaining({ code: "d1_scan_maintenance_incomplete", severity: "warning" }),
       expect.objectContaining({ code: "d1_expired_scan_maintenance_leases", severity: "warning" }),
+    ]));
+  });
+
+  it("keeps terminal pre-intent upload history informational", async () => {
+    const historicalD1 = structuredClone(d1Json);
+    Object.assign(historicalD1[0].results[0], {
+      unclassified_upload_sessions: 8,
+      active_unclassified_upload_sessions: 0,
+    });
+    const runner = runnerFromMap({
+      "scheduler jobs describe": { ...schedulerDescribe, state: "ENABLED" },
+      "run jobs describe": runJobDescribe,
+      "run jobs executions list": executionsList,
+      "logs/run.googleapis.com%2Fstdout": stdoutLogs,
+      "logs/run.googleapis.com%2Fvarlog%2Fsystem": systemLogs,
+      "wrangler d1 execute": historicalD1,
+      "artifacts repositories describe": artifactDescribe,
+      "scheduler jobs list": schedulerList,
+    });
+
+    const snapshot = await buildProcessorOpsSnapshot({
+      projectId: "music-library-audio-staging",
+      region: "asia-south1",
+      runJob: "music-audio-processor",
+      schedulerJob: "music-audio-processor-quarter-hour",
+      d1Database: "music-library-staging-apac",
+      artifactRepo: "music-audio",
+      stdoutLimit: 200,
+      systemLimit: 120,
+      executionLimit: 200,
+      alertLookbackHours: 24,
+      summary: false,
+      includeExecutionDetails: false,
+      enforce: false,
+    }, runner);
+
+    expect(snapshot.d1.unclassifiedUploadSessions).toBe(8);
+    expect(snapshot.d1.activeUnclassifiedUploadSessions).toBe(0);
+    expect(snapshot.alerts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "d1_unclassified_upload_sessions_historical",
+        severity: "info",
+      }),
+    ]));
+    expect(snapshot.alerts).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "d1_unclassified_upload_sessions", severity: "warning" }),
     ]));
   });
 

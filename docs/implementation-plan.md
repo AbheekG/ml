@@ -1,8 +1,30 @@
 # Music Library implementation plan
 
-Status: approved direction; execute iteratively and validate each phase on real data and devices.
+Status: the necessary private-beta feature set is implemented and accepted in
+protected staging. Continue with optional UX refinement, audit/cleanup, and
+production readiness only as separately prioritized and approved.
 
-Current protected-staging checkpoint (2026-07-17): the vertical slice, online
+Current handoff checkpoint (2026-07-18): protected staging runs Worker
+`6f49167f-cd55-4981-8dbe-2245545e32df`, client/service-worker build
+`258dec2ffcd1`. The latest branch verification passed 55 Vitest files / 369 tests,
+all 90 Python audio tests, all three TypeScript projects, production and service-
+worker builds, whitespace checks, an exact dependency tree with zero reported
+npm vulnerabilities, and zero-write staging-D1 postflight. The audit follow-up
+adds accessible control contrast and complete Lists-tab semantics, dirty-form
+navigation/reconnect protection, accurate active-versus-historical upload alert
+classification, and Recording-date validation. Its deployed behavior passed the
+owner's macOS keyboard, unsaved-work, offline/reconnect, and date-input checks.
+The approved `Asia/Kolkata` shared-calendar refinement is included in protected
+staging; its deployment postflight retained Access protection, found no pending
+migration or integrity error, and wrote zero D1 rows. The owner confirmed the
+ordinary date selector remains normal; the conditional differing-date note is
+accepted through automated India/device boundary coverage because both locations
+showed the same date during the manual check. The bounded 2026-07-18 audit-
+improvement slice is complete, deployed, and accepted. No new implementation
+task is selected at this checkpoint.
+Production remains absent and separately approval-gated.
+
+Milestone history and operational detail: the vertical slice, online
 catalog/child editing, private Scan create/replace, and Recording
 create/replace are implemented. Audio finalization now records an immutable
 dispatch attempt and starts the bounded Cloud Run Job through keyless
@@ -18,9 +40,26 @@ gate also passed Scan and Recording create/replace, multipart interruption and
 resume, exact duplicate rejection/dismissal, audio processing/playback, metadata
 editing, retained replacement history, and child/parent Trash/restore. Its exact
 D1/R2 postflight matches every planned count and all nine retained objects.
-iOS/iPadOS compatibility, observed per-Scan orientation, and mobile pinch-zoom
-refinement remain explicit later work. The local logout hardening now places a
-persistent privacy barrier before clearing, invalidates other tabs, prevents
+iOS/iPadOS compatibility and observed per-Scan orientation remain explicit
+later work. Scan-viewer gesture containment is owner-accepted:
+the viewer modal suppresses browser-level touch zoom while open, and a native
+non-passive wheel boundary converts trackpad pinch into bounded image zoom
+without scaling the controls. Android Brave testing then exposed that a single
+five-second application health timeout could falsely mark the whole app offline
+and close the viewer even though the Scan request itself succeeded. The deployed
+follow-up now applies the simpler boundary documented in
+[`connectivity-and-online-media.md`](connectivity-and-online-media.md): global
+offline/read-only state follows browser connectivity events, operational health
+checks no longer drive UI state, individual request failures stay local, and an
+open viewer remains mounted with immediate loading feedback. A subsequent
+Android-only reset was traced to browser chrome resizing the visual viewport;
+new images now fit once, while later layout changes preserve zoom and clamp pan.
+Protected-staging Worker version `b896f7f5-c666-49b7-b138-2cc1b2621b47` and
+client/service-worker build `fc7c39c255bc` contain both corrections; automated
+and cloud postflight checks pass, and Android Chrome/Brave plus macOS Safari
+acceptance is complete. The local logout hardening now places a persistent privacy barrier
+before clearing, invalidates
+other tabs, prevents
 stale sync commits, verifies IndexedDB/CacheStorage removal, requests browser
 HTTP-cache clearing, and keeps Cloudflare Access control paths outside the
 service worker. Protected-staging Worker version
@@ -64,6 +103,14 @@ protected staging without deleting the six retained private objects. The two
 already-finalized historical rows were unchanged; no recoverable pre-intent
 sessions remain.
 
+The deployed navigation and feedback follow-up now retains catalog query, filters,
+sort, and scroll only in mounted App memory across Song navigation. It resets on
+reload, logout, or private-data invalidation and never places private queries in
+URLs or browser storage. Direct action-wide feedback and duplicate panels reveal
+themselves with nearest-position scrolling, while field and background-refresh
+messages stay in context. The boundary and manual gate are recorded in
+[navigation-and-feedback.md](navigation-and-feedback.md).
+
 The owner-directed genuine Scan-source recovery is complete for the exact
 reviewed staging set. The local matcher inventoried both read-only trees, checked
 exact hashes first, combined transformation-tolerant content evidence with
@@ -76,20 +123,89 @@ regenerate its mappings, or garbage-collect the retained history. Production and
 the unresolved cases remain separately owner-gated; see
 [scan-original-recovery.md](scan-original-recovery.md).
 
+Protected-staging Worker version `3e6ac24e-93d3-4704-9fd8-a6bbb0b75efc`
+contains the accepted Scan-viewer refinements and the catalog-navigation/action-
+feedback follow-up with client/service-worker build `0a1a445e3ce3`. Android's
+provisional native Back scroll is ignored until the cached catalog completes its
+explicit restoration, so it cannot replace the saved position with page top.
+Forward navigation to a Song detail starts at the top without altering the
+catalog's separately remembered position.
+Verification passes at 47 Vitest files / 327 tests, all 90 Python audio tests,
+all three TypeScript projects, production bundles, and whitespace checks. Access
+still returns the expected unauthenticated redirect, no migration is pending,
+and aggregate D1/foreign-key postflight is unchanged with zero rows written.
+Catalog restoration, Android native-Back behavior, and Song-detail top position
+are owner-accepted. macOS Safari's interactive Back gesture has a non-blocking
+temporary scroll-input lock after returning to the correct position; do not add
+timing workarounds without stronger application evidence. Feedback visibility
+may be observed during the next natural error or duplicate operation;
+iOS/iPadOS remains deferred.
+
+The completed Scan-sharing slice adds capability-gated native sharing from the
+Scan viewer and its Song row of only an authenticated Scan readability JPEG.
+Both actions and responsive accessible row icons are deployed as protected-staging Worker version
+`b3ccdca7-683b-4881-b4aa-1a85dd4d892a`, client/service-worker build
+`b4de0994f09e`. The client verifies the private representation, JPEG type, exact
+length, and 20 MiB bound before sharing a generic file-only payload; it never
+shares the original fallback or a public URL. Verification passes at 49 Vitest
+files / 338 tests, all 90 Python audio tests, all three TypeScript projects,
+production build, and whitespace checks. Access still returns the expected
+unauthenticated redirect, no migration is pending, and aggregate D1/foreign-key
+postflight is unchanged with zero rows written. Android and iPadOS native-share
+acceptance of the direct row action and responsive icons was subsequently
+reported successful by the owner, without a named device/browser. The in-app
+browser runtime failed during setup before opening the local page, so automated
+checks are not treated as rendered-browser acceptance. The follow-up extending
+the accessible icon/text pattern to compact Song, typed-lyric, and Recording
+actions plus text-retaining Add and Replace actions is deployed as Worker
+version `aa9630a7-0d56-4f21-b06e-873c80ef79d0`, client/service-worker build
+`d0f72594ac8b`. Verification passes at 50 Vitest files / 343 tests, all 90 Python
+audio tests, all three TypeScript projects, production build, and whitespace
+checks. Access, migrations, aggregate D1, and foreign-key postflight are clean
+with zero rows written.
+
+The completed Recording-sharing slice adds reader-facing Recording playback
+sharing. A read-only staging inventory found all 829 active Recordings ready with valid private MP3
+playback: 193 derivative-backed and 636 already-canonical-original-backed, with a
+24,420,114-byte maximum. The owner selected a 50 MiB Recording-sharing safety
+bound for future headroom. The Recording-scoped route resolves the
+current playback relationship server-side, verifies exact D1/R2 size, returns a
+generic private no-store MP3, and never accepts a media/storage identifier from
+the client. Capability-gated row sharing independently validates representation,
+MIME, exact length, and size, with accepted cancellation/second-tap semantics.
+It is committed and deployed as Worker
+`c9db96fd-3028-457b-867a-482143732672`, client/service-worker build
+`9f78a8f53da9`. The owner accepted the principal behavior after checking several
+Recordings, correct selection among multiple rows, quiet cancellation, and
+offline disabling; the device/browser was not recorded. Deliberately oversized
+and slow-download second-tap paths remain automatically covered and need not be
+forced with retained test media. See [recording-sharing.md](recording-sharing.md).
+Automated verification passes at 51 Vitest files / 354 tests, all 90 Python
+audio tests, all three TypeScript projects, production build, service-worker
+build `9f78a8f53da9`, whitespace checks, and a zero-result/zero-write query probe
+against the real staging D1 engine.
+
 ## Current execution order
 
-The core read/edit/recovery/search flows and safe Scan/Recording create/replace
-pipelines now work in staging. Continue in this order:
+The core read/edit/recovery/search/sharing flows and safe Scan/Recording create/
+replace pipelines now work in staging. No necessary feature slice is currently
+open. Continue in this order:
 
-1. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
+1. begin the next session with a read-only whole-application and workspace audit,
+   then prioritize any optional UX ideas against concrete user benefit, risk,
+   accessibility, and maintenance cost;
+2. implement approved optional improvements as separate small commits with the
+   existing automated and protected-staging device gates;
+3. at the next genuine Recording finalization/replacement, verify its bounded
+   immediate-dispatch record as ordinary postflight without creating retained
+   media solely for a test;
+4. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
    any deletion executor and every physical delete remain separately designed
-   and owner-approved; at the next genuine Recording finalization/replacement,
-   verify its bounded immediate-dispatch record as ordinary postflight;
-2. investigate the two issue-marked Scan mappings, the deferred unmatched cases,
-   or the reserved later manual uploads only when the owner prioritizes them;
-3. add sharing or further search/product polish only from concrete feedback;
-4. begin production readiness and cutover only after the staging acceptance,
-   reconciliation, backup, quota, and explicit owner-approval gates pass.
+   and owner-approved;
+5. investigate the two issue-marked Scan mappings, deferred unmatched cases,
+   per-Scan orientation, or reserved manual uploads only when prioritized; and
+6. begin production readiness and cutover only after reconciliation, backup,
+   quota, broader device-coverage, and explicit owner-approval gates pass.
 
 This is a delivery order rather than a schema dependency. The accepted search and filter work remains independently testable while media workflows are added.
 
@@ -333,7 +449,11 @@ Deliverable: safe online maintenance by the primary editor.
   searchable existing-Person input, controlled Role dropdown, duplicate-pair
   prevention, and per-row remove control; protected-staging interaction is
   manually accepted, while real-device accessibility remains;
-- one-tap system sharing for an individual scan or recording by sharing authenticated file bytes rather than exposing a public media URL, with capability-aware fallback behavior;
+- one-tap system sharing of an individual Scan's authenticated readability JPEG
+  is deployed with capability and representation checks and no public media URL;
+  the owner reports that it works well without naming the tested device/browser;
+  Recording playback sharing is deployed and similarly accepted for principal
+  behavior with its separate bounded privacy contract;
 - copy for an individual typed-lyric block plus capability-gated system text
   sharing are now implemented locally for all readers and remain available while
   offline; real Safari/iOS and Chrome/Android clipboard/share-sheet checks remain;

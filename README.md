@@ -30,7 +30,10 @@ Do not commit song titles, lyrics, names, email addresses, media, credentials, g
 
 ## Current status
 
-The private staging application is operational:
+The necessary private-beta feature set is implemented and operational in
+protected staging. Remaining work is optional UX refinement, broader device
+coverage, workspace/production-readiness review, and separately authorized
+cutover work:
 
 - the normalized D1 schema and guarded relationships are implemented;
 - the AppSheet importer validates and loads all 454 songs plus related lyrics and media metadata into local D1;
@@ -39,7 +42,19 @@ The private staging application is operational:
 - song detail displays metadata, typed lyrics, scan records, and recording records;
 - the complete catalog, metadata, and typed lyrics are atomically cached in IndexedDB, while the production app shell and hashed assets are precached by a service worker;
 - private scans open in an in-app zoom/pan viewer and recordings stream with seeking; starting one Recording pauses any other Recording playing on that Song without changing its verified stored source;
-- type checks, importer/schema/API tests, production builds, and local end-to-end API smoke tests pass.
+- capable online browsers can share the authenticated optimized JPEG for an individual Scan directly from its Song row or from the viewer through the native system share sheet; original Scan bytes, public URLs, and persistent media caches are not involved, and the owner reports that the deployed behavior works well;
+- private Recording playback sharing is deployed with a Recording-scoped ready-MP3 route, a 50 MiB safety bound, generic filenames, and no client-selected storage identifier or public URL; the owner accepted the principal device behavior after checking correct-row sharing, quiet cancellation, offline disabling, and multiple Recordings on one Song, while the deliberately oversized and slow-download second-tap paths remain automatically covered rather than manually forced;
+- repeated Song, typed-lyric, Recording, and Scan actions use accessible symbols with text on wider layouts and 44-pixel icon-only touch targets where compactness helps on narrow layouts; Add, Replace, and higher-consequence actions retain descriptive text;
+- the global offline/read-only indicator follows browser connectivity rather than treating one slow API request as proof that the whole app is offline; online-only media handles request failures locally, and an open Scan viewer remains mounted with immediate loading feedback; the Scan/connectivity behavior is owner-accepted in Android Chrome/Brave and macOS Safari;
+- catalog search, filters, sorting, and scroll position survive in-app Song navigation and Back in private memory, while reload/logout intentionally resets them; Song details open at the top, and the navigation behavior is owner-accepted on Android and macOS; action-wide errors and duplicate outcomes reveal themselves without moving background-refresh messages or field-level validation away from their context;
+- the deployed audit follow-up gives focus and interactive controls at least 3:1 non-text contrast, completes keyboard/ARIA behavior for the Lists tabs, protects dirty editor state across navigation and reconnect, and classifies terminal pre-intent upload history as informational; the owner accepted its keyboard, unsaved-work, offline/reconnect, and date-input behavior on macOS;
+- the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
+- the latest branch checkpoint passes 55 Vitest files / 369 tests, all 90 Python audio tests, all three TypeScript projects, the production/service-worker build, whitespace checks, an exact dependency tree with zero reported npm vulnerabilities, and the prior zero-write staging D1 postflight.
+
+The bounded improvements selected from the 2026-07-18 whole-application audit are
+implemented, deployed, and accepted. No further implementation slice is implied
+by this checkpoint; optional UX ideas and production-readiness gates remain
+separately prioritized work.
 
 - a reconciled forward migration enforces normalized active Song titles, statuses, controlled lookup keys, simplified typed lyrics, Recording descriptions, and Trash safety;
 - all imported row and media-reference counts remain unchanged, with legacy Scan/Recording metadata retained privately;
@@ -59,16 +74,27 @@ The private staging application is operational:
 - the Worker has a durable, editor-owned 8 MiB multipart intake for creating or replacing private Recording originals. Immutable upload intents bind each session to its exact operation, recovery controls expose resumable/stored/duplicate sessions without exposing storage identifiers, replacement preserves prior media history, and active processing/upload guards prevent conflicting Trash or source changes;
 - the deployed audio processor uses a separately authenticated claim/lease boundary, database-enforced global single-running-job gate, bounded lease recovery, operation-scoped transfer capabilities, immutable derivative attempts, independent byte verification, atomic provenance finalization, and explicit editor retry. Finalization records an immutable dispatch attempt and starts the bounded Cloud Run Job asynchronously through keyless Cloudflare Access-to-Google Workload Identity Federation; a 15-minute OAuth Scheduler remains enabled as the reliable/cost-bounded fallback, so a failed immediate trigger leaves durable pending work rather than losing it;
 - imported and newly uploaded Scans use a private derivative-or-original read path; a bounded daily repair task backfills fingerprints and derivatives with expiring per-media leases and privacy-safe failure records. Originals remain private and retained;
-- the owner accepted the representative local Scan-derivative visual review; the historical pre-intent Recording upload review is complete, with all six recoverable test sessions discarded without deleting their retained private objects and both finalized historical rows left unchanged; macOS Safari and Android Chrome/Brave read-only, offline, Scan-viewer, playback, and unsaved-form checks are owner-accepted; a controlled synthetic staging gate also accepted Scan/Recording create, replace, interruption/resume, duplicate rejection/dismissal, processing, playback, metadata edit, and recoverable Trash/restore with exact D1/R2 postflight; the transient fast-dispatch identity-exchange failure is now strongly explained by and corrected through a Google-compatible Access application-token duration, deployed bounded diagnostics, retained Scheduler fallback, and application-scoped token revocation; its live recheck is deliberately deferred to the next genuine Recording operation instead of creating retained staging data only for a test; a guarded read-only planner now inventories terminal unreferenced Recording-upload objects, with the next review deferred until on or after 2026-08-16 and every deletion still separately approval-gated; hardened logout/private-cache removal is deployed to protected staging with a cross-tab privacy barrier, stale-write prevention, verified browser-storage clearing, network-cache clearing, and a direct Cloudflare Access logout boundary; both normal online logout and offline logout followed by automatic reconnect completion are owner-accepted in Safari and Android; iOS/iPadOS compatibility, per-Scan orientation corrections, and mobile pinch-zoom refinement remain explicit later work; broader contribution roles and product expansion remain evidence-driven.
+- the owner accepted the representative local Scan-derivative visual review; the historical pre-intent Recording upload review is complete, with all six recoverable test sessions discarded without deleting their retained private objects and both finalized historical rows left unchanged; macOS Safari and Android Chrome/Brave read-only, offline, Scan-viewer, playback, and unsaved-form checks are owner-accepted; a controlled synthetic staging gate also accepted Scan/Recording create, replace, interruption/resume, duplicate rejection/dismissal, processing, playback, metadata edit, and recoverable Trash/restore with exact D1/R2 postflight; the transient fast-dispatch identity-exchange failure is now strongly explained by and corrected through a Google-compatible Access application-token duration, deployed bounded diagnostics, retained Scheduler fallback, and application-scoped token revocation; its live recheck is deliberately deferred to the next genuine Recording operation instead of creating retained staging data only for a test; a guarded read-only planner now inventories terminal unreferenced Recording-upload objects, with the next review deferred until on or after 2026-08-16 and every deletion still separately approval-gated; hardened logout/private-cache removal is deployed to protected staging with a cross-tab privacy barrier, stale-write prevention, verified browser-storage clearing, network-cache clearing, and a direct Cloudflare Access logout boundary; both normal online logout and offline logout followed by automatic reconnect completion are owner-accepted in Safari and Android; Scan-viewer touch and trackpad gestures are contained inside the modal and owner-accepted; responsive repeated actions plus private Scan and Recording sharing are owner-accepted; broader iOS/iPadOS compatibility, per-Scan orientation corrections, broader contribution roles, and product expansion remain evidence-driven later work.
 
 The exact Scan conversion, provenance, repair, and visual-acceptance rules are
 recorded in [the Scan integrity/readability policy](docs/scan-readability.md).
+The playback-source selection, size bound, privacy contract, and device gates for
+Recording sharing are recorded in [the Recording sharing policy](docs/recording-sharing.md).
+The browser-connectivity boundary and online-only media behavior are recorded in
+[the connectivity and online-media policy](docs/connectivity-and-online-media.md).
+The private in-memory catalog restoration and action-feedback rules are recorded
+in [the navigation and feedback policy](docs/navigation-and-feedback.md).
 The logout/cache guarantees and remaining real-browser gate are recorded in
 [the private local-data policy](docs/logout-and-local-data.md).
 
 The private staging catalog is loaded into an APAC-primary D1 database for the application's users in India. After the retained synthetic acceptance records, it has 456 Songs, 499 Scans, 830 Recordings, and 1,974 media rows; originals/derivatives remain in private APAC storage and are delivered only through authenticated API routes. Unassigned/unlinked legacy files remain local for later identification.
 
 Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
+
+Current protected-staging deployment: Worker
+`6f49167f-cd55-4981-8dbe-2245545e32df`, client/service-worker build
+`258dec2ffcd1`. Production resources and DNS/cutover remain separately
+approval-gated.
 
 Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker also validates Access JWT signatures, issuer, and audience on every API request. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.
 

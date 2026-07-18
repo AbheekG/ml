@@ -1,9 +1,19 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { ScanViewer } from "./ScanViewer";
+import { ActionContent } from "./ActionContent";
 import { CatalogControls } from "./CatalogControls";
 import { RecordingUploadPage } from "./RecordingUploadPage";
+import { RecordingDateField } from "./RecordingDateField";
 import { CreditRows } from "./CreditRows";
+import { FeedbackMessage, useRevealFeedback } from "./FeedbackMessage";
+import { LookupTabs, lookupPanelId, lookupTabId } from "./LookupTabs";
+import {
+  UnsavedChangesProvider,
+  editorValuesChanged,
+  shouldRefreshEditor,
+  useUnsavedChanges,
+} from "./UnsavedChanges";
 import { pauseOtherAudioPlayers } from "./audio-playback";
 import { copyTextBlock, shareTextBlock, supportsSystemTextShare } from "./text-sharing";
 import {
@@ -54,13 +64,32 @@ import {
   type TrashedScan,
   type TrashedSong,
 } from "./catalog";
-import { emptyCatalogFilters, filterAndSortCatalog, type CatalogSort } from "./catalog-view";
+import {
+  filterAndSortCatalog,
+  initialCatalogViewState,
+  type CatalogViewState,
+} from "./catalog-view";
 import { findSimilarLookupItems } from "./lookup-similarity";
 import { shouldOfferDirectCameraCapture } from "./device-capabilities";
 import { scanDisplayName } from "./scan-viewer";
 import {
-  createLatestConnectivityChecker,
+  isShareAbort,
+  loadOptimizedScanShareFile,
+  ScanSharingError,
+  shareOptimizedScanFile,
+  supportsOptimizedScanSharing,
+} from "./scan-sharing";
+import {
+  isRecordingShareTooLarge,
+  loadRecordingShareFile,
+  MAX_RECORDING_SHARE_BYTES,
+  RecordingSharingError,
+  shareRecordingFile,
+  supportsRecordingSharing,
+} from "./recording-sharing";
+import {
   preserveSessionResolutionDuringRevalidation,
+  subscribeToBrowserConnectivity,
 } from "./app-lifecycle";
 import {
   PRIVATE_CACHE_NAMESPACE_KEY,
@@ -78,56 +107,29 @@ import {
 function useOnlineStatus(): boolean {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
 
-  useEffect(() => {
-    const checker = createLatestConnectivityChecker(
-      async (signal) => {
-        const response = await fetch(`/api/health?connectivity=${Date.now()}`, {
-          cache: "no-store",
-          headers: { Accept: "application/json" },
-          signal,
-        });
-        return response.ok
-          && response.headers.get("content-type")?.includes("application/json") === true;
-      },
-      setIsOnline,
-    );
-
-    const goOnline = () => { void checker.check(); };
-    const goOffline = () => checker.markOffline();
-    const checkWhenVisible = () => {
-      if (document.visibilityState === "visible") void checker.check();
-    };
-
-    window.addEventListener("online", goOnline);
-    window.addEventListener("offline", goOffline);
-    window.addEventListener("focus", goOnline);
-    window.addEventListener("pageshow", goOnline);
-    document.addEventListener("visibilitychange", checkWhenVisible);
-    const interval = window.setInterval(() => { void checker.check(); }, 30000);
-    void checker.check();
-
-    return () => {
-      checker.dispose();
-      window.clearInterval(interval);
-      window.removeEventListener("online", goOnline);
-      window.removeEventListener("offline", goOffline);
-      window.removeEventListener("focus", goOnline);
-      window.removeEventListener("pageshow", goOnline);
-      document.removeEventListener("visibilitychange", checkWhenVisible);
-    };
-  }, []);
+  useEffect(() => subscribeToBrowserConnectivity(window, () => navigator.onLine, setIsOnline), []);
 
   return isOnline;
 }
 
-function SongsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
+function SongsPage({
+  isOnline,
+  canEdit,
+  view,
+  onViewChange,
+  scrollPosition,
+}: {
+  isOnline: boolean;
+  canEdit: boolean | null;
+  view: CatalogViewState;
+  onViewChange: (view: CatalogViewState) => void;
+  scrollPosition: { current: number };
+}) {
   const [songs, setSongs] = useState<CatalogSong[]>([]);
-  const [query, setQuery] = useState("");
-  const [filters, setFilters] = useState(emptyCatalogFilters);
-  const [sort, setSort] = useState<CatalogSort>("latin-asc");
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const restoredScroll = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,7 +161,22 @@ function SongsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
     return () => { cancelled = true; };
   }, [isOnline]);
 
-  const visibleSongs = filterAndSortCatalog(songs, query, filters, sort);
+  useLayoutEffect(() => {
+    if (restoredScroll.current || (isLoading && songs.length === 0)) return;
+    restoredScroll.current = true;
+    window.scrollTo({ top: scrollPosition.current, left: 0, behavior: "auto" });
+  }, [isLoading, scrollPosition, songs.length]);
+
+  useLayoutEffect(() => {
+    const rememberScroll = () => {
+      if (!restoredScroll.current) return;
+      scrollPosition.current = window.scrollY;
+    };
+    window.addEventListener("scroll", rememberScroll, { passive: true });
+    return () => window.removeEventListener("scroll", rememberScroll);
+  }, [scrollPosition]);
+
+  const visibleSongs = filterAndSortCatalog(songs, view.query, view.filters, view.sort);
 
   return (
     <main className="page-shell" id="main-content">
@@ -172,18 +189,18 @@ function SongsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
           </p>
         </div>
         {isOnline && canEdit === true
-          ? <Link className="primary-action action-link" to="/songs/new">Add song</Link>
-          : <button className="primary-action" type="button" disabled title={isOnline ? "Editor access is required" : "Go online to add a song"}>Add song</button>}
+          ? <Link className="primary-action action-link icon-text-action" to="/songs/new"><ActionContent kind="add" label="Add song" /></Link>
+          : <button className="primary-action icon-text-action" type="button" disabled title={isOnline ? "Editor access is required" : "Go online to add a song"}><ActionContent kind="add" label="Add song" /></button>}
       </section>
 
       <CatalogControls
         songs={songs}
-        query={query}
-        filters={filters}
-        sort={sort}
-        onQueryChange={setQuery}
-        onFiltersChange={setFilters}
-        onSortChange={setSort}
+        query={view.query}
+        filters={view.filters}
+        sort={view.sort}
+        onQueryChange={(query) => onViewChange({ ...view, query })}
+        onFiltersChange={(filters) => onViewChange({ ...view, filters })}
+        onSortChange={(sort) => onViewChange({ ...view, sort })}
       />
 
       {error && <p className="catalog-message error-message" role="alert">{error}</p>}
@@ -195,7 +212,11 @@ function SongsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
         <ol className="song-list" aria-label="Songs">
           {visibleSongs.map((song) => (
             <li key={song.id}>
-              <Link className="song-row" to={`/songs/${encodeURIComponent(song.id)}`}>
+              <Link
+                className="song-row"
+                to={`/songs/${encodeURIComponent(song.id)}`}
+                onClick={() => { scrollPosition.current = window.scrollY; }}
+              >
                 <span className="song-titles">
                   <strong>{song.titleLatin}</strong>
                   {song.titleNative && <span lang="und">{song.titleNative}</span>}
@@ -265,6 +286,18 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [viewerScanId, setViewerScanId] = useState<string | null>(null);
+  const [scanShareBusy, setScanShareBusy] = useState<{ scanId: string; phase: "preparing" | "sharing" } | null>(null);
+  const [preparedScanShare, setPreparedScanShare] = useState<{ scanId: string; file: File } | null>(null);
+  const [scanShareFeedback, setScanShareFeedback] = useState<{ scanId: string; message: string; isError: boolean } | null>(null);
+  const scanShareAbortRef = useRef<AbortController | null>(null);
+  const scanShareGenerationRef = useRef(0);
+  const [recordingShareBusy, setRecordingShareBusy] = useState<{ recordingId: string; phase: "preparing" | "sharing" } | null>(null);
+  const [preparedRecordingShare, setPreparedRecordingShare] = useState<{ recordingId: string; file: File } | null>(null);
+  const [recordingShareFeedback, setRecordingShareFeedback] = useState<{ recordingId: string; message: string; isError: boolean } | null>(null);
+  const recordingShareAbortRef = useRef<AbortController | null>(null);
+  const recordingShareGenerationRef = useRef(0);
+  const recordingSharingAvailable = typeof navigator !== "undefined"
+    && supportsRecordingSharing();
   const recordingPlayers = useRef(new Map<string, HTMLAudioElement>());
   const [retryingRecordingId, setRetryingRecordingId] = useState<string | null>(null);
   const [processingRetryError, setProcessingRetryError] = useState<string | null>(null);
@@ -275,9 +308,9 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
     isError: boolean;
   } | null>(null);
 
-  useEffect(() => {
-    if (!isOnline) setViewerScanId(null);
-  }, [isOnline]);
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [songId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -307,6 +340,34 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
     void load();
     return () => { cancelled = true; };
   }, [songId, isOnline]);
+
+  useEffect(() => {
+    scanShareGenerationRef.current += 1;
+    scanShareAbortRef.current?.abort();
+    scanShareAbortRef.current = null;
+    setScanShareBusy(null);
+    setPreparedScanShare(null);
+    setScanShareFeedback(null);
+  }, [songId, isOnline]);
+
+  useEffect(() => () => {
+    scanShareGenerationRef.current += 1;
+    scanShareAbortRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    recordingShareGenerationRef.current += 1;
+    recordingShareAbortRef.current?.abort();
+    recordingShareAbortRef.current = null;
+    setRecordingShareBusy(null);
+    setPreparedRecordingShare(null);
+    setRecordingShareFeedback(null);
+  }, [songId, isOnline]);
+
+  useEffect(() => () => {
+    recordingShareGenerationRef.current += 1;
+    recordingShareAbortRef.current?.abort();
+  }, []);
 
   if (isLoading && !song) {
     return <main className="page-shell" id="main-content"><p>Loading song…</p></main>;
@@ -389,13 +450,128 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
     }
   }
 
+  async function shareScan(scanId: string): Promise<void> {
+    if (!isOnline || scanShareBusy !== null) return;
+    const generation = scanShareGenerationRef.current;
+    setScanShareFeedback(null);
+
+    let file = preparedScanShare?.scanId === scanId ? preparedScanShare.file : null;
+    try {
+      if (!file) {
+        setScanShareBusy({ scanId, phase: "preparing" });
+        const controller = new AbortController();
+        scanShareAbortRef.current?.abort();
+        scanShareAbortRef.current = controller;
+        file = await loadOptimizedScanShareFile(scanId, controller.signal);
+        if (generation !== scanShareGenerationRef.current) return;
+        if (scanShareAbortRef.current === controller) scanShareAbortRef.current = null;
+        setPreparedScanShare({ scanId, file });
+      }
+
+      setScanShareBusy({ scanId, phase: "sharing" });
+      const outcome = await shareOptimizedScanFile(file);
+      if (generation !== scanShareGenerationRef.current) return;
+      if (outcome === "retry_required") {
+        setPreparedScanShare({ scanId, file });
+        setScanShareFeedback({
+          scanId,
+          message: "The optimized scan is ready. Tap Share again.",
+          isError: false,
+        });
+      } else {
+        setPreparedScanShare(null);
+        setScanShareFeedback(outcome === "shared"
+          ? { scanId, message: "Optimized scan shared.", isError: false }
+          : null);
+      }
+    } catch (shareError) {
+      if (isShareAbort(shareError) || generation !== scanShareGenerationRef.current) return;
+      setPreparedScanShare(null);
+      const code = shareError instanceof ScanSharingError ? shareError.code : "share_failed";
+      setScanShareFeedback({
+        scanId,
+        message: code === "optimized_unavailable"
+          ? "An optimized copy is not available for sharing."
+          : code === "file_too_large"
+            ? "This optimized scan is too large to share."
+            : code === "share_unavailable"
+              ? "File sharing is not available in this browser."
+              : "The optimized scan could not be shared right now.",
+        isError: true,
+      });
+    } finally {
+      if (generation === scanShareGenerationRef.current) setScanShareBusy(null);
+    }
+  }
+
+  async function shareRecording(recordingId: string): Promise<void> {
+    if (!isOnline || recordingShareBusy !== null) return;
+    const generation = recordingShareGenerationRef.current;
+    setRecordingShareFeedback(null);
+
+    let file = preparedRecordingShare?.recordingId === recordingId
+      ? preparedRecordingShare.file
+      : null;
+    try {
+      if (!file) {
+        setRecordingShareBusy({ recordingId, phase: "preparing" });
+        const controller = new AbortController();
+        recordingShareAbortRef.current?.abort();
+        recordingShareAbortRef.current = controller;
+        file = await loadRecordingShareFile(recordingId, controller.signal);
+        if (generation !== recordingShareGenerationRef.current) return;
+        if (recordingShareAbortRef.current === controller) recordingShareAbortRef.current = null;
+        setPreparedRecordingShare({ recordingId, file });
+      }
+
+      setRecordingShareBusy({ recordingId, phase: "sharing" });
+      const outcome = await shareRecordingFile(file);
+      if (generation !== recordingShareGenerationRef.current) return;
+      if (outcome === "retry_required") {
+        setPreparedRecordingShare({ recordingId, file });
+        setRecordingShareFeedback({
+          recordingId,
+          message: "The playback recording is ready. Tap Share again.",
+          isError: false,
+        });
+      } else {
+        setPreparedRecordingShare(null);
+        setRecordingShareFeedback(outcome === "shared"
+          ? { recordingId, message: "Playback recording shared.", isError: false }
+          : null);
+      }
+    } catch (shareError) {
+      if (isShareAbort(shareError) || generation !== recordingShareGenerationRef.current) return;
+      setPreparedRecordingShare(null);
+      const code = shareError instanceof RecordingSharingError ? shareError.code : "share_failed";
+      setRecordingShareFeedback({
+        recordingId,
+        message: code === "file_too_large"
+          ? "This playback recording is too large to share."
+          : code === "share_unavailable"
+            ? "File sharing is not available in this browser."
+            : "The playback recording could not be shared right now.",
+        isError: true,
+      });
+    } finally {
+      if (generation === recordingShareGenerationRef.current) setRecordingShareBusy(null);
+    }
+  }
+
   return (
     <main className="page-shell detail-page" id="main-content">
       <Link className="back-link" to="/songs">← All songs</Link>
       <header className="detail-heading">
         <div className="heading-actions">
           <p className="eyebrow">Song</p>
-          {isOnline && canEdit === true && <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(song.id)}/edit`}>Edit song</Link>}
+          {isOnline && canEdit === true && (
+            <Link
+              className="secondary-action action-link compact-action"
+              to={`/songs/${encodeURIComponent(song.id)}/edit`}
+              aria-label="Edit Song"
+              title="Edit Song"
+            ><ActionContent kind="edit" label="Edit song" /></Link>
+          )}
         </div>
         <h1>{song.titleLatin}</h1>
         {song.titleNative && <p className="native-title" lang="und">{song.titleNative}</p>}
@@ -410,20 +586,31 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                 <h2 id={`${lyrics.id}-title`}>Typed lyrics</h2>
                 <div className="lyric-actions">
                   <button
-                    className="secondary-action"
+                    className="secondary-action compact-action"
                     type="button"
                     disabled={lyricAction?.busy === true}
+                    aria-label="Copy typed lyrics"
+                    title="Copy typed lyrics"
                     onClick={() => { void copyLyrics(lyrics.id, lyrics.content); }}
-                  >Copy</button>
+                  ><ActionContent kind="copy" label="Copy" /></button>
                   {supportsSystemTextShare() && (
                     <button
-                      className="secondary-action"
+                      className="secondary-action compact-action"
                       type="button"
                       disabled={lyricAction?.busy === true}
+                      aria-label="Share typed lyrics"
+                      title="Share typed lyrics"
                       onClick={() => { void shareLyrics(lyrics.id, lyrics.content); }}
-                    >Share</button>
+                    ><ActionContent kind="share" label="Share" /></button>
                   )}
-                  {isOnline && canEdit === true && <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(song.id)}/lyrics/${encodeURIComponent(lyrics.id)}/edit`}>Edit</Link>}
+                  {isOnline && canEdit === true && (
+                    <Link
+                      className="secondary-action action-link compact-action"
+                      to={`/songs/${encodeURIComponent(song.id)}/lyrics/${encodeURIComponent(lyrics.id)}/edit`}
+                      aria-label="Edit typed lyrics"
+                      title="Edit typed lyrics"
+                    ><ActionContent kind="edit" label="Edit" /></Link>
+                  )}
                 </div>
               </div>
               {lyricAction?.lyricId === lyrics.id && lyricAction.message && (
@@ -437,7 +624,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
           ))}
 
           {isOnline && canEdit === true && (
-            <Link className="secondary-action action-link add-child-action" to={`/songs/${encodeURIComponent(song.id)}/lyrics/new`}>Add typed lyrics</Link>
+            <Link className="secondary-action action-link add-child-action icon-text-action" to={`/songs/${encodeURIComponent(song.id)}/lyrics/new`}><ActionContent kind="add" label="Add typed lyrics" /></Link>
           )}
 
           {song.recordings.length > 0 && (
@@ -445,7 +632,11 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
               <h2 id="recordings-title">Recordings <span>{song.recordings.length}</span></h2>
               {processingRetryError && <p className="catalog-message error-message" role="alert">{processingRetryError}</p>}
               <ul className="media-list">
-                {song.recordings.map((recording) => (
+                {song.recordings.map((recording) => {
+                  const recordingShareTooLarge = isRecordingShareTooLarge(
+                    recording.playbackByteSize,
+                  );
+                  return (
                   <li key={recording.id}>
                     <div className="recording-item">
                       <strong>{recording.description}</strong>
@@ -466,29 +657,84 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                           />
                         : <span>{recording.processingState === "processing" ? "Preparing audio…" : "Audio needs attention"}</span>}
                     </div>
-                    {isOnline && canEdit === true && (
+                    {((recording.processingState === "ready"
+                      && recording.hasPlaybackMedia
+                      && recordingSharingAvailable)
+                      || (isOnline && canEdit === true)) && (
                       <div className="media-item-actions">
-                        {recording.processingState === "failed" && (
+                        {recording.processingState === "ready"
+                          && recording.hasPlaybackMedia
+                          && recordingSharingAvailable && (
                           <button
-                            className="media-action"
+                            className="media-action compact-action"
+                            type="button"
+                            disabled={!isOnline || recordingShareBusy !== null || recordingShareTooLarge}
+                            aria-label={recordingShareTooLarge
+                              ? "Recording is too large to share"
+                              : recordingShareBusy?.recordingId === recording.id
+                                ? recordingShareBusy.phase === "preparing" ? "Preparing Recording" : "Sharing Recording"
+                                : "Share Recording"}
+                            aria-busy={recordingShareBusy?.recordingId === recording.id || undefined}
+                            aria-describedby={recordingShareTooLarge
+                              ? `recording-share-size-${recording.id}`
+                              : recordingShareFeedback?.recordingId === recording.id
+                                ? `recording-share-${recording.id}`
+                                : undefined}
+                            title={recordingShareTooLarge
+                              ? "This Recording is larger than 50 MiB"
+                              : isOnline ? "Share the playback recording" : "Recording sharing requires an internet connection"}
+                            onClick={() => { void shareRecording(recording.id); }}
+                          ><ActionContent
+                              kind="share"
+                              label={recordingShareTooLarge
+                                ? "Too large"
+                                : recordingShareBusy?.recordingId === recording.id
+                                  ? recordingShareBusy.phase === "preparing" ? "Preparing…" : "Sharing…"
+                                  : "Share"}
+                            /></button>
+                        )}
+                        {isOnline && canEdit === true && recording.processingState === "failed" && (
+                          <button
+                            className="media-action icon-text-action"
                             type="button"
                             disabled={retryingRecordingId !== null}
                             onClick={() => { void retryFailedRecording(recording); }}
                           >
-                            {retryingRecordingId === recording.id ? "Retrying…" : "Retry preparation"}
+                            <ActionContent kind="retry" label={retryingRecordingId === recording.id ? "Retrying…" : "Retry preparation"} />
                           </button>
                         )}
-                        <Link className="media-action" to={`/songs/${encodeURIComponent(song.id)}/recordings/${encodeURIComponent(recording.id)}/edit`}>Edit</Link>
+                        {isOnline && canEdit === true && (
+                          <Link
+                            className="media-action compact-action"
+                            to={`/songs/${encodeURIComponent(song.id)}/recordings/${encodeURIComponent(recording.id)}/edit`}
+                            aria-label="Edit Recording"
+                            title="Edit Recording"
+                          ><ActionContent kind="edit" label="Edit" /></Link>
+                        )}
+                        {recordingShareFeedback?.recordingId === recording.id && (
+                          <p
+                            className={`media-row-share-status${recordingShareFeedback.isError ? " error-message" : ""}`}
+                            id={`recording-share-${recording.id}`}
+                            role={recordingShareFeedback.isError ? "alert" : "status"}
+                          >{recordingShareFeedback.message}</p>
+                        )}
+                        {recordingShareTooLarge && (
+                          <p
+                            className="media-row-share-status"
+                            id={`recording-share-size-${recording.id}`}
+                          >Playback is larger than {MAX_RECORDING_SHARE_BYTES / 1_048_576} MiB and cannot be shared here.</p>
+                        )}
                       </div>
                     )}
                   </li>
-                ))}
+                  );
+                })}
               </ul>
               <p className="media-note">Some legacy formats may need a playback conversion.</p>
             </section>
           )}
           {isOnline && canEdit === true && (
-            <Link className="secondary-action action-link add-child-action" to={`/songs/${encodeURIComponent(song.id)}/recordings/new`}>Add Recording</Link>
+            <Link className="secondary-action action-link add-child-action icon-text-action" to={`/songs/${encodeURIComponent(song.id)}/recordings/new`}><ActionContent kind="add" label="Add Recording" /></Link>
           )}
 
           {song.scans.length > 0 && (
@@ -499,8 +745,48 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                   <li key={scan.id}>
                     <div><strong>{scanDisplayName(scan)}</strong><span>{scan.filename}</span></div>
                     <div className="media-item-actions">
-                      <button className="media-action" type="button" disabled={!isOnline} title={isOnline ? "View scan" : "Scans require an internet connection"} onClick={() => setViewerScanId(scan.id)}>View</button>
-                      {isOnline && canEdit === true && <Link className="media-action" to={`/songs/${encodeURIComponent(song.id)}/scans/${encodeURIComponent(scan.id)}/edit`}>Edit</Link>}
+                      <button
+                        className="media-action compact-action"
+                        type="button"
+                        disabled={!isOnline}
+                        aria-label="View Scan"
+                        title={isOnline ? "View Scan" : "Scans require an internet connection"}
+                        onClick={() => setViewerScanId(scan.id)}
+                      ><ActionContent kind="view" label="View" /></button>
+                      {supportsOptimizedScanSharing() && (
+                        <button
+                          className="media-action compact-action"
+                          type="button"
+                          disabled={!isOnline || scanShareBusy !== null}
+                          aria-label={scanShareBusy?.scanId === scan.id
+                            ? scanShareBusy.phase === "preparing" ? "Preparing Scan" : "Sharing Scan"
+                            : "Share Scan"}
+                          aria-busy={scanShareBusy?.scanId === scan.id || undefined}
+                          aria-describedby={scanShareFeedback?.scanId === scan.id ? `scan-share-${scan.id}` : undefined}
+                          title={isOnline ? "Share the optimized scan image" : "Scan sharing requires an internet connection"}
+                          onClick={() => { void shareScan(scan.id); }}
+                        ><ActionContent
+                            kind="share"
+                            label={scanShareBusy?.scanId === scan.id
+                              ? scanShareBusy.phase === "preparing" ? "Preparing…" : "Sharing…"
+                              : "Share"}
+                          /></button>
+                      )}
+                      {isOnline && canEdit === true && (
+                        <Link
+                          className="media-action compact-action"
+                          to={`/songs/${encodeURIComponent(song.id)}/scans/${encodeURIComponent(scan.id)}/edit`}
+                          aria-label="Edit Scan"
+                          title="Edit Scan"
+                        ><ActionContent kind="edit" label="Edit" /></Link>
+                      )}
+                      {scanShareFeedback?.scanId === scan.id && (
+                        <p
+                          className={`media-row-share-status${scanShareFeedback.isError ? " error-message" : ""}`}
+                          id={`scan-share-${scan.id}`}
+                          role={scanShareFeedback.isError ? "alert" : "status"}
+                        >{scanShareFeedback.message}</p>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -508,12 +794,12 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
             </section>
           )}
           {isOnline && canEdit === true && (
-            <Link className="secondary-action action-link add-child-action" to={`/songs/${encodeURIComponent(song.id)}/scans/new`}>Add Scan</Link>
+            <Link className="secondary-action action-link add-child-action icon-text-action" to={`/songs/${encodeURIComponent(song.id)}/scans/new`}><ActionContent kind="add" label="Add Scan" /></Link>
           )}
         </div>
         <aside><MetadataList song={song} /></aside>
       </div>
-      {viewerScanId && <ScanViewer scans={song.scans} initialScanId={viewerScanId} onClose={() => setViewerScanId(null)} />}
+      {viewerScanId && <ScanViewer scans={song.scans} initialScanId={viewerScanId} isOnline={isOnline} onClose={() => setViewerScanId(null)} />}
     </main>
   );
 }
@@ -538,6 +824,12 @@ function LyricEditorPage({
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isTrashing, setIsTrashing] = useState(false);
+  const editorKey = `${mode}:${songId}:${lyricId}`;
+  const loadedEditorKey = useRef<string | null>(null);
+  const [initialContent, setInitialContent] = useState<{ key: string; value: string } | null>(null);
+  const hasUnsavedChanges = initialContent?.key === editorKey
+    && editorValuesChanged(initialContent.value, content);
+  const { allowNextNavigation } = useUnsavedChanges(hasUnsavedChanges);
 
   useEffect(() => {
     let cancelled = false;
@@ -546,6 +838,8 @@ function LyricEditorPage({
         setIsLoading(false);
         return;
       }
+      if (!shouldRefreshEditor(loadedEditorKey.current, editorKey, hasUnsavedChanges)) return;
+      setIsLoading(true);
       try {
         const song = await refreshSong(songId);
         if (cancelled) return;
@@ -557,9 +851,16 @@ function LyricEditorPage({
             return;
           }
           setContent(lyric.content);
+          setInitialContent({ key: editorKey, value: lyric.content });
           setRevision(lyric.revision);
           setIsLegacyImport(lyric.origin === "legacy_import");
+        } else {
+          setContent("");
+          setInitialContent({ key: editorKey, value: "" });
+          setRevision(null);
+          setIsLegacyImport(false);
         }
+        loadedEditorKey.current = editorKey;
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The typed-lyrics editor could not be loaded.");
       } finally {
@@ -568,7 +869,7 @@ function LyricEditorPage({
     }
     void load();
     return () => { cancelled = true; };
-  }, [canEdit, isOnline, lyricId, mode, songId]);
+  }, [canEdit, editorKey, isOnline, lyricId, mode, songId]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -583,6 +884,7 @@ function LyricEditorPage({
         await updateLyric(songId, lyricId, content, revision ?? 0);
       }
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (saveError) {
       if (saveError instanceof ApiError) {
@@ -615,6 +917,7 @@ function LyricEditorPage({
     try {
       await trashLyric(songId, lyricId, revision);
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (trashError) {
       setError(trashError instanceof Error ? trashError.message : "The typed lyrics could not be moved to Trash.");
@@ -641,7 +944,7 @@ function LyricEditorPage({
         <p className="lede">Spaces, blank lines, capitalization, and script are saved exactly as entered.</p>
         {isLegacyImport && <p className="editor-note">This is an imported combined block. It remains marked for the later split-and-review workflow.</p>}
       </header>
-      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <FeedbackMessage message={error} />
       <form className="song-form" onSubmit={(event) => { void submit(event); }}>
         <section className="form-card">
           <label className="form-field">
@@ -702,9 +1005,20 @@ function ScanEditorPage({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [duplicateScan, setDuplicateScan] = useState<DuplicateScanDetails | null>(null);
+  const duplicateScanNoticeRef = useRevealFeedback(duplicateScan);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isTrashing, setIsTrashing] = useState(false);
+  const editorKey = `${mode}:${songId}:${scanId}`;
+  const loadedEditorKey = useRef<string | null>(null);
+  const [initialValues, setInitialValues] = useState<{
+    key: string;
+    value: { notebookId: string; pageLabel: string; fileSelected: boolean };
+  } | null>(null);
+  const currentValues = { notebookId, pageLabel, fileSelected: file !== null };
+  const hasUnsavedChanges = initialValues?.key === editorKey
+    && editorValuesChanged(initialValues.value, currentValues);
+  const { allowNextNavigation } = useUnsavedChanges(hasUnsavedChanges);
 
   useEffect(() => {
     if (!file) {
@@ -723,6 +1037,8 @@ function ScanEditorPage({
         setIsLoading(false);
         return;
       }
+      if (!shouldRefreshEditor(loadedEditorKey.current, editorKey, hasUnsavedChanges)) return;
+      setIsLoading(true);
       try {
         const [editorOptions, song] = await Promise.all([
           loadScanEditorOptions(),
@@ -741,7 +1057,27 @@ function ScanEditorPage({
           setNotebookId(scan.notebookId ?? "");
           setPageLabel(scan.pageLabel ?? "");
           setRevision(scan.revision);
+          setFile(null);
+          setInitialValues({
+            key: editorKey,
+            value: {
+              notebookId: scan.notebookId ?? "",
+              pageLabel: scan.pageLabel ?? "",
+              fileSelected: false,
+            },
+          });
+        } else {
+          setFilename("");
+          setNotebookId("");
+          setPageLabel("");
+          setRevision(null);
+          setFile(null);
+          setInitialValues({
+            key: editorKey,
+            value: { notebookId: "", pageLabel: "", fileSelected: false },
+          });
         }
+        loadedEditorKey.current = editorKey;
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The Scan editor could not be loaded.");
       } finally {
@@ -750,7 +1086,7 @@ function ScanEditorPage({
     }
     void load();
     return () => { cancelled = true; };
-  }, [canEdit, isOnline, mode, scanId, songId]);
+  }, [canEdit, editorKey, isOnline, mode, scanId, songId]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -784,6 +1120,7 @@ function ScanEditorPage({
         });
       }
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (saveError) {
       if (saveError instanceof ApiError) {
@@ -810,6 +1147,7 @@ function ScanEditorPage({
     try {
       await trashScan(songId, scanId, revision);
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (trashError) {
       setError(trashError instanceof Error ? trashError.message : "The Scan could not be moved to Trash.");
@@ -839,11 +1177,17 @@ function ScanEditorPage({
         <h1>{mode === "create" ? "Add Scan" : mode === "replace" ? "Replace Scan Image" : "Edit Scan"}</h1>
         <p className="lede">{mode === "create" ? "Upload a private image, then optionally identify its Notebook and Page." : mode === "replace" ? "Upload a new private image to replace the current file. The previous image is preserved in history." : "Choose a Notebook and optional Page, or leave both empty for an external Scan."}</p>
       </header>
-      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <FeedbackMessage message={duplicateScan ? null : error} />
       {duplicateScan && (
-        <section className="duplicate-scan-notice" aria-labelledby="duplicate-scan-title">
+        <section
+          className="duplicate-scan-notice"
+          ref={duplicateScanNoticeRef}
+          role="alert"
+          aria-labelledby="duplicate-scan-title"
+        >
           <div>
             <strong id="duplicate-scan-title">Existing Scan details</strong>
+            {error && <span>{error}</span>}
             <span>Song: {duplicateScan.songTitle}</span>
             <span>File: {duplicateScan.filename}</span>
             {duplicateScan.notebookName ? <span>Notebook: {duplicateScan.notebookName}</span> : <span>Type: External Scan</span>}
@@ -911,7 +1255,7 @@ function ScanEditorPage({
                 <span>Private file</span>
                 <strong>{filename}</strong>
               </div>
-              <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(songId)}/scans/${encodeURIComponent(scanId)}/replace`}>Replace image</Link>
+              <Link className="secondary-action action-link icon-text-action" to={`/songs/${encodeURIComponent(songId)}/scans/${encodeURIComponent(scanId)}/replace`}><ActionContent kind="replace" label="Replace image" /></Link>
             </div>
           )}
           {mode !== "replace" && (
@@ -970,6 +1314,16 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isTrashing, setIsTrashing] = useState(false);
+  const editorKey = `${songId}:${recordingId}`;
+  const loadedEditorKey = useRef<string | null>(null);
+  const [initialValues, setInitialValues] = useState<{
+    key: string;
+    value: { description: string; recordedOn: string; vocalistIds: string[] };
+  } | null>(null);
+  const currentValues = { description, recordedOn, vocalistIds };
+  const hasUnsavedChanges = initialValues?.key === editorKey
+    && editorValuesChanged(initialValues.value, currentValues);
+  const { allowNextNavigation } = useUnsavedChanges(hasUnsavedChanges);
 
   useEffect(() => {
     let cancelled = false;
@@ -978,6 +1332,8 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
         setIsLoading(false);
         return;
       }
+      if (!shouldRefreshEditor(loadedEditorKey.current, editorKey, hasUnsavedChanges)) return;
+      setIsLoading(true);
       try {
         const [editorOptions, song] = await Promise.all([
           loadRecordingEditorOptions(),
@@ -992,11 +1348,18 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
           return;
         }
         setFilename(recording.filename);
-        setDescription(recording.description);
-        setRecordedOn(recording.recordedOn ?? "");
-        setVocalistIds(recording.credits.filter((credit) => credit.role === "vocals").map((credit) => credit.personId));
+        const nextValues = {
+          description: recording.description,
+          recordedOn: recording.recordedOn ?? "",
+          vocalistIds: recording.credits.filter((credit) => credit.role === "vocals").map((credit) => credit.personId),
+        };
+        setDescription(nextValues.description);
+        setRecordedOn(nextValues.recordedOn);
+        setVocalistIds(nextValues.vocalistIds);
+        setInitialValues({ key: editorKey, value: nextValues });
         setProcessingState(recording.processingState);
         setRevision(recording.revision);
+        loadedEditorKey.current = editorKey;
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The Recording editor could not be loaded.");
       } finally {
@@ -1005,7 +1368,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
     }
     void load();
     return () => { cancelled = true; };
-  }, [canEdit, isOnline, recordingId, songId]);
+  }, [canEdit, editorKey, isOnline, recordingId, songId]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -1021,6 +1384,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
         revision,
       });
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (saveError) {
       if (saveError instanceof ApiError) {
@@ -1045,6 +1409,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
     try {
       await trashRecording(songId, recordingId, revision);
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (trashError) {
       setError(trashError instanceof Error ? trashError.message : "The Recording could not be moved to Trash.");
@@ -1068,7 +1433,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
         <h1>Edit Recording</h1>
         <p className="lede">Describe this take, optionally record its date, and select any known vocalists.</p>
       </header>
-      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <FeedbackMessage message={error} />
       <form className="song-form" onSubmit={(event) => { void submit(event); }}>
         <section className="form-card">
           <div className="form-file-summary">
@@ -1078,7 +1443,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
             </div>
             {processingState === "processing"
               ? <span className="media-note">Replacement is available after processing finishes.</span>
-              : <Link className="secondary-action action-link" to={`/songs/${encodeURIComponent(songId)}/recordings/${encodeURIComponent(recordingId)}/replace`}>Replace audio</Link>}
+              : <Link className="secondary-action action-link icon-text-action" to={`/songs/${encodeURIComponent(songId)}/recordings/${encodeURIComponent(recordingId)}/replace`}><ActionContent kind="replace" label="Replace audio" /></Link>}
           </div>
           <label className="form-field">
             <span>Recording description <strong aria-hidden="true">*</strong></span>
@@ -1086,11 +1451,11 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
             <small>Use this for details such as an old verse, alternate tune, incomplete take, or accompaniment. Capitalization is preserved.</small>
             {fieldErrors.description?.map((message) => <em key={message}>{message}</em>)}
           </label>
-          <label className="form-field compact-field">
-            <span>Recorded date</span>
-            <input type="date" max={new Date().toISOString().slice(0, 10)} value={recordedOn} onChange={(event) => setRecordedOn(event.target.value)} />
-            {fieldErrors.recordedOn?.map((message) => <em key={message}>{message}</em>)}
-          </label>
+          <RecordingDateField
+            value={recordedOn}
+            onChange={setRecordedOn}
+            errors={fieldErrors.recordedOn}
+          />
         </section>
         <fieldset className="form-card choice-group">
           <legend>Vocals</legend>
@@ -1234,7 +1599,7 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
           <p className="lede">Removed items stay here indefinitely unless a future permanent-cleanup policy is approved.</p>
         </div>
       </header>
-      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <FeedbackMessage message={error} />
       {isLoading ? (
         <section className="empty-state"><p>Loading Trash…</p></section>
       ) : songs.length === 0 && lyrics.length === 0 && scans.length === 0 && recordings.length === 0 ? (
@@ -1403,6 +1768,12 @@ function SongEditorPage({
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isTrashing, setIsTrashing] = useState(false);
+  const editorKey = `${mode}:${songId}`;
+  const loadedEditorKey = useRef<string | null>(null);
+  const [initialForm, setInitialForm] = useState<{ key: string; value: SongFormState } | null>(null);
+  const hasUnsavedChanges = initialForm?.key === editorKey
+    && editorValuesChanged(initialForm.value, form);
+  const { allowNextNavigation } = useUnsavedChanges(hasUnsavedChanges);
 
   useEffect(() => {
     let cancelled = false;
@@ -1411,6 +1782,8 @@ function SongEditorPage({
         setIsLoading(false);
         return;
       }
+      if (!shouldRefreshEditor(loadedEditorKey.current, editorKey, hasUnsavedChanges)) return;
+      setIsLoading(true);
       try {
         const [editorOptions, song] = await Promise.all([
           loadSongEditorOptions(),
@@ -1419,7 +1792,7 @@ function SongEditorPage({
         if (cancelled) return;
         setOptions(editorOptions);
         if (song) {
-          setForm({
+          const nextForm: SongFormState = {
             titleLatin: song.titleLatin,
             titleNative: song.titleNative ?? "",
             status: song.status === "checked" ? "checked" : "draft",
@@ -1430,13 +1803,20 @@ function SongEditorPage({
             aliasesText: song.aliases.join("\n"),
             notes: song.notes ?? "",
             revision: song.revision,
-          });
+          };
+          setForm(nextForm);
+          setInitialForm({ key: editorKey, value: nextForm });
           setChildCounts({
             lyricTexts: song.lyricTexts.length,
             scans: song.scans.length,
             recordings: song.recordings.length,
           });
+        } else {
+          setForm(EMPTY_SONG_FORM);
+          setInitialForm({ key: editorKey, value: EMPTY_SONG_FORM });
+          setChildCounts({ lyricTexts: 0, scans: 0, recordings: 0 });
         }
+        loadedEditorKey.current = editorKey;
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The editor could not be loaded.");
       } finally {
@@ -1445,7 +1825,7 @@ function SongEditorPage({
     }
     void load();
     return () => { cancelled = true; };
-  }, [canEdit, isOnline, mode, songId]);
+  }, [canEdit, editorKey, isOnline, mode, songId]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -1471,6 +1851,7 @@ function SongEditorPage({
         ? await createSong(payload)
         : await updateSong(songId, { ...payload, revision: form.revision ?? 0 });
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(saved.id)}`, { replace: true });
     } catch (saveError) {
       if (saveError instanceof ApiError) {
@@ -1496,6 +1877,7 @@ function SongEditorPage({
     try {
       await trashSong(songId, form.revision);
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate("/songs", { replace: true });
     } catch (trashError) {
       setError(trashError instanceof Error ? trashError.message : "The Song could not be moved to Trash.");
@@ -1523,7 +1905,7 @@ function SongEditorPage({
         <h1>{mode === "create" ? "Add song" : "Edit song"}</h1>
         <p className="lede">Required fields are marked. Changes are saved immediately to the private library.</p>
       </header>
-      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      <FeedbackMessage message={error} />
       <form className="song-form" onSubmit={(event) => { void submit(event); }}>
         <section className="form-card">
           <label className="form-field">
@@ -1547,7 +1929,7 @@ function SongEditorPage({
 
         <fieldset className="form-card choice-group">
           <legend>Languages <strong aria-hidden="true">*</strong></legend>
-          <p>Select at least one.</p>
+          <p>Required. Select at least one.</p>
           <div className="choice-grid">
             {options?.languages.map((language) => (
               <label key={language.id}><input type="checkbox" checked={form.languageIds.includes(language.id)} onChange={(event) => setForm({ ...form, languageIds: selected(form.languageIds, language.id, event.target.checked) })} /><span>{language.displayName}</span></label>
@@ -1715,6 +2097,15 @@ function ManageLookupsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: 
     }));
   }
 
+  function selectLookupKind(kind: LookupKind): void {
+    setActiveKind(kind);
+    setFilter("");
+    setAddName("");
+    setConfirmSimilar(false);
+    setEditing(null);
+    setError(null);
+  }
+
   async function addItem(event: FormEvent): Promise<void> {
     event.preventDefault();
     if (isSaving || !addName.trim() || addMatch.exact || (addMatch.similar.length > 0 && !confirmSimilar)) return;
@@ -1759,34 +2150,27 @@ function ManageLookupsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: 
         </div>
       </header>
 
-      <div className="lookup-tabs" role="tablist" aria-label="Library lists">
-        {(Object.keys(LOOKUP_LABELS) as LookupKind[]).map((kind) => (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeKind === kind}
-            className={activeKind === kind ? "active" : ""}
-            key={kind}
-            onClick={() => {
-              setActiveKind(kind);
-              setFilter("");
-              setAddName("");
-              setConfirmSimilar(false);
-              setEditing(null);
-              setError(null);
-            }}
-          >
-            {LOOKUP_LABELS[kind].plural}
-            <span>{collections?.[kind].length ?? "–"}</span>
-          </button>
-        ))}
-      </div>
+      <LookupTabs
+        activeKind={activeKind}
+        options={(Object.keys(LOOKUP_LABELS) as LookupKind[]).map((kind) => ({
+          kind,
+          label: LOOKUP_LABELS[kind].plural,
+          count: collections?.[kind].length ?? null,
+        }))}
+        onSelect={selectLookupKind}
+      />
 
-      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
-      {!collections ? (
-        <section className="empty-state"><p>Loading library lists…</p></section>
-      ) : (
-        <div className="lookup-layout">
+      <div
+        className="lookup-tab-panel"
+        id={lookupPanelId(activeKind)}
+        role="tabpanel"
+        aria-labelledby={lookupTabId(activeKind)}
+      >
+        <FeedbackMessage message={error} />
+        {!collections ? (
+          <section className="empty-state"><p>Loading library lists…</p></section>
+        ) : (
+          <div className="lookup-layout">
           <section className="detail-card lookup-add" aria-labelledby="lookup-add-title">
             <div>
               <p className="eyebrow">New choice</p>
@@ -1863,14 +2247,17 @@ function ManageLookupsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: 
             )}
             <p className="media-note">Items cannot be deleted because Songs, Scans, or Recordings may refer to them.</p>
           </section>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </main>
   );
 }
 
 export function App() {
   const isOnline = useOnlineStatus();
+  const [catalogView, setCatalogView] = useState(initialCatalogViewState);
+  const catalogScrollPosition = useRef(0);
   const [session, setSession] = useState<AppSession | null>(null);
   const [sessionResolved, setSessionResolved] = useState(false);
   const [privateDataBlocked, setPrivateDataBlocked] = useState(isPrivateDataBlocked);
@@ -1887,6 +2274,8 @@ export function App() {
   }
 
   async function logoutAndClear(): Promise<void> {
+    setCatalogView(initialCatalogViewState());
+    catalogScrollPosition.current = 0;
     sessionGeneration.current += 1;
     setSession(null);
     setSessionResolved(false);
@@ -1907,6 +2296,8 @@ export function App() {
 
   useEffect(() => {
     const invalidatePrivateData = () => {
+      setCatalogView(initialCatalogViewState());
+      catalogScrollPosition.current = 0;
       sessionGeneration.current += 1;
       localStorage.removeItem(PRIVATE_CACHE_NAMESPACE_KEY);
       setSession(null);
@@ -1980,6 +2371,7 @@ export function App() {
   const canEdit = !sessionResolved ? null : session?.role === "editor" || session?.role === "admin";
 
   return (
+    <UnsavedChangesProvider>
     <div className="app-frame">
       <a className="skip-link" href="#main-content">Skip to content</a>
       <header className="app-header">
@@ -1998,7 +2390,15 @@ export function App() {
         : isOnline && !sessionResolved
         ? <main className="page-shell" id="main-content"><p>Checking this device’s private session…</p></main>
         : <Routes>
-        <Route path="/songs" element={<SongsPage isOnline={isOnline} canEdit={canEdit} />} />
+        <Route path="/songs" element={(
+          <SongsPage
+            isOnline={isOnline}
+            canEdit={canEdit}
+            view={catalogView}
+            onViewChange={setCatalogView}
+            scrollPosition={catalogScrollPosition}
+          />
+        )} />
         <Route path="/songs/new" element={<SongEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/edit" element={<SongEditorPage mode="edit" isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/songs/:songId/lyrics/new" element={<LyricEditorPage mode="create" isOnline={isOnline} canEdit={canEdit} />} />
@@ -2023,5 +2423,6 @@ export function App() {
         <Link to="/account">Account</Link>
       </nav>}
     </div>
+    </UnsavedChangesProvider>
   );
 }

@@ -1,56 +1,19 @@
-export type ConnectivityProbe = (signal: AbortSignal) => Promise<boolean>;
-
-export type LatestConnectivityChecker = {
-  check: () => Promise<void>;
-  markOffline: () => void;
-  dispose: () => void;
+export type BrowserConnectivityTarget = {
+  addEventListener: (type: "online" | "offline" | "pageshow", listener: EventListener) => void;
+  removeEventListener: (type: "online" | "offline" | "pageshow", listener: EventListener) => void;
 };
 
-export function createLatestConnectivityChecker(
-  probe: ConnectivityProbe,
+export function subscribeToBrowserConnectivity(
+  target: BrowserConnectivityTarget,
+  readOnline: () => boolean,
   onStatus: (isOnline: boolean) => void,
-  timeoutMs = 5_000,
-): LatestConnectivityChecker {
-  let disposed = false;
-  let sequence = 0;
-  let active: { sequence: number; controller: AbortController } | null = null;
-
-  async function check(): Promise<void> {
-    const currentSequence = ++sequence;
-    active?.controller.abort();
-
-    const controller = new AbortController();
-    active = { sequence: currentSequence, controller };
-    const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const isOnline = await probe(controller.signal);
-      if (!disposed && currentSequence === sequence) onStatus(isOnline);
-    } catch {
-      // A superseded check is intentionally aborted. Only the newest request
-      // may turn the application offline; its own timeout/failure remains real.
-      if (!disposed && currentSequence === sequence) onStatus(false);
-    } finally {
-      globalThis.clearTimeout(timeout);
-      if (active?.sequence === currentSequence) active = null;
-    }
-  }
-
-  function markOffline(): void {
-    ++sequence;
-    active?.controller.abort();
-    active = null;
-    if (!disposed) onStatus(false);
-  }
-
-  function dispose(): void {
-    disposed = true;
-    ++sequence;
-    active?.controller.abort();
-    active = null;
-  }
-
-  return { check, markOffline, dispose };
+): () => void {
+  const update = () => onStatus(readOnline());
+  const eventTypes = ["online", "offline", "pageshow"] as const;
+  for (const eventType of eventTypes) target.addEventListener(eventType, update);
+  return () => {
+    for (const eventType of eventTypes) target.removeEventListener(eventType, update);
+  };
 }
 
 export function preserveSessionResolutionDuringRevalidation(

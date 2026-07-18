@@ -7,6 +7,12 @@ export const SCAN_ZOOM_STEP = 0.25;
 export type ScanSize = { width: number; height: number };
 export type ScanPoint = { x: number; y: number };
 export type ScanView = { zoom: number; x: number; y: number };
+export type ScanWheelInput = {
+  ctrlKey: boolean;
+  deltaX: number;
+  deltaY: number;
+  metaKey: boolean;
+};
 
 export function clampScanZoom(value: number): number {
   return Math.min(MAX_SCAN_ZOOM, Math.max(MIN_SCAN_ZOOM, value));
@@ -60,6 +66,17 @@ export function fittedScanView(fitted: ScanSize, viewport: ScanSize): ScanView {
   return clampScanView({ zoom: MIN_SCAN_ZOOM, x: 0, y: 0 }, fitted, viewport);
 }
 
+export function scanViewAfterLayoutChange(
+  current: ScanView,
+  fitted: ScanSize,
+  viewport: ScanSize,
+  fitNewImage: boolean,
+): ScanView {
+  return fitNewImage
+    ? fittedScanView(fitted, viewport)
+    : clampScanView(current, fitted, viewport);
+}
+
 export function zoomScanAtPoint(
   current: ScanView,
   nextZoom: number,
@@ -73,5 +90,29 @@ export function zoomScanAtPoint(
     zoom,
     x: focalPoint.x - (focalPoint.x - current.x) * ratio,
     y: focalPoint.y - (focalPoint.y - current.y) * ratio,
+  }, fitted, viewport);
+}
+
+export function scanViewAfterWheel(
+  current: ScanView,
+  input: ScanWheelInput,
+  focalPoint: ScanPoint,
+  fitted: ScanSize,
+  viewport: ScanSize,
+): ScanView {
+  if (input.ctrlKey || input.metaKey) {
+    return zoomScanAtPoint(
+      current,
+      current.zoom * Math.exp(-input.deltaY * 0.004),
+      focalPoint,
+      fitted,
+      viewport,
+    );
+  }
+
+  return clampScanView({
+    ...current,
+    x: current.x - input.deltaX,
+    y: current.y - input.deltaY,
   }, fitted, viewport);
 }

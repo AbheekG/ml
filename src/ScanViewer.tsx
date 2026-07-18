@@ -3,16 +3,16 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
 } from "react";
 import type { SongScan } from "./catalog";
 import {
   adjacentScanId,
   clampScanView,
   fitScanSize,
-  fittedScanView,
   MAX_SCAN_ZOOM,
   MIN_SCAN_ZOOM,
+  scanViewAfterLayoutChange,
+  scanViewAfterWheel,
   scanDisplayName,
   SCAN_ZOOM_STEP,
   type ScanPoint,
@@ -20,6 +20,13 @@ import {
   type ScanView,
   zoomScanAtPoint,
 } from "./scan-viewer";
+import {
+  isShareAbort,
+  loadOptimizedScanShareFile,
+  ScanSharingError,
+  shareOptimizedScanFile,
+  supportsOptimizedScanSharing,
+} from "./scan-sharing";
 
 type WebkitDocument = Document & {
   webkitFullscreenElement?: Element | null;
@@ -51,10 +58,12 @@ function activeFullscreenElement(): Element | null {
 export function ScanViewer({
   scans,
   initialScanId,
+  isOnline,
   onClose,
 }: {
   scans: SongScan[];
   initialScanId: string;
+  isOnline: boolean;
   onClose: () => void;
 }) {
   const [currentScanId, setCurrentScanId] = useState(initialScanId);
@@ -63,12 +72,18 @@ export function ScanViewer({
   const [view, setView] = useState<ScanView>({ zoom: MIN_SCAN_ZOOM, x: 0, y: 0 });
   const [loadFailed, setLoadFailed] = useState(false);
   const [isImageOnly, setIsImageOnly] = useState(false);
+  const [shareBusy, setShareBusy] = useState<"preparing" | "sharing" | null>(null);
+  const [preparedShare, setPreparedShare] = useState<{ scanId: string; file: File } | null>(null);
+  const [shareFeedback, setShareFeedback] = useState<{ message: string; isError: boolean } | null>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const viewRef = useRef(view);
+  const fitNewImageRef = useRef(true);
   const pointersRef = useRef(new Map<number, ScanPoint>());
   const gestureRef = useRef<Gesture | null>(null);
+  const shareAbortRef = useRef<AbortController | null>(null);
+  const shareGenerationRef = useRef(0);
   const currentScan = scans.find((scan) => scan.id === currentScanId) ?? scans[0];
   const previousId = currentScan ? adjacentScanId(scans, currentScan.id, -1) : null;
   const nextId = currentScan ? adjacentScanId(scans, currentScan.id, 1) : null;
@@ -83,6 +98,8 @@ export function ScanViewer({
     || "webkitRequestFullscreen" in HTMLElement.prototype
     || typeof (overlayRef.current as WebkitElement | null)?.webkitRequestFullscreen === "function"
   );
+  const sharingAvailable = typeof navigator !== "undefined"
+    && supportsOptimizedScanSharing();
 
   function applyView(next: ScanView): void {
     viewRef.current = next;
@@ -125,11 +142,26 @@ export function ScanViewer({
   }
 
   useEffect(() => {
+    fitNewImageRef.current = true;
     setNaturalSize({ width: 0, height: 0 });
     setLoadFailed(false);
     pointersRef.current.clear();
     gestureRef.current = null;
   }, [currentScanId]);
+
+  useEffect(() => {
+    shareGenerationRef.current += 1;
+    shareAbortRef.current?.abort();
+    shareAbortRef.current = null;
+    setPreparedShare(null);
+    setShareBusy(null);
+    setShareFeedback(null);
+  }, [currentScanId, isOnline]);
+
+  useEffect(() => () => {
+    shareGenerationRef.current += 1;
+    shareAbortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -143,9 +175,44 @@ export function ScanViewer({
 
   useEffect(() => {
     if (fittedSize.width === 0 || fittedSize.height === 0) return;
-    const next = fittedScanView(fittedSize, viewportSize);
+    const next = scanViewAfterLayoutChange(
+      viewRef.current,
+      fittedSize,
+      viewportSize,
+      fitNewImageRef.current,
+    );
+    fitNewImageRef.current = false;
     viewRef.current = next;
     setView(next);
+  }, [fittedSize.height, fittedSize.width, viewportSize.height, viewportSize.width]);
+
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    const stage = stageRef.current;
+    if (!overlay || !stage) return;
+    const wheelStage = stage;
+
+    function handleWheel(event: WheelEvent): void {
+      const target = event.target;
+      const isOverStage = target instanceof Node && wheelStage.contains(target);
+
+      if (!isOverStage) {
+        if (event.ctrlKey || event.metaKey) event.preventDefault();
+        return;
+      }
+
+      event.preventDefault();
+      applyView(scanViewAfterWheel(
+        viewRef.current,
+        event,
+        stagePoint(event.clientX, event.clientY),
+        fittedSize,
+        viewportSize,
+      ));
+    }
+
+    overlay.addEventListener("wheel", handleWheel, { passive: false });
+    return () => overlay.removeEventListener("wheel", handleWheel);
   }, [fittedSize.height, fittedSize.width, viewportSize.height, viewportSize.width]);
 
   useEffect(() => {
@@ -249,20 +316,6 @@ export function ScanViewer({
     beginGesture();
   }
 
-  function wheel(event: ReactWheelEvent<HTMLDivElement>): void {
-    event.preventDefault();
-    if (event.ctrlKey || event.metaKey) {
-      const multiplier = Math.exp(-event.deltaY * 0.004);
-      zoomTo(viewRef.current.zoom * multiplier, stagePoint(event.clientX, event.clientY));
-    } else {
-      applyView(clampScanView({
-        ...viewRef.current,
-        x: viewRef.current.x - event.deltaX,
-        y: viewRef.current.y - event.deltaY,
-      }, fittedSize, viewportSize));
-    }
-  }
-
   async function enterImageOnly(): Promise<void> {
     setIsImageOnly(true);
     const element = overlayRef.current as WebkitElement | null;
@@ -275,6 +328,59 @@ export function ScanViewer({
       }
     } catch {
       // Image-only mode remains useful when a browser refuses true fullscreen.
+    }
+  }
+
+  async function shareCurrentScan(): Promise<void> {
+    if (!isOnline || shareBusy !== null) return;
+    const scanId = currentScan.id;
+    const generation = shareGenerationRef.current;
+    setShareFeedback(null);
+
+    let file = preparedShare?.scanId === scanId ? preparedShare.file : null;
+    try {
+      if (!file) {
+        setShareBusy("preparing");
+        const controller = new AbortController();
+        shareAbortRef.current?.abort();
+        shareAbortRef.current = controller;
+        file = await loadOptimizedScanShareFile(scanId, controller.signal);
+        if (generation !== shareGenerationRef.current) return;
+        if (shareAbortRef.current === controller) shareAbortRef.current = null;
+        setPreparedShare({ scanId, file });
+      }
+
+      setShareBusy("sharing");
+      const outcome = await shareOptimizedScanFile(file);
+      if (generation !== shareGenerationRef.current) return;
+      if (outcome === "retry_required") {
+        setPreparedShare({ scanId, file });
+        setShareFeedback({
+          message: "The optimized scan is ready. Tap Share again.",
+          isError: false,
+        });
+      } else {
+        setPreparedShare(null);
+        setShareFeedback(outcome === "shared"
+          ? { message: "Optimized scan shared.", isError: false }
+          : null);
+      }
+    } catch (error) {
+      if (isShareAbort(error) || generation !== shareGenerationRef.current) return;
+      setPreparedShare(null);
+      const code = error instanceof ScanSharingError ? error.code : "share_failed";
+      setShareFeedback({
+        message: code === "optimized_unavailable"
+          ? "An optimized copy is not available for sharing."
+          : code === "file_too_large"
+            ? "This optimized scan is too large to share."
+            : code === "share_unavailable"
+              ? "File sharing is not available in this browser."
+              : "The optimized scan could not be shared right now.",
+        isError: true,
+      });
+    } finally {
+      if (generation === shareGenerationRef.current) setShareBusy(null);
     }
   }
 
@@ -326,20 +432,36 @@ export function ScanViewer({
             </div>
             <div>
               <a href={originalMediaUrl} target="_blank" rel="noreferrer">Open original</a>
+              {sharingAvailable && (
+                <button
+                  type="button"
+                  disabled={!isOnline || shareBusy !== null}
+                  aria-describedby={shareFeedback ? "scan-share-status" : undefined}
+                  title={isOnline ? "Share the optimized scan image" : "Scan sharing requires an internet connection"}
+                  onClick={() => { void shareCurrentScan(); }}
+                >{shareBusy === "preparing" ? "Preparing…" : shareBusy === "sharing" ? "Sharing…" : "Share"}</button>
+              )}
               <button type="button" onClick={() => { void enterImageOnly(); }} title="Hide controls and use device fullscreen when available">Image only</button>
             </div>
+            {shareFeedback && (
+              <p
+                className={`scan-share-status${shareFeedback.isError ? " scan-share-error" : ""}`}
+                id="scan-share-status"
+                role={shareFeedback.isError ? "alert" : "status"}
+              >{shareFeedback.message}</p>
+            )}
           </div>
         )}
 
         <div
           className="scan-viewer-stage"
           ref={stageRef}
+          aria-busy={!loadFailed && naturalSize.width === 0}
           onPointerDown={pointerDown}
           onPointerMove={pointerMove}
           onPointerUp={pointerEnd}
           onPointerCancel={pointerEnd}
           onLostPointerCapture={pointerEnd}
-          onWheel={wheel}
         >
           {loadFailed ? (
             <div className="scan-load-error" role="alert">
@@ -347,21 +469,34 @@ export function ScanViewer({
               <a href={originalMediaUrl} target="_blank" rel="noreferrer">Open the original file</a>
             </div>
           ) : (
-            <img
-              src={mediaUrl}
-              alt={scanDisplayName(currentScan)}
-              draggable="false"
-              style={{
-                width: fittedSize.width,
-                height: fittedSize.height,
-                transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.zoom})`,
-              }}
-              onLoad={(event) => setNaturalSize({
-                width: event.currentTarget.naturalWidth,
-                height: event.currentTarget.naturalHeight,
-              })}
-              onError={() => setLoadFailed(true)}
-            />
+            <>
+              {naturalSize.width === 0 && (
+                <div className="scan-loading" role="status">
+                  <span aria-hidden="true" />
+                  Loading scan…
+                </div>
+              )}
+              <img
+                src={mediaUrl}
+                alt={scanDisplayName(currentScan)}
+                draggable="false"
+                fetchPriority="high"
+                loading="eager"
+                style={{
+                  width: fittedSize.width,
+                  height: fittedSize.height,
+                  transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.zoom})`,
+                }}
+                onLoad={(event) => {
+                  fitNewImageRef.current = true;
+                  setNaturalSize({
+                    width: event.currentTarget.naturalWidth,
+                    height: event.currentTarget.naturalHeight,
+                  });
+                }}
+                onError={() => setLoadFailed(true)}
+              />
+            </>
           )}
         </div>
 

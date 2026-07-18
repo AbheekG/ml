@@ -72,8 +72,9 @@ in [audio-processing.md](audio-processing.md). It prepares and verifies playback
 media before the Worker independently verifies stored bytes and atomically marks
 the Recording ready. Play never starts conversion.
 
-The Worker half of that control plane is implemented locally. Processor claim
-authentication is separate from end-user Access roles. One claim creates a
+The Worker half of that control plane is implemented and deployed in protected
+staging. Processor claim authentication is separate from end-user Access roles.
+One claim creates a
 one-hour opaque lease and four HMAC-bound operation capabilities, so changing a
 source URL into a derivative/result URL fails authentication. Only the lease
 hash is retained in D1. Derivative upload uses a deterministic attempt-specific
