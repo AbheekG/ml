@@ -41,6 +41,7 @@ cutover work:
 - exact and phonetic title/alias matches outrank literal metadata and lyric-only matches; bounded Indic-roman normalization, typos, later title words, and locally joined/split words work entirely from the offline cache;
 - song detail displays metadata, typed lyrics, scan records, and recording records;
 - the complete catalog, metadata, and typed lyrics are atomically cached in IndexedDB, while the production app shell and hashed assets are precached by a service worker;
+- the protected manifest request now explicitly includes the Cloudflare Access session credentials required for Chrome to evaluate the authenticated PWA; the Android standalone-install retest is pending;
 - private scans open in an in-app zoom/pan viewer and recordings stream with seeking; starting one Recording pauses any other Recording playing on that Song without changing its verified stored source;
 - the Scan viewer supports clockwise quarter-turn correction: every reader may rotate locally, online editors persist one revision-guarded orientation value, and browser display/share transforms leave both retained originals and readability derivatives unchanged;
 - capable online browsers can share the authenticated optimized JPEG for an individual Scan directly from its Song row or from the viewer through the native system share sheet; original Scan bytes, public URLs, and persistent media caches are not involved, and the owner reports that the deployed behavior works well;
@@ -95,8 +96,8 @@ The private staging catalog is loaded into an APAC-primary D1 database for the a
 Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
 
 Current protected-staging deployment: Worker
-`97a66e8f-0209-4ce6-920c-12165d61a451`, client/service-worker build
-`51d4d6e88633`. Production resources and DNS/cutover remain separately
+`c06947b2-95ce-43e8-82b0-d9411746c103`, client/service-worker build
+`193893b3833a`. Production resources and DNS/cutover remain separately
 approval-gated.
 
 Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker also validates Access JWT signatures, issuer, and audience on every API request. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.
