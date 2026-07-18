@@ -72,11 +72,12 @@ revocation. After the wait, the owner reopened protected staging without another
 identity-provider prompt and confirmed normal application access; this is the
 expected longer-global/shorter-application refresh behavior.
 
-The owner accepted deferring a live immediate-dispatch recheck to the next
-genuine Recording upload or replacement. Do not create retained catalog/media
-state solely to exercise WIF. At that next operation, include the immutable
-dispatch attempt and resulting job outcome in the ordinary bounded postflight;
-the enabled Scheduler remains the reliability fallback.
+The deferred live immediate-dispatch recheck is complete. Four genuine Recording
+uploads processed on demand in owner testing; read-only D1 postflight confirmed
+an accepted `upload_finalize` dispatch and first-attempt successful job for each,
+with every Recording ready and no processing error. Do not create retained
+catalog/media state solely to re-exercise WIF. The enabled Scheduler remains the
+reliability fallback.
 
 Cloud Run Jobs always use the second-generation execution environment. Its
 secret volume is root-owned, so each new non-root file mount needs a read smoke;

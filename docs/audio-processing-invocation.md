@@ -275,10 +275,11 @@ version `c2ea5df7-e011-4429-b07f-9f75a691b098`. Protected-staging access passed
 without another identity-provider prompt, consistent with the longer global
 token silently authorizing a fresh application token. There is no non-mutating
 immediate-dispatch smoke endpoint: only successful Recording upload finalization
-or replacement invokes this path. The owner accepted deferring its live recheck
-to the next genuine editor operation rather than creating retained staging data
-only for a test. Keep Scheduler enabled, and inspect the bounded dispatch record
-as part of that operation's normal postflight.
+or replacement invokes this path. Four later genuine upload finalizations
+completed the deferred live recheck. The owner observed that each processed on
+demand; read-only D1 postflight confirmed four accepted `upload_finalize`
+dispatches, four first-attempt successful jobs, and ready Recordings with no
+processing error. Keep Scheduler enabled as the reliability fallback.
 
 ## Aggregate-only observability
 

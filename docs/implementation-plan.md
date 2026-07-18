@@ -104,11 +104,12 @@ that duration. With owner approval, staging now has an explicit one-month global
 duration and a 24-hour application duration; the human policy still inherits the
 application, and existing application tokens were revoked. Protected-staging
 access then passed without a new identity-provider prompt. Protected-staging
-version `c2ea5df7-e011-4429-b07f-9f75a691b098` contains the hardening. Because
-only a successful Recording finalization or replacement exercises immediate
-dispatch, the owner accepted checking it during the next genuine operation
-rather than creating retained staging state only for a test. Do not weaken or
-remove the Scheduler fallback. Separately, the owner
+version `c2ea5df7-e011-4429-b07f-9f75a691b098` contains the hardening. Four
+later genuine Recording upload finalizations each exercised immediate dispatch:
+the owner observed on-demand processing, and read-only postflight found an
+accepted `upload_finalize` dispatch plus a first-attempt successful job for all
+four. This closes the deferred live recheck. Do not weaken or remove the
+Scheduler fallback. Separately, the owner
 reviewed all six recoverable historical pre-intent Recording upload
 sessions, confirmed they were test uploads, and discarded them recoverably in
 protected staging without deleting the six retained private objects. The two
@@ -207,15 +208,12 @@ accepted. No new implementation task is selected. Continue in this order:
    then wait for the owner to select the next task;
 2. implement approved optional improvements as separate small commits with the
    existing automated and protected-staging device gates;
-3. at the next genuine Recording finalization/replacement, verify its bounded
-   immediate-dispatch record as ordinary postflight without creating retained
-   media solely for a test;
-4. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
+3. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
    any deletion executor and every physical delete remain separately designed
    and owner-approved;
-5. investigate the two issue-marked Scan mappings, deferred unmatched cases, or
+4. investigate the two issue-marked Scan mappings, deferred unmatched cases, or
    reserved manual uploads only when prioritized; and
-6. begin production readiness and cutover only after reconciliation, backup,
+5. begin production readiness and cutover only after reconciliation, backup,
    quota, broader device-coverage, and explicit owner-approval gates pass.
 
 This is a delivery order rather than a schema dependency. The accepted search and filter work remains independently testable while media workflows are added.
