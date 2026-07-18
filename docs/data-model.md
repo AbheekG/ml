@@ -28,7 +28,10 @@ Scan ── optional Notebook
 - `lyric_texts` stores required content, stable automatic order, audit/Trash fields, and a hidden `user`/`legacy_import` origin. Existing combined workbook text remains intact; editors do not classify language, script, representation, or label.
 - `scans` references exactly one private media object and exposes optional Notebook/Page metadata plus a constrained `0`–`3` clockwise display orientation. Imported Source, Version, Date, ScanText, and Notes remain preserved in hidden `legacy_*` columns but are not part of the initial editor model.
 - `recordings` stores one required, normalized-unique per-Song description, optional recorded date and contributors, processing state, an original media object, and an optional playback object. Imported Version and the four populated Notes are combined losslessly for display and also remain in hidden `legacy_*` columns.
-- `media_objects` stores private R2 object metadata and recovery state; binary data does not enter D1.
+- `media_objects` stores private R2 object metadata and recovery state; binary
+  data does not enter D1. `original_filename` is retained as provenance and
+  authenticated media/recovery metadata, not as the ordinary human-facing label
+  for a Scan or Recording.
 - `audio_derivatives` immutably binds each playback-audio media object to its original-audio source, conversion-policy ID, and the verified source/derivative hashes and byte sizes.
 - `recording_upload_sessions`, `recording_upload_intents`, `recording_upload_parts`, and `recording_upload_credits` durably retain an editor-owned multipart request, its immutable create/replace target, only the R2-returned part ETags, intended metadata, revisions, and terminal outcome. Finalization rechecks duplicates and atomically creates or updates the exact Recording, preserves replacement history, copies credits, and creates the policy-bound pending job. Private object keys, multipart IDs, ETags, hashes, and generated catalog/job IDs are never browser inputs.
 - `audio_processing_jobs` durably binds a processing Recording to the exact original media ID/hash/size and conversion policy. Attempt counts, expiring leases, results, and privacy-safe failure codes follow a database-enforced retry state machine. Uniqueness is not enforced per recording (removed in migration `0010` to allow historical jobs from audio replacements). Migration `0007` rejects already-expired running leases and rejects expired-lease recovery or editor retry unless the exact active source Recording is back in `processing` state. Migration `0008` permits only one global `running` row, rejects recovery before lease expiry, and rejects automatic recovery after the third expired attempt so the Worker must checkpoint a durable `processing_lease_expired` failure before an editor can retry.
@@ -89,3 +92,8 @@ Scan ── optional Notebook
   hash the retained source bytes, preserve historical duplicates, and generate
   private derivatives without modifying any legacy input.
 - Files present on disk but absent from the workbook are quarantined for review and are not silently uploaded or deleted.
+
+The filename storage-versus-presentation boundary is recorded in
+[media-filename-presentation.md](media-filename-presentation.md). Removing
+filename text from ordinary views is a deferred presentation change and does not
+authorize a schema migration or provenance deletion.

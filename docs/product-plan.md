@@ -131,6 +131,9 @@ The first migration stores each existing workbook `LyricsTyped` block intact and
 
 - thumbnail grid or compact list;
 - show optional notebook/page where present and otherwise treat the Scan as external;
+- identify Scans to readers by Notebook/Page or the generic `Scanned page` label;
+  retain original filenames privately as provenance rather than showing opaque
+  AppSheet/generated or generic camera basenames as catalog metadata;
 - group notebook scans naturally by notebook and page when useful, with stable creation order as fallback;
 - full-screen viewer with zoom and next/previous navigation;
 - clockwise quarter-turn viewing for every reader, with online editor persistence and current-view sharing while retained media stays unchanged;
@@ -140,6 +143,9 @@ The first migration stores each existing workbook `LyricsTyped` block intact and
 ### Recordings
 
 - one card per recording with its required description, optional date, and contributors where available;
+- do not append the source audio filename in ordinary presentation; the required
+  description is the Recording's human-facing identity and the filename remains
+  private provenance/upload-recovery metadata;
 - reliable inline play/pause/seek;
 - only one recording plays at a time;
 - prepare any required playback derivative once before the Recording becomes ready; pressing Play never starts transcoding;
@@ -149,6 +155,9 @@ The first migration stores each existing workbook `LyricsTyped` block intact and
 - editor actions to add, edit metadata, replace audio, move to Trash, or restore.
 
 Mixed legacy formats remain preserved. Import or post-upload processing creates and verifies a browser-compatible playback derivative once when needed, stores it privately, and never discards the original. Playback only streams an already prepared source.
+
+The approved filename-presentation boundary and its deliberately deferred
+implementation are defined in [media-filename-presentation.md](media-filename-presentation.md).
 
 ## Editing workflow
 

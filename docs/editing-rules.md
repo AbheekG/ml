@@ -75,6 +75,13 @@ Rules should be enforced at every relevant layer:
 
 ### Media upload and playback
 
+- Treat an original upload filename as private provenance, not a reader-facing
+  label. It may identify a newly selected local file or an editor-owned resumable
+  upload, but ordinary Recording, Scan, viewer, and Trash presentation uses
+  Recording description or Scan Notebook/Page/generic position instead. Retain
+  the basename in storage metadata; do not replace it with an internal ID or
+  erase it through a presentation-only change. See
+  [media-filename-presentation.md](media-filename-presentation.md).
 - Inspect actual file signatures/codecs rather than trusting extensions and calculate a SHA-256 content fingerprint before finalizing an upload.
 - Reject an accidental exact-content duplicate and link to the existing record. When the same media legitimately belongs in another context, reuse the private stored object rather than uploading duplicate bytes.
 - Upload/validation/database finalization is atomic: a failed or incomplete upload cannot create an active orphan record or replace a working file.

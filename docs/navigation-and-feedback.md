@@ -87,9 +87,9 @@ tap without moving the page.
 
 Each Song-row Scan action pairs its text with an eye, connected-share, or pencil
 symbol on wider layouts. Below 37 rem the visible text is removed to preserve the
-media title and filename, while the 44-pixel icon button retains an explicit
-accessible name and disabled state. View and Share remain reader actions; Edit
-remains online and editor-only.
+semantic Scan label and metadata, while the 44-pixel icon button retains an
+explicit accessible name and disabled state. View and Share remain reader
+actions; Edit remains online and editor-only.
 
 The deployed follow-up generalizes that same pattern to repeated compact actions:
 Edit Song; typed-lyric Copy, Share, and Edit; and Recording Edit. Recording retry

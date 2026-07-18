@@ -213,18 +213,23 @@ against the real staging D1 engine.
 The core read/edit/recovery/search/sharing flows and safe Scan/Recording create/
 replace pipelines now work in staging. Scan orientation is deployed and
 accepted. The credentialed-manifest deployment is also accepted on Android
-Chrome. No new implementation task is selected. Continue in this order:
+Chrome. The owner is currently prioritizing private legacy file reconciliation;
+no app implementation is selected during that work. Continue in this order:
 
-1. begin the next session with a read-only workspace and deployment orientation,
-   then wait for the owner to select the next task;
-2. implement approved optional improvements as separate small commits with the
-   existing automated and protected-staging device gates;
-3. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
+1. continue only the owner-selected private legacy Lyrics/Scan/Recording review,
+   preserving its no-import/no-move boundary until separately authorized;
+2. after that reconciliation is complete, implement the approved removal of
+   source filenames from ordinary media presentation while retaining private
+   provenance and recovery metadata, as defined in
+   [media-filename-presentation.md](media-filename-presentation.md);
+3. implement any other approved optional improvements as separate small commits
+   with the existing automated and protected-staging device gates;
+4. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
    any deletion executor and every physical delete remain separately designed
    and owner-approved;
-4. investigate the two issue-marked Scan mappings, deferred unmatched cases, or
+5. investigate the two issue-marked Scan mappings, deferred unmatched cases, or
    reserved manual uploads only when prioritized; and
-5. begin production readiness and cutover only after reconciliation, backup,
+6. begin production readiness and cutover only after reconciliation, backup,
    quota, broader device-coverage, and explicit owner-approval gates pass.
 
 This is a delivery order rather than a schema dependency. The accepted search and filter work remains independently testable while media workflows are added.

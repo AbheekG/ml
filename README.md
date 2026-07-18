@@ -58,6 +58,14 @@ implemented, deployed, and accepted. No further implementation slice is implied
 by this checkpoint; optional UX ideas and production-readiness gates remain
 separately prioritized work.
 
+The owner has approved one deferred media-presentation refinement for after the
+current private legacy Lyrics/Scan/Recording reconciliation: ordinary Song,
+Scan-viewer, and Trash views should stop displaying original upload filenames,
+which are frequently opaque AppSheet-generated or generic device basenames.
+Filenames remain private provenance and upload/recovery metadata; no schema or
+media deletion is implied. See
+[the media filename presentation decision](docs/media-filename-presentation.md).
+
 - a reconciled forward migration enforces normalized active Song titles, statuses, controlled lookup keys, simplified typed lyrics, Recording descriptions, and Trash safety;
 - all imported row and media-reference counts remain unchanged, with legacy Scan/Recording metadata retained privately;
 - authenticated identities must map to an active `app_users` record, with reusable viewer/editor/admin authorization guards;
