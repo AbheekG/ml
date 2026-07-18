@@ -90,7 +90,7 @@ in [the navigation and feedback policy](docs/navigation-and-feedback.md).
 The logout/cache guarantees and remaining real-browser gate are recorded in
 [the private local-data policy](docs/logout-and-local-data.md).
 
-The private staging catalog is loaded into an APAC-primary D1 database for the application's users in India. After the retained synthetic acceptance records, it has 456 Songs, 499 Scans, 830 Recordings, and 1,974 media rows; originals/derivatives remain in private APAC storage and are delivered only through authenticated API routes. Unassigned/unlinked legacy files remain local for later identification.
+The private staging catalog is loaded into an APAC-primary D1 database for the application's users in India. After the retained synthetic acceptance records and four later genuine Recording uploads, it has 456 Songs, 499 Scans, 834 Recordings (833 active), and 1,978 media rows; originals/derivatives remain in private APAC storage and are delivered only through authenticated API routes. Unassigned/unlinked legacy files remain local for later identification.
 
 Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
 
