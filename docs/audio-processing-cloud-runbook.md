@@ -577,15 +577,17 @@ npm run ops:processor-snapshot -- --alert-lookback-hours 6
 Current severity policy in this command is:
 
 - `critical`: foreign-key errors or non-aggregate stdout payload shapes;
-- `warning`: pending/running D1 jobs, a stale direct-dispatch attempt,
-  pre-intent upload sessions, missing Scan hashes/derivatives, Scan maintenance
+- `warning`: pending/running D1 jobs, a stale direct-dispatch attempt, active
+  upload sessions missing their required intent, missing Scan hashes/derivatives, Scan maintenance
   failures/expired leases, failed processor outcomes, or non-zero container exit
   lines inside the configured lookback window;
 - `info`: Scheduler paused (unexpected while the reliability fallback is meant
   to be active, but not itself a data-integrity failure).
 
-Historical failures/non-zero exits outside the lookback window are emitted as
-`info` (`*_historical`) to preserve context without inflating active warnings.
+Historical failures/non-zero exits outside the lookback window and terminal
+pre-intent upload sessions are emitted as `info` (`*_historical`) to preserve
+context without inflating active warnings. The D1 snapshot retains both total
+and active unclassified-upload counts; it never changes or deletes those rows.
 
 The command only reads Cloud Run, Scheduler, Cloud Logging, and D1 aggregate
 state. It must not be used as authorization to resume Scheduler, execute Jobs,
