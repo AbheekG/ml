@@ -64,11 +64,12 @@ Rules should be enforced at every relevant layer:
 - When the editor supplies no description, generate the next available stable fallback such as `Recording 1`, `Recording 2`, and so on. Descriptions must be normalized-unique within one Song so every Recording remains distinguishable.
 - Trim surrounding whitespace but do not title-case or otherwise rewrite description content. Include the description in later search behavior and show it above the audio player.
 - Preserve every imported Version exactly. For the four imported Recording rows with separate Notes, append the Note to that Recording's description during the editing-schema migration without discarding either value.
-- Recorded date remains optional, cannot be later than the editor's local current
-  calendar date, and is hidden when absent. Server validation accepts a calendar
-  date that is currently today in any real-world timezone so editors east of UTC
-  are not rejected after local midnight; the device UI still prevents choosing
-  its own tomorrow.
+- Recorded date remains optional and is hidden when absent. The shared library
+  calendar is `Asia/Kolkata`: browser and server both use the current date in
+  India as the latest allowed date. The field keeps its short normal label; only
+  while the device and India have different dates does it show a compact India-
+  date note. Stored values remain timezone-free calendar dates and are not
+  converted or rewritten for viewers elsewhere.
 - Recording contributors remain optional and hidden when absent. The original audio is retained, with a compatible playback derivative generated when required.
 
 ### Media upload and playback

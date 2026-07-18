@@ -5,12 +5,18 @@ const description = z.string()
   .max(10_000, "Recording description is too long")
   .refine((value) => value.trim().length > 0, "Recording description must not be blank");
 
-const MAX_TIMEZONE_OFFSET_HOURS = 14;
+const INDIA_TIME_ZONE = "Asia/Kolkata";
 
-export function latestCurrentCalendarDate(now: Date = new Date()): string {
-  return new Date(now.valueOf() + (MAX_TIMEZONE_OFFSET_HOURS * 60 * 60 * 1000))
-    .toISOString()
-    .slice(0, 10);
+export function currentIndiaCalendarDate(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: INDIA_TIME_ZONE,
+  }).formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
 function recordedOn(maximumDate: string) {
@@ -98,7 +104,7 @@ export function parseRecordingUpdate(
   value: unknown,
   now: Date = new Date(),
 ): RecordingParseResult<RecordingUpdateInput> {
-  const result = updateRecordingSchema(latestCurrentCalendarDate(now)).safeParse(value);
+  const result = updateRecordingSchema(currentIndiaCalendarDate(now)).safeParse(value);
   if (!result.success) return { success: false, fields: fieldsFromError(result.error) };
   const trimmedDescription = result.data.description.trim();
   return {
@@ -117,7 +123,7 @@ export function parseRecordingCreateMetadata(
   value: unknown,
   now: Date = new Date(),
 ): RecordingParseResult<RecordingCreateMetadataInput> {
-  const result = createRecordingMetadataSchema(latestCurrentCalendarDate(now)).safeParse(value);
+  const result = createRecordingMetadataSchema(currentIndiaCalendarDate(now)).safeParse(value);
   if (!result.success) return { success: false, fields: fieldsFromError(result.error) };
   const description = result.data.description?.trim() || null;
   return {

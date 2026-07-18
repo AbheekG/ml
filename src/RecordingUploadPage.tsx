@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { CreditRows } from "./CreditRows";
+import { RecordingDateField } from "./RecordingDateField";
 import { FeedbackMessage, useRevealFeedback } from "./FeedbackMessage";
 import {
   loadRecordingEditorOptions,
@@ -30,7 +31,6 @@ import {
   recordingUploadProgressLabel,
 } from "./recording-upload-view";
 import { editorValuesChanged, shouldRefreshEditor, useUnsavedChanges } from "./UnsavedChanges";
-import { localIsoDate } from "./local-date";
 
 export function RecordingUploadPage({
   mode = "create",
@@ -527,11 +527,12 @@ export function RecordingUploadPage({
               <small>Optional. Leave empty to use the first available “Recording N” name. Capitalization is preserved.</small>
               {fieldErrors.description?.map((message) => <em key={message}>{message}</em>)}
             </label>
-            <label className="form-field compact-field">
-              <span>Recorded date</span>
-              <input disabled={formLocked} type="date" max={localIsoDate()} value={recordedOn} onChange={(event) => setRecordedOn(event.target.value)} />
-              {fieldErrors.recordedOn?.map((message) => <em key={message}>{message}</em>)}
-            </label>
+            <RecordingDateField
+              disabled={formLocked}
+              value={recordedOn}
+              onChange={setRecordedOn}
+              errors={fieldErrors.recordedOn}
+            />
           </section>
 
           <fieldset className="form-card choice-group" disabled={formLocked}>

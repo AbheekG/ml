@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  latestCurrentCalendarDate,
+  currentIndiaCalendarDate,
   parseRecordingRevision,
   parseRecordingUpdate,
 } from "./recording-writes";
@@ -51,21 +51,32 @@ describe("Recording validation", () => {
     })).toMatchObject({ success: false, fields: { creditPersonIds: ["Duplicate contributors are not allowed"] } });
   });
 
-  it("accepts a local current date after UTC midnight boundaries but rejects the next global day", () => {
-    const now = new Date("2026-07-18T12:30:00.000Z");
-    expect(latestCurrentCalendarDate(now)).toBe("2026-07-19");
+  it("uses the India calendar boundary for current and future dates", () => {
+    const beforeIndiaMidnight = new Date("2026-07-18T18:29:59.000Z");
+    const afterIndiaMidnight = new Date("2026-07-18T18:30:00.000Z");
+    expect(currentIndiaCalendarDate(beforeIndiaMidnight)).toBe("2026-07-18");
+    expect(currentIndiaCalendarDate(afterIndiaMidnight)).toBe("2026-07-19");
     expect(parseRecordingUpdate({
       description: "Take",
       recordedOn: "2026-07-19",
       creditPersonIds: [],
       revision: 1,
-    }, now).success).toBe(true);
+    }, beforeIndiaMidnight)).toMatchObject({
+      success: false,
+      fields: { recordedOn: ["Recorded date cannot be in the future"] },
+    });
+    expect(parseRecordingUpdate({
+      description: "Take",
+      recordedOn: "2026-07-19",
+      creditPersonIds: [],
+      revision: 1,
+    }, afterIndiaMidnight).success).toBe(true);
     expect(parseRecordingUpdate({
       description: "Take",
       recordedOn: "2026-07-20",
       creditPersonIds: [],
       revision: 1,
-    }, now)).toMatchObject({
+    }, afterIndiaMidnight)).toMatchObject({
       success: false,
       fields: { recordedOn: ["Recorded date cannot be in the future"] },
     });

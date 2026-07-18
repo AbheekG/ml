@@ -4,6 +4,7 @@ import { ScanViewer } from "./ScanViewer";
 import { ActionContent } from "./ActionContent";
 import { CatalogControls } from "./CatalogControls";
 import { RecordingUploadPage } from "./RecordingUploadPage";
+import { RecordingDateField } from "./RecordingDateField";
 import { CreditRows } from "./CreditRows";
 import { FeedbackMessage, useRevealFeedback } from "./FeedbackMessage";
 import { LookupTabs, lookupPanelId, lookupTabId } from "./LookupTabs";
@@ -69,7 +70,6 @@ import {
   type CatalogViewState,
 } from "./catalog-view";
 import { findSimilarLookupItems } from "./lookup-similarity";
-import { localIsoDate } from "./local-date";
 import { shouldOfferDirectCameraCapture } from "./device-capabilities";
 import { scanDisplayName } from "./scan-viewer";
 import {
@@ -1451,11 +1451,11 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
             <small>Use this for details such as an old verse, alternate tune, incomplete take, or accompaniment. Capitalization is preserved.</small>
             {fieldErrors.description?.map((message) => <em key={message}>{message}</em>)}
           </label>
-          <label className="form-field compact-field">
-            <span>Recorded date</span>
-            <input type="date" max={localIsoDate()} value={recordedOn} onChange={(event) => setRecordedOn(event.target.value)} />
-            {fieldErrors.recordedOn?.map((message) => <em key={message}>{message}</em>)}
-          </label>
+          <RecordingDateField
+            value={recordedOn}
+            onChange={setRecordedOn}
+            errors={fieldErrors.recordedOn}
+          />
         </section>
         <fieldset className="form-card choice-group">
           <legend>Vocals</legend>
