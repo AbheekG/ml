@@ -1,4 +1,4 @@
-import type { SongScan } from "./catalog";
+import type { ScanRotationQuarterTurns, SongScan } from "./catalog";
 
 export const MIN_SCAN_ZOOM = 1;
 export const MAX_SCAN_ZOOM = 3;
@@ -13,6 +13,39 @@ export type ScanWheelInput = {
   deltaY: number;
   metaKey: boolean;
 };
+
+export function nextScanRotation(
+  current: ScanRotationQuarterTurns,
+): ScanRotationQuarterTurns {
+  return ((current + 1) % 4) as ScanRotationQuarterTurns;
+}
+
+export function rotatedScanSize(
+  size: ScanSize,
+  rotationQuarterTurns: ScanRotationQuarterTurns,
+): ScanSize {
+  return rotationQuarterTurns % 2 === 0
+    ? size
+    : { width: size.height, height: size.width };
+}
+
+export function scanImageTransform(
+  view: ScanView,
+  fitted: ScanSize,
+  rotationQuarterTurns: ScanRotationQuarterTurns,
+): string {
+  const base = `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.zoom})`;
+  switch (rotationQuarterTurns) {
+    case 1:
+      return `${base} translateX(${fitted.width}px) rotate(90deg)`;
+    case 2:
+      return `${base} translate(${fitted.width}px, ${fitted.height}px) rotate(180deg)`;
+    case 3:
+      return `${base} translateY(${fitted.height}px) rotate(270deg)`;
+    default:
+      return base;
+  }
+}
 
 export function clampScanZoom(value: number): number {
   return Math.min(MAX_SCAN_ZOOM, Math.max(MIN_SCAN_ZOOM, value));

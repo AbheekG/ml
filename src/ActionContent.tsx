@@ -2,8 +2,11 @@ export type ActionIconKind =
   | "add"
   | "copy"
   | "edit"
+  | "fullscreen"
+  | "original"
   | "replace"
   | "retry"
+  | "rotate"
   | "share"
   | "view";
 
@@ -54,6 +57,24 @@ export function ActionContent({
           </>
         )}
         {kind === "add" && <path d="M12 5v14M5 12h14" />}
+        {kind === "rotate" && (
+          <>
+            <path d="M20 7v5h-5" />
+            <path d="M19 12a7 7 0 1 1-2.1-5" />
+          </>
+        )}
+        {kind === "fullscreen" && (
+          <>
+            <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5" />
+          </>
+        )}
+        {kind === "original" && (
+          <>
+            <rect x="4" y="4" width="16" height="16" rx="2" />
+            <circle cx="9" cy="9" r="1.5" />
+            <path d="m5 17 4-4 3 3 2-2 5 5" />
+          </>
+        )}
         {kind === "retry" && (
           <>
             <path d="M20 7v5h-5" />

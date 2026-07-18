@@ -33,6 +33,8 @@ export type Credit = {
   role: string;
 };
 
+export type ScanRotationQuarterTurns = 0 | 1 | 2 | 3;
+
 export type SongScan = {
   id: string;
   mediaId: string;
@@ -40,6 +42,8 @@ export type SongScan = {
   notebookName: string | null;
   pageLabel: string | null;
   revision: number;
+  rotationQuarterTurns: ScanRotationQuarterTurns;
+  hasReadabilityDerivative: boolean;
   filename: string;
 };
 
@@ -638,6 +642,21 @@ export async function updateScan(
       body: JSON.stringify(payload),
     },
   );
+  return response.scan;
+}
+
+export async function updateScanOrientation(
+  songId: string,
+  scanId: string,
+  payload: { rotationQuarterTurns: ScanRotationQuarterTurns; revision: number },
+): Promise<{ id: string; revision: number; rotationQuarterTurns: ScanRotationQuarterTurns }> {
+  const response = await apiJson<{
+    scan: { id: string; revision: number; rotationQuarterTurns: ScanRotationQuarterTurns };
+  }>(`/api/songs/${encodeURIComponent(songId)}/scans/${encodeURIComponent(scanId)}/orientation`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
   return response.scan;
 }
 

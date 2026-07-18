@@ -56,6 +56,7 @@ Rules should be enforced at every relevant layer:
 - Page is optional, appears only when a Notebook is selected, and is stored as normalized short text rather than a number so values such as `12A`, `cover`, or Roman numerals remain possible.
 - Do not expose Scan Version, captured Date, extracted ScanText, or Scan Notes in the initial editor. Creation/audit time is automatic, OCR can be added later if useful, and only Song-level Notes are retained for now.
 - Display notebook scans in natural Notebook/Page order when those values exist, followed by stable creation order. Empty optional Scan metadata and empty Scan sections remain hidden.
+- Every reader may rotate a Scan clockwise in quarter turns for the current viewer session. Only an online editor/admin persists the absolute `0`–`3` display orientation; this is revision-guarded presentation metadata and does not modify the original or stored readability derivative. Replacing the Scan file resets the correction to zero. Current-view sharing applies the effective saved-plus-local orientation to the complete page in the browser. See [scan-orientation.md](scan-orientation.md).
 
 ### Recordings
 

@@ -876,6 +876,111 @@ describe("Worker API", () => {
     await expect(response.json()).resolves.toEqual({ scan: { id: "scan-1", revision: 3 } });
   });
 
+  it("allows only editors to persist an absolute Scan orientation", async () => {
+    const viewerResponse = await app.request(
+      "http://local.test/api/songs/song-1/scans/scan-1/orientation",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rotationQuarterTurns: 1, revision: 2 }),
+      },
+      localBindings(undefined, "viewer"),
+    );
+    expect(viewerResponse.status).toBe(403);
+    await expect(viewerResponse.json()).resolves.toEqual({
+      error: "insufficient_role",
+      requiredRole: "editor",
+    });
+
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    let batch: FakeStatement[] = [];
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => {
+        batch = statements;
+        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+
+    const editorResponse = await app.request(
+      "http://local.test/api/songs/song-1/scans/scan-1/orientation",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rotationQuarterTurns: 3, revision: 2 }),
+      },
+      localBindings(database, "editor"),
+    );
+
+    expect(editorResponse.status).toBe(200);
+    expect(batch[0].query).toContain("SET rotation_quarter_turns = ?");
+    expect(batch[0].values).toEqual(expect.arrayContaining([3, "scan-1", "song-1", 2]));
+    expect(batch[1].query).toContain("UPDATE songs");
+    await expect(editorResponse.json()).resolves.toEqual({
+      scan: { id: "scan-1", revision: 3, rotationQuarterTurns: 3 },
+    });
+  });
+
+  it("rejects invalid or stale Scan orientation updates", async () => {
+    const invalidResponse = await app.request(
+      "http://local.test/api/songs/song-1/scans/scan-1/orientation",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rotationQuarterTurns: 5, revision: 2 }),
+      },
+      localBindings(),
+    );
+    expect(invalidResponse.status).toBe(400);
+    await expect(invalidResponse.json()).resolves.toMatchObject({
+      error: "invalid_scan_orientation",
+    });
+
+    const database = {
+      prepare: (query: string) => ({
+        bind: () => ({
+          first: async () => query.includes("SELECT\n      scans.revision")
+            ? {
+                revision: 4,
+                rotationQuarterTurns: 2,
+                trashedAt: null,
+                songTrashedAt: null,
+                mediaState: "active",
+              }
+            : null,
+        }),
+      }),
+      batch: async () => [
+        { meta: { changes: 0 } },
+        { meta: { changes: 0 } },
+      ],
+    } as unknown as D1Database;
+    const staleResponse = await app.request(
+      "http://local.test/api/songs/song-1/scans/scan-1/orientation",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rotationQuarterTurns: 1, revision: 2 }),
+      },
+      localBindings(database, "editor"),
+    );
+    expect(staleResponse.status).toBe(409);
+    await expect(staleResponse.json()).resolves.toEqual({
+      error: "scan_edit_conflict",
+      currentRevision: 4,
+    });
+  });
+
   it("moves a Scan and its private media object to Trash without deleting either", async () => {
     type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
     let batch: FakeStatement[] = [];

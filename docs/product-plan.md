@@ -133,6 +133,7 @@ The first migration stores each existing workbook `LyricsTyped` block intact and
 - show optional notebook/page where present and otherwise treat the Scan as external;
 - group notebook scans naturally by notebook and page when useful, with stable creation order as fallback;
 - full-screen viewer with zoom and next/previous navigation;
+- clockwise quarter-turn viewing for every reader, with online editor persistence and current-view sharing while retained media stays unchanged;
 - clear online-only message when offline;
 - editor actions to add, edit metadata, replace a file, move to Trash, or restore.
 

@@ -42,6 +42,7 @@ cutover work:
 - song detail displays metadata, typed lyrics, scan records, and recording records;
 - the complete catalog, metadata, and typed lyrics are atomically cached in IndexedDB, while the production app shell and hashed assets are precached by a service worker;
 - private scans open in an in-app zoom/pan viewer and recordings stream with seeking; starting one Recording pauses any other Recording playing on that Song without changing its verified stored source;
+- the Scan viewer supports clockwise quarter-turn correction: every reader may rotate locally, online editors persist one revision-guarded orientation value, and browser display/share transforms leave both retained originals and readability derivatives unchanged;
 - capable online browsers can share the authenticated optimized JPEG for an individual Scan directly from its Song row or from the viewer through the native system share sheet; original Scan bytes, public URLs, and persistent media caches are not involved, and the owner reports that the deployed behavior works well;
 - private Recording playback sharing is deployed with a Recording-scoped ready-MP3 route, a 50 MiB safety bound, generic filenames, and no client-selected storage identifier or public URL; the owner accepted the principal device behavior after checking correct-row sharing, quiet cancellation, offline disabling, and multiple Recordings on one Song, while the deliberately oversized and slow-download second-tap paths remain automatically covered rather than manually forced;
 - repeated Song, typed-lyric, Recording, and Scan actions use accessible symbols with text on wider layouts and 44-pixel icon-only touch targets where compactness helps on narrow layouts; Add, Replace, and higher-consequence actions retain descriptive text;
@@ -78,6 +79,8 @@ separately prioritized work.
 
 The exact Scan conversion, provenance, repair, and visual-acceptance rules are
 recorded in [the Scan integrity/readability policy](docs/scan-readability.md).
+The browser-only display correction and current-view sharing boundary is
+recorded in [the Scan orientation policy](docs/scan-orientation.md).
 The playback-source selection, size bound, privacy contract, and device gates for
 Recording sharing are recorded in [the Recording sharing policy](docs/recording-sharing.md).
 The browser-connectivity boundary and online-only media behavior are recorded in

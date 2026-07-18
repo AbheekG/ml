@@ -52,6 +52,7 @@ import {
 } from "./scan-readability";
 import {
   parseScanCreate,
+  parseScanOrientation,
   parseScanRevision,
   parseScanUpdate,
   type ScanUpdateInput,
@@ -206,6 +207,7 @@ type LyricStateRow = {
 
 type ScanStateRow = {
   revision: number;
+  rotationQuarterTurns: 0 | 1 | 2 | 3;
   trashedAt: string | null;
   songTrashedAt: string | null;
   mediaState: "active" | "trashed";
@@ -1129,6 +1131,7 @@ async function loadScanState(
   return database.prepare(`
     SELECT
       scans.revision,
+      scans.rotation_quarter_turns AS rotationQuarterTurns,
       scans.trashed_at AS trashedAt,
       songs.trashed_at AS songTrashedAt,
       media_objects.state AS mediaState
@@ -3956,6 +3959,96 @@ app.put("/api/songs/:songId/scans/:scanId", requireRole("editor"), async (contex
   }
 });
 
+app.put("/api/songs/:songId/scans/:scanId/orientation", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseScanOrientation(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_scan_orientation", fields: parsed.fields }, 400);
+  }
+
+  const songId = context.req.param("songId");
+  const scanId = context.req.param("scanId");
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+  const { revision, rotationQuarterTurns } = parsed.data;
+
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        UPDATE scans
+        SET rotation_quarter_turns = ?,
+            revision = revision + 1,
+            updated_at = ?,
+            updated_by = ?
+        WHERE id = ?
+          AND song_id = ?
+          AND revision = ?
+          AND rotation_quarter_turns <> ?
+          AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM songs
+            WHERE songs.id = scans.song_id AND songs.trashed_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM media_objects
+            WHERE media_objects.id = scans.media_id
+              AND media_objects.kind = 'scan'
+              AND media_objects.state = 'active'
+          )
+      `).bind(
+        rotationQuarterTurns, timestamp, actor,
+        scanId, songId, revision, rotationQuarterTurns,
+      ),
+      context.env.DB.prepare(`
+        UPDATE songs
+        SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM scans
+            WHERE id = ?
+              AND song_id = songs.id
+              AND revision = ?
+              AND rotation_quarter_turns = ?
+              AND updated_at = ?
+              AND updated_by = ?
+          )
+      `).bind(
+        timestamp, actor, songId, scanId, revision + 1,
+        rotationQuarterTurns, timestamp, actor,
+      ),
+    ]);
+
+    if (results[0].meta.changes === 0) {
+      const current = await loadScanState(context.env.DB, songId, scanId);
+      if (!current || current.trashedAt !== null || current.songTrashedAt !== null) {
+        return context.json({ error: "scan_not_found" }, 404);
+      }
+      if (current.mediaState !== "active") {
+        return context.json({ error: "scan_media_unavailable" }, 409);
+      }
+      if (current.revision === revision
+        && current.rotationQuarterTurns === rotationQuarterTurns) {
+        return context.json({
+          scan: { id: scanId, revision, rotationQuarterTurns },
+        });
+      }
+      return context.json({ error: "scan_edit_conflict", currentRevision: current.revision }, 409);
+    }
+
+    return context.json({
+      scan: { id: scanId, revision: revision + 1, rotationQuarterTurns },
+    });
+  } catch (error) {
+    const response = scanWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
 app.put("/api/songs/:songId/recordings/:recordingId", requireRole("editor"), async (context) => {
   let body: unknown;
   try {
@@ -4269,7 +4362,8 @@ app.post("/api/songs/:songId/scans/:scanId/media", requireRole("editor"), async 
       `).bind(historyId, timestamp, actor, scanId, songId, parsed.data.revision),
       context.env.DB.prepare(`
         UPDATE scans
-        SET media_id = ?, revision = revision + 1, updated_at = ?, updated_by = ?
+        SET media_id = ?, rotation_quarter_turns = 0,
+            revision = revision + 1, updated_at = ?, updated_by = ?
         WHERE id = ? AND song_id = ? AND revision = ? AND trashed_at IS NULL
           AND EXISTS (SELECT 1 FROM songs WHERE id = ? AND trashed_at IS NULL)
       `).bind(mediaId, timestamp, actor, scanId, songId, parsed.data.revision, songId),
@@ -5000,9 +5094,14 @@ app.get("/api/songs/:songId", async (context) => {
         notebooks.display_name AS notebookName,
         scans.page_label AS pageLabel,
         scans.revision,
+        scans.rotation_quarter_turns AS rotationQuarterTurns,
+        CASE WHEN scan_readability_derivatives.source_media_id IS NULL THEN 0 ELSE 1 END
+          AS hasReadabilityDerivative,
         media_objects.original_filename AS filename
       FROM scans
       JOIN media_objects ON media_objects.id = scans.media_id
+      LEFT JOIN scan_readability_derivatives
+        ON scan_readability_derivatives.source_media_id = media_objects.id
       LEFT JOIN notebooks ON notebooks.id = scans.notebook_id
       WHERE scans.song_id = ? AND scans.trashed_at IS NULL
       ORDER BY
@@ -5019,6 +5118,8 @@ app.get("/api/songs/:songId", async (context) => {
       notebookName: string | null;
       pageLabel: string | null;
       revision: number;
+      rotationQuarterTurns: 0 | 1 | 2 | 3;
+      hasReadabilityDerivative: number;
       filename: string;
     }>(),
     context.env.DB.prepare(`
@@ -5083,7 +5184,10 @@ app.get("/api/songs/:songId", async (context) => {
       tags: tags.results,
       credits: credits.results,
       lyricTexts: lyricTexts.results,
-      scans: scans.results,
+      scans: scans.results.map((scan) => ({
+        ...scan,
+        hasReadabilityDerivative: scan.hasReadabilityDerivative === 1,
+      })),
       recordings: recordings.results.map((recording) => ({
         ...recording,
         hasPlaybackMedia: recording.hasPlaybackMedia === 1,

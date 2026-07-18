@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   loadOptimizedScanShareFile,
   MAX_OPTIMIZED_SCAN_SHARE_BYTES,
+  prepareVisibleScanShareFile,
+  rotateOptimizedScanShareFile,
   shareOptimizedScanFile,
   supportsOptimizedScanSharing,
 } from "./scan-sharing";
@@ -53,6 +55,69 @@ describe("optimized Scan sharing", () => {
     expect(file.type).toBe("image/jpeg");
     expect(file.lastModified).toBe(0);
     expect(new Uint8Array(await file.arrayBuffer())).toEqual(bytes);
+  });
+
+  it("rotates the complete visible image into a generic JPEG without another fetch", async () => {
+    const operations: Array<[string, ...number[]]> = [];
+    const context = {
+      translate: (x: number, y: number) => operations.push(["translate", x, y]),
+      rotate: (radians: number) => operations.push(["rotate", radians]),
+      drawImage: () => operations.push(["drawImage"]),
+    };
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: () => context,
+      toBlob: (callback: BlobCallback) => callback(new Blob([new Uint8Array([1, 2, 3])], {
+        type: "image/jpeg",
+      })),
+    } as unknown as HTMLCanvasElement;
+    const image = {
+      naturalWidth: 1200,
+      naturalHeight: 900,
+    } as unknown as HTMLImageElement;
+
+    const file = await prepareVisibleScanShareFile(null, image, 1, () => canvas);
+
+    expect(canvas.width).toBe(900);
+    expect(canvas.height).toBe(1200);
+    expect(operations[0]).toEqual(["translate", 900, 0]);
+    expect(operations[1][0]).toBe("rotate");
+    expect(operations[1][1]).toBeCloseTo(Math.PI / 2);
+    expect(operations[2]).toEqual(["drawImage"]);
+    expect(file.name).toBe("scan.jpg");
+    expect(file.type).toBe("image/jpeg");
+    expect(file.size).toBe(3);
+  });
+
+  it("shares zero-turn bytes unchanged and releases decoded rotation resources", async () => {
+    const file = new File([new Uint8Array([1, 2, 3])], "scan.jpg", { type: "image/jpeg" });
+    await expect(rotateOptimizedScanShareFile(file, 0)).resolves.toBe(file);
+
+    let released = false;
+    const image = { naturalWidth: 2, naturalHeight: 3 } as unknown as HTMLImageElement;
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: () => ({
+        translate: () => undefined,
+        rotate: () => undefined,
+        drawImage: () => undefined,
+      }),
+      toBlob: (callback: BlobCallback) => callback(new Blob([new Uint8Array([4])], {
+        type: "image/jpeg",
+      })),
+    } as unknown as HTMLCanvasElement;
+    const rotated = await rotateOptimizedScanShareFile(
+      file,
+      3,
+      async () => ({ image, release: () => { released = true; } }),
+      () => canvas,
+    );
+    expect(rotated.size).toBe(1);
+    expect(canvas.width).toBe(3);
+    expect(canvas.height).toBe(2);
+    expect(released).toBe(true);
   });
 
   it("never substitutes an original or a non-JPEG response", async () => {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseScanCreate, parseScanRevision, parseScanUpdate } from "./scan-writes";
+import {
+  parseScanCreate,
+  parseScanOrientation,
+  parseScanRevision,
+  parseScanUpdate,
+} from "./scan-writes";
 
 describe("Scan validation", () => {
   it("normalizes optional Notebook and Page values", () => {
@@ -40,5 +45,18 @@ describe("Scan validation", () => {
       data: { revision: 2 },
     });
     expect(parseScanRevision({ revision: 0 })).toMatchObject({ success: false });
+  });
+
+  it("accepts only absolute quarter-turn orientation values", () => {
+    expect(parseScanOrientation({ rotationQuarterTurns: 3, revision: 2 })).toEqual({
+      success: true,
+      data: { rotationQuarterTurns: 3, revision: 2 },
+    });
+    expect(parseScanOrientation({ rotationQuarterTurns: 4, revision: 2 }))
+      .toMatchObject({ success: false });
+    expect(parseScanOrientation({ rotationQuarterTurns: 1, revision: 0 }))
+      .toMatchObject({ success: false });
+    expect(parseScanOrientation({ rotationQuarterTurns: 1, revision: 2, extra: true }))
+      .toMatchObject({ success: false });
   });
 });

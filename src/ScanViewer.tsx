@@ -4,13 +4,21 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import type { SongScan } from "./catalog";
+import { ActionContent } from "./ActionContent";
+import {
+  updateScanOrientation,
+  type ScanRotationQuarterTurns,
+  type SongScan,
+} from "./catalog";
 import {
   adjacentScanId,
   clampScanView,
   fitScanSize,
   MAX_SCAN_ZOOM,
   MIN_SCAN_ZOOM,
+  nextScanRotation,
+  rotatedScanSize,
+  scanImageTransform,
   scanViewAfterLayoutChange,
   scanViewAfterWheel,
   scanDisplayName,
@@ -21,8 +29,7 @@ import {
   zoomScanAtPoint,
 } from "./scan-viewer";
 import {
-  isShareAbort,
-  loadOptimizedScanShareFile,
+  prepareVisibleScanShareFile,
   ScanSharingError,
   shareOptimizedScanFile,
   supportsOptimizedScanSharing,
@@ -56,14 +63,24 @@ function activeFullscreenElement(): Element | null {
 }
 
 export function ScanViewer({
+  songId,
   scans,
   initialScanId,
   isOnline,
+  canEdit,
+  onOrientationSaved,
   onClose,
 }: {
+  songId: string;
   scans: SongScan[];
   initialScanId: string;
   isOnline: boolean;
+  canEdit: boolean;
+  onOrientationSaved: (scan: {
+    id: string;
+    revision: number;
+    rotationQuarterTurns: ScanRotationQuarterTurns;
+  }) => void;
   onClose: () => void;
 }) {
   const [currentScanId, setCurrentScanId] = useState(initialScanId);
@@ -72,25 +89,50 @@ export function ScanViewer({
   const [view, setView] = useState<ScanView>({ zoom: MIN_SCAN_ZOOM, x: 0, y: 0 });
   const [loadFailed, setLoadFailed] = useState(false);
   const [isImageOnly, setIsImageOnly] = useState(false);
+  const [rotationOverrides, setRotationOverrides] = useState<Record<string, ScanRotationQuarterTurns>>({});
+  const [orientationSavingScanId, setOrientationSavingScanId] = useState<string | null>(null);
+  const [orientationFeedback, setOrientationFeedback] = useState<{
+    scanId: string;
+    message: string;
+    isError: boolean;
+  } | null>(null);
   const [shareBusy, setShareBusy] = useState<"preparing" | "sharing" | null>(null);
-  const [preparedShare, setPreparedShare] = useState<{ scanId: string; file: File } | null>(null);
+  const [preparedShare, setPreparedShare] = useState<{
+    scanId: string;
+    rotationQuarterTurns: ScanRotationQuarterTurns;
+    file: File;
+  } | null>(null);
   const [shareFeedback, setShareFeedback] = useState<{ message: string; isError: boolean } | null>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const viewRef = useRef(view);
   const fitNewImageRef = useRef(true);
   const pointersRef = useRef(new Map<number, ScanPoint>());
   const gestureRef = useRef<Gesture | null>(null);
-  const shareAbortRef = useRef<AbortController | null>(null);
   const shareGenerationRef = useRef(0);
+  const orientationSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingOrientationRef = useRef<{
+    scanId: string;
+    revision: number;
+    rotationQuarterTurns: ScanRotationQuarterTurns;
+  } | null>(null);
+  const orientationSavingRef = useRef(false);
+  const isOnlineRef = useRef(isOnline);
+  const mountedRef = useRef(true);
   const currentScan = scans.find((scan) => scan.id === currentScanId) ?? scans[0];
   const previousId = currentScan ? adjacentScanId(scans, currentScan.id, -1) : null;
   const nextId = currentScan ? adjacentScanId(scans, currentScan.id, 1) : null;
   const currentIndex = currentScan ? scans.findIndex((scan) => scan.id === currentScan.id) : -1;
   const mediaUrl = currentScan ? `/api/scans/${encodeURIComponent(currentScan.id)}/image` : "";
   const originalMediaUrl = currentScan ? `/api/media/${encodeURIComponent(currentScan.mediaId)}` : "";
-  const fittedSize = fitScanSize(naturalSize, viewportSize);
+  const effectiveRotation = currentScan
+    ? rotationOverrides[currentScan.id] ?? currentScan.rotationQuarterTurns
+    : 0;
+  const orientedNaturalSize = rotatedScanSize(naturalSize, effectiveRotation);
+  const fittedSize = fitScanSize(orientedNaturalSize, viewportSize);
+  const displayedImageSize = rotatedScanSize(fittedSize, effectiveRotation);
   const webkitDocument = typeof document !== "undefined" ? document as WebkitDocument : null;
   const fullscreenAvailable = typeof document !== "undefined" && (
     document.fullscreenEnabled
@@ -141,6 +183,147 @@ export function ScanViewer({
     gestureRef.current = null;
   }
 
+  function clearOrientationTimer(): void {
+    if (orientationSaveTimeoutRef.current !== null) {
+      clearTimeout(orientationSaveTimeoutRef.current);
+      orientationSaveTimeoutRef.current = null;
+    }
+  }
+
+  async function persistPendingOrientation(): Promise<void> {
+    clearOrientationTimer();
+    const pending = pendingOrientationRef.current;
+    if (!pending || orientationSavingRef.current) return;
+    pendingOrientationRef.current = null;
+    if (!canEdit || !isOnlineRef.current) {
+      if (mountedRef.current) {
+        setOrientationFeedback({
+          scanId: pending.scanId,
+          message: "Rotation applies to this view only while offline.",
+          isError: false,
+        });
+      }
+      return;
+    }
+
+    orientationSavingRef.current = true;
+    if (mountedRef.current) {
+      setOrientationSavingScanId(pending.scanId);
+      setOrientationFeedback({
+        scanId: pending.scanId,
+        message: "Saving orientation…",
+        isError: false,
+      });
+    }
+    try {
+      const updated = await updateScanOrientation(songId, pending.scanId, {
+        rotationQuarterTurns: pending.rotationQuarterTurns,
+        revision: pending.revision,
+      });
+      onOrientationSaved(updated);
+      if (mountedRef.current) {
+        setRotationOverrides((current) => {
+          if (current[pending.scanId] !== updated.rotationQuarterTurns) return current;
+          const next = { ...current };
+          delete next[pending.scanId];
+          return next;
+        });
+        setOrientationFeedback({
+          scanId: pending.scanId,
+          message: "Orientation saved.",
+          isError: false,
+        });
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setOrientationFeedback({
+          scanId: pending.scanId,
+          message: error instanceof Error
+            ? `${error.message} The rotation remains in this view only.`
+            : "Orientation could not be saved. The rotation remains in this view only.",
+          isError: true,
+        });
+      }
+    } finally {
+      orientationSavingRef.current = false;
+      if (mountedRef.current) setOrientationSavingScanId(null);
+    }
+  }
+
+  function rotateCurrentScan(): void {
+    if (!currentScan || orientationSavingRef.current) return;
+    const rotationQuarterTurns = nextScanRotation(effectiveRotation);
+    fitNewImageRef.current = true;
+    setRotationOverrides((current) => ({
+      ...current,
+      [currentScan.id]: rotationQuarterTurns,
+    }));
+    shareGenerationRef.current += 1;
+    setPreparedShare(null);
+    setShareFeedback(null);
+
+    clearOrientationTimer();
+    pendingOrientationRef.current = null;
+    if (!canEdit) {
+      setOrientationFeedback({
+        scanId: currentScan.id,
+        message: "Rotation applies to this view only.",
+        isError: false,
+      });
+      return;
+    }
+    if (!isOnlineRef.current) {
+      setOrientationFeedback({
+        scanId: currentScan.id,
+        message: "Rotation applies to this view only while offline.",
+        isError: false,
+      });
+      return;
+    }
+    if (rotationQuarterTurns === currentScan.rotationQuarterTurns) {
+      setRotationOverrides((current) => {
+        const next = { ...current };
+        delete next[currentScan.id];
+        return next;
+      });
+      setOrientationFeedback(null);
+      return;
+    }
+
+    pendingOrientationRef.current = {
+      scanId: currentScan.id,
+      revision: currentScan.revision,
+      rotationQuarterTurns,
+    };
+    setOrientationFeedback({
+      scanId: currentScan.id,
+      message: "Orientation will be saved.",
+      isError: false,
+    });
+    orientationSaveTimeoutRef.current = setTimeout(() => {
+      void persistPendingOrientation();
+    }, 600);
+  }
+
+  function selectScan(scanId: string): void {
+    void persistPendingOrientation();
+    setCurrentScanId(scanId);
+  }
+
+  useEffect(() => {
+    isOnlineRef.current = isOnline;
+    if (!isOnline && pendingOrientationRef.current) {
+      const pending = pendingOrientationRef.current;
+      pendingOrientationRef.current = null;
+      clearOrientationTimer();
+      setOrientationFeedback({
+        scanId: pending.scanId,
+        message: "Rotation applies to this view only while offline.",
+        isError: false,
+      });
+    }
+  }, [isOnline]);
+
   useEffect(() => {
     fitNewImageRef.current = true;
     setNaturalSize({ width: 0, height: 0 });
@@ -151,16 +334,18 @@ export function ScanViewer({
 
   useEffect(() => {
     shareGenerationRef.current += 1;
-    shareAbortRef.current?.abort();
-    shareAbortRef.current = null;
     setPreparedShare(null);
     setShareBusy(null);
     setShareFeedback(null);
-  }, [currentScanId, isOnline]);
+  }, [currentScanId, effectiveRotation, isOnline]);
 
-  useEffect(() => () => {
-    shareGenerationRef.current += 1;
-    shareAbortRef.current?.abort();
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      shareGenerationRef.current += 1;
+      mountedRef.current = false;
+      void persistPendingOrientation();
+    };
   }, []);
 
   useEffect(() => {
@@ -184,7 +369,7 @@ export function ScanViewer({
     fitNewImageRef.current = false;
     viewRef.current = next;
     setView(next);
-  }, [fittedSize.height, fittedSize.width, viewportSize.height, viewportSize.width]);
+  }, [effectiveRotation, fittedSize.height, fittedSize.width, viewportSize.height, viewportSize.width]);
 
   useEffect(() => {
     const overlay = overlayRef.current;
@@ -234,17 +419,17 @@ export function ScanViewer({
     function keyDown(event: KeyboardEvent): void {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        closeViewer();
         return;
       }
       if (!isImageOnly && event.key === "ArrowLeft" && previousId) {
         event.preventDefault();
-        setCurrentScanId(previousId);
+        selectScan(previousId);
         return;
       }
       if (!isImageOnly && event.key === "ArrowRight" && nextId) {
         event.preventDefault();
-        setCurrentScanId(nextId);
+        selectScan(nextId);
         return;
       }
       if (event.key !== "Tab" || !overlayRef.current) return;
@@ -265,7 +450,7 @@ export function ScanViewer({
     }
     document.addEventListener("keydown", keyDown);
     return () => document.removeEventListener("keydown", keyDown);
-  }, [isImageOnly, nextId, onClose, previousId]);
+  }, [isImageOnly, nextId, previousId]);
 
   if (!currentScan) return null;
 
@@ -334,27 +519,34 @@ export function ScanViewer({
   async function shareCurrentScan(): Promise<void> {
     if (!isOnline || shareBusy !== null) return;
     const scanId = currentScan.id;
+    const rotationQuarterTurns = effectiveRotation;
     const generation = shareGenerationRef.current;
     setShareFeedback(null);
 
-    let file = preparedShare?.scanId === scanId ? preparedShare.file : null;
+    let file = preparedShare?.scanId === scanId
+      && preparedShare.rotationQuarterTurns === rotationQuarterTurns
+      ? preparedShare.file
+      : null;
     try {
       if (!file) {
+        if (!currentScan.hasReadabilityDerivative || !imageRef.current) {
+          throw new ScanSharingError("optimized_unavailable");
+        }
         setShareBusy("preparing");
-        const controller = new AbortController();
-        shareAbortRef.current?.abort();
-        shareAbortRef.current = controller;
-        file = await loadOptimizedScanShareFile(scanId, controller.signal);
+        file = await prepareVisibleScanShareFile(
+          null,
+          imageRef.current,
+          rotationQuarterTurns,
+        );
         if (generation !== shareGenerationRef.current) return;
-        if (shareAbortRef.current === controller) shareAbortRef.current = null;
-        setPreparedShare({ scanId, file });
+        setPreparedShare({ scanId, rotationQuarterTurns, file });
       }
 
       setShareBusy("sharing");
       const outcome = await shareOptimizedScanFile(file);
       if (generation !== shareGenerationRef.current) return;
       if (outcome === "retry_required") {
-        setPreparedShare({ scanId, file });
+        setPreparedShare({ scanId, rotationQuarterTurns, file });
         setShareFeedback({
           message: "The optimized scan is ready. Tap Share again.",
           isError: false,
@@ -366,7 +558,7 @@ export function ScanViewer({
           : null);
       }
     } catch (error) {
-      if (isShareAbort(error) || generation !== shareGenerationRef.current) return;
+      if (generation !== shareGenerationRef.current) return;
       setPreparedShare(null);
       const code = error instanceof ScanSharingError ? error.code : "share_failed";
       setShareFeedback({
@@ -385,6 +577,7 @@ export function ScanViewer({
   }
 
   function closeViewer(): void {
+    void persistPendingOrientation();
     const webkitDoc = document as WebkitDocument;
     if (activeFullscreenElement() === overlayRef.current) {
       try {
@@ -429,20 +622,58 @@ export function ScanViewer({
               <button type="button" disabled={view.zoom <= MIN_SCAN_ZOOM} onClick={() => zoomTo(view.zoom - SCAN_ZOOM_STEP)} aria-label="Zoom out">−</button>
               <button type="button" onClick={() => zoomTo(MIN_SCAN_ZOOM)}>{Math.round(view.zoom * 100)}%</button>
               <button type="button" disabled={view.zoom >= MAX_SCAN_ZOOM} onClick={() => zoomTo(view.zoom + SCAN_ZOOM_STEP)} aria-label="Zoom in">+</button>
+              <button
+                className="compact-action"
+                type="button"
+                disabled={orientationSavingScanId !== null}
+                aria-label="Rotate Scan clockwise"
+                aria-busy={orientationSavingScanId === currentScan.id || undefined}
+                aria-describedby={orientationFeedback?.scanId === currentScan.id
+                  ? "scan-orientation-status"
+                  : undefined}
+                title={canEdit && isOnline
+                  ? "Rotate clockwise and save the orientation"
+                  : "Rotate clockwise for this view"}
+                onClick={rotateCurrentScan}
+              ><ActionContent kind="rotate" label="Rotate" /></button>
             </div>
             <div>
-              <a href={originalMediaUrl} target="_blank" rel="noreferrer">Open original</a>
+              <a
+                className="compact-action"
+                href={originalMediaUrl}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open original Scan"
+                title="Open the untouched original Scan"
+              ><ActionContent kind="original" label="Original" /></a>
               {sharingAvailable && (
                 <button
+                  className="compact-action"
                   type="button"
-                  disabled={!isOnline || shareBusy !== null}
+                  disabled={!isOnline || !currentScan.hasReadabilityDerivative
+                    || naturalSize.width === 0 || shareBusy !== null}
                   aria-describedby={shareFeedback ? "scan-share-status" : undefined}
                   title={isOnline ? "Share the optimized scan image" : "Scan sharing requires an internet connection"}
                   onClick={() => { void shareCurrentScan(); }}
-                >{shareBusy === "preparing" ? "Preparing…" : shareBusy === "sharing" ? "Sharing…" : "Share"}</button>
+                ><ActionContent
+                    kind="share"
+                    label={shareBusy === "preparing" ? "Preparing…" : shareBusy === "sharing" ? "Sharing…" : "Share"}
+                  /></button>
               )}
-              <button type="button" onClick={() => { void enterImageOnly(); }} title="Hide controls and use device fullscreen when available">Image only</button>
+              <button
+                className="compact-action"
+                type="button"
+                onClick={() => { void enterImageOnly(); }}
+                title="Hide controls and use device fullscreen when available"
+              ><ActionContent kind="fullscreen" label="Image only" /></button>
             </div>
+            {orientationFeedback?.scanId === currentScan.id && (
+              <p
+                className={`scan-share-status${orientationFeedback.isError ? " scan-share-error" : ""}`}
+                id="scan-orientation-status"
+                role={orientationFeedback.isError ? "alert" : "status"}
+              >{orientationFeedback.message}</p>
+            )}
             {shareFeedback && (
               <p
                 className={`scan-share-status${shareFeedback.isError ? " scan-share-error" : ""}`}
@@ -477,15 +708,16 @@ export function ScanViewer({
                 </div>
               )}
               <img
+                ref={imageRef}
                 src={mediaUrl}
                 alt={scanDisplayName(currentScan)}
                 draggable="false"
                 fetchPriority="high"
                 loading="eager"
                 style={{
-                  width: fittedSize.width,
-                  height: fittedSize.height,
-                  transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.zoom})`,
+                  width: displayedImageSize.width,
+                  height: displayedImageSize.height,
+                  transform: scanImageTransform(view, fittedSize, effectiveRotation),
                 }}
                 onLoad={(event) => {
                   fitNewImageRef.current = true;
@@ -504,8 +736,8 @@ export function ScanViewer({
 
         {!isImageOnly && scans.length > 1 && (
           <footer className="scan-viewer-navigation">
-            <button type="button" disabled={!previousId} onClick={() => previousId && setCurrentScanId(previousId)}>← Previous</button>
-            <button type="button" disabled={!nextId} onClick={() => nextId && setCurrentScanId(nextId)}>Next →</button>
+            <button type="button" disabled={!previousId} onClick={() => previousId && selectScan(previousId)}>← Previous</button>
+            <button type="button" disabled={!nextId} onClick={() => nextId && selectScan(nextId)}>Next →</button>
           </footer>
         )}
       </div>

@@ -5,6 +5,9 @@ import {
   clampScanZoom,
   fitScanSize,
   fittedScanView,
+  nextScanRotation,
+  rotatedScanSize,
+  scanImageTransform,
   scanViewAfterLayoutChange,
   scanViewAfterWheel,
   scanDisplayName,
@@ -12,8 +15,8 @@ import {
 } from "./scan-viewer";
 
 const scans = [
-  { id: "one", mediaId: "m1", notebookId: "book", notebookName: "Book", pageLabel: "1", revision: 1, filename: "1.jpg" },
-  { id: "two", mediaId: "m2", notebookId: null, notebookName: null, pageLabel: null, revision: 1, filename: "2.jpg" },
+  { id: "one", mediaId: "m1", notebookId: "book", notebookName: "Book", pageLabel: "1", revision: 1, rotationQuarterTurns: 0 as const, hasReadabilityDerivative: true, filename: "1.jpg" },
+  { id: "two", mediaId: "m2", notebookId: null, notebookName: null, pageLabel: null, revision: 1, rotationQuarterTurns: 0 as const, hasReadabilityDerivative: true, filename: "2.jpg" },
 ];
 
 describe("scan viewer helpers", () => {
@@ -103,5 +106,29 @@ describe("scan viewer helpers", () => {
     }, { x: 300, y: 300 }, fitted, viewport);
 
     expect(panned).toEqual({ zoom: 2, x: -90, y: -275 });
+  });
+
+  it("cycles clockwise through all four orientations", () => {
+    expect(nextScanRotation(0)).toBe(1);
+    expect(nextScanRotation(1)).toBe(2);
+    expect(nextScanRotation(2)).toBe(3);
+    expect(nextScanRotation(3)).toBe(0);
+  });
+
+  it("swaps fitted dimensions and positions each rotated image from the top-left origin", () => {
+    expect(rotatedScanSize({ width: 1200, height: 900 }, 0))
+      .toEqual({ width: 1200, height: 900 });
+    expect(rotatedScanSize({ width: 1200, height: 900 }, 1))
+      .toEqual({ width: 900, height: 1200 });
+    const view = { zoom: 1, x: 10, y: 20 };
+    const fitted = { width: 300, height: 400 };
+    expect(scanImageTransform(view, fitted, 0))
+      .toBe("translate3d(10px, 20px, 0) scale(1)");
+    expect(scanImageTransform(view, fitted, 1))
+      .toBe("translate3d(10px, 20px, 0) scale(1) translateX(300px) rotate(90deg)");
+    expect(scanImageTransform(view, fitted, 2))
+      .toBe("translate3d(10px, 20px, 0) scale(1) translate(300px, 400px) rotate(180deg)");
+    expect(scanImageTransform(view, fitted, 3))
+      .toBe("translate3d(10px, 20px, 0) scale(1) translateY(400px) rotate(270deg)");
   });
 });

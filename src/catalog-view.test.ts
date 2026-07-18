@@ -106,6 +106,8 @@ describe("catalog filters", () => {
         notebookName: "Notebook One",
         pageLabel: "1",
         revision: 1,
+        rotationQuarterTurns: 0,
+        hasReadabilityDerivative: true,
         filename: "page.jpg",
       }],
       recordings: [{

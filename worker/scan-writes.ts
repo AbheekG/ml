@@ -31,6 +31,11 @@ const scanRevisionSchema = z.object({
   revision: z.number().int().positive(),
 }).strict();
 
+const scanOrientationSchema = z.object({
+  rotationQuarterTurns: z.number().int().min(0).max(3),
+  revision: z.number().int().positive(),
+}).strict();
+
 export type ScanUpdateInput = {
   notebookId: string | null;
   pageLabel: string | null;
@@ -38,6 +43,11 @@ export type ScanUpdateInput = {
 };
 
 export type ScanCreateInput = Omit<ScanUpdateInput, "revision">;
+
+export type ScanOrientationInput = {
+  rotationQuarterTurns: 0 | 1 | 2 | 3;
+  revision: number;
+};
 
 export type ScanParseResult<T> =
   | { success: true; data: T }
@@ -86,4 +96,13 @@ export function parseScanRevision(value: unknown): ScanParseResult<{ revision: n
   const result = scanRevisionSchema.safeParse(value);
   if (!result.success) return { success: false, fields: fieldsFromError(result.error) };
   return { success: true, data: result.data };
+}
+
+export function parseScanOrientation(value: unknown): ScanParseResult<ScanOrientationInput> {
+  const result = scanOrientationSchema.safeParse(value);
+  if (!result.success) return { success: false, fields: fieldsFromError(result.error) };
+  return {
+    success: true,
+    data: result.data as ScanOrientationInput,
+  };
 }

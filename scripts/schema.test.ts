@@ -17,7 +17,8 @@ const nonUniqueJobsMigration = readFileSync(resolve("migrations/0010_non_unique_
 const audioDispatchMigration = readFileSync(resolve("migrations/0011_audio_dispatch_and_replacement_guards.sql"), "utf8");
 const scanIntegrityMigration = readFileSync(resolve("migrations/0012_scan_integrity_and_readability.sql"), "utf8");
 const scanMaintenanceLeasesMigration = readFileSync(resolve("migrations/0013_scan_maintenance_leases.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}`;
+const scanDisplayRotationMigration = readFileSync(resolve("migrations/0014_scan_display_rotation.sql"), "utf8");
+const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}`;
 const timestamp = "2026-07-12T00:00:00.000Z";
 
 function runSql(sql: string): string {
@@ -44,9 +45,62 @@ function migrateScanIntegrity(beforeMigration: string, afterMigration: string): 
   });
 }
 
+function migrateScanRotation(beforeMigration: string, afterMigration: string): string {
+  return execFileSync("sqlite3", [":memory:"], {
+    encoding: "utf8",
+    input: `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${beforeMigration}\n${scanDisplayRotationMigration}\n${afterMigration}`,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
 describe("initial database schema", () => {
   it("loads successfully", () => {
     expect(() => runSql("PRAGMA foreign_key_check;")).not.toThrow();
+  });
+
+  it("defaults existing Scan orientation to zero and constrains it to quarter turns", () => {
+    const output = migrateScanRotation(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', 'scans/scan-media-1.jpg', 'one.jpg', 'image/jpeg', 4,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO scans (
+        id, song_id, media_id, created_at, created_by, updated_at, updated_by
+      ) VALUES ('scan-1', 'song-1', 'scan-media-1', '${timestamp}', 'test', '${timestamp}', 'test');
+    `, `
+      SELECT rotation_quarter_turns FROM scans WHERE id = 'scan-1';
+      UPDATE scans SET rotation_quarter_turns = 3 WHERE id = 'scan-1';
+      SELECT rotation_quarter_turns FROM scans WHERE id = 'scan-1';
+    `);
+    expect(output).toBe("0\n3\n");
+
+    expect(() => runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', 'scans/scan-media-1.jpg', 'one.jpg', 'image/jpeg', 4,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO scans (
+        id, song_id, media_id, rotation_quarter_turns,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'scan-1', 'song-1', 'scan-media-1', 4,
+        '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+    `)).toThrow(/CHECK constraint failed/);
   });
 
   it("enforces durable Recording upload session, credit, and exact part relationships", () => {

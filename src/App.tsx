@@ -75,6 +75,7 @@ import { scanDisplayName } from "./scan-viewer";
 import {
   isShareAbort,
   loadOptimizedScanShareFile,
+  rotateOptimizedScanShareFile,
   ScanSharingError,
   shareOptimizedScanFile,
   supportsOptimizedScanSharing,
@@ -287,7 +288,11 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
   const [isLoading, setIsLoading] = useState(true);
   const [viewerScanId, setViewerScanId] = useState<string | null>(null);
   const [scanShareBusy, setScanShareBusy] = useState<{ scanId: string; phase: "preparing" | "sharing" } | null>(null);
-  const [preparedScanShare, setPreparedScanShare] = useState<{ scanId: string; file: File } | null>(null);
+  const [preparedScanShare, setPreparedScanShare] = useState<{
+    scanId: string;
+    rotationQuarterTurns: 0 | 1 | 2 | 3;
+    file: File;
+  } | null>(null);
   const [scanShareFeedback, setScanShareFeedback] = useState<{ scanId: string; message: string; isError: boolean } | null>(null);
   const scanShareAbortRef = useRef<AbortController | null>(null);
   const scanShareGenerationRef = useRef(0);
@@ -450,29 +455,35 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
     }
   }
 
-  async function shareScan(scanId: string): Promise<void> {
+  async function shareScan(scan: SongDetail["scans"][number]): Promise<void> {
     if (!isOnline || scanShareBusy !== null) return;
+    const scanId = scan.id;
+    const rotationQuarterTurns = scan.rotationQuarterTurns;
     const generation = scanShareGenerationRef.current;
     setScanShareFeedback(null);
 
-    let file = preparedScanShare?.scanId === scanId ? preparedScanShare.file : null;
+    let file = preparedScanShare?.scanId === scanId
+      && preparedScanShare.rotationQuarterTurns === rotationQuarterTurns
+      ? preparedScanShare.file
+      : null;
     try {
       if (!file) {
         setScanShareBusy({ scanId, phase: "preparing" });
         const controller = new AbortController();
         scanShareAbortRef.current?.abort();
         scanShareAbortRef.current = controller;
-        file = await loadOptimizedScanShareFile(scanId, controller.signal);
+        const optimizedFile = await loadOptimizedScanShareFile(scanId, controller.signal);
+        file = await rotateOptimizedScanShareFile(optimizedFile, rotationQuarterTurns);
         if (generation !== scanShareGenerationRef.current) return;
         if (scanShareAbortRef.current === controller) scanShareAbortRef.current = null;
-        setPreparedScanShare({ scanId, file });
+        setPreparedScanShare({ scanId, rotationQuarterTurns, file });
       }
 
       setScanShareBusy({ scanId, phase: "sharing" });
       const outcome = await shareOptimizedScanFile(file);
       if (generation !== scanShareGenerationRef.current) return;
       if (outcome === "retry_required") {
-        setPreparedScanShare({ scanId, file });
+        setPreparedScanShare({ scanId, rotationQuarterTurns, file });
         setScanShareFeedback({
           scanId,
           message: "The optimized scan is ready. Tap Share again.",
@@ -764,7 +775,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                           aria-busy={scanShareBusy?.scanId === scan.id || undefined}
                           aria-describedby={scanShareFeedback?.scanId === scan.id ? `scan-share-${scan.id}` : undefined}
                           title={isOnline ? "Share the optimized scan image" : "Scan sharing requires an internet connection"}
-                          onClick={() => { void shareScan(scan.id); }}
+                          onClick={() => { void shareScan(scan); }}
                         ><ActionContent
                             kind="share"
                             label={scanShareBusy?.scanId === scan.id
@@ -799,7 +810,26 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
         </div>
         <aside><MetadataList song={song} /></aside>
       </div>
-      {viewerScanId && <ScanViewer scans={song.scans} initialScanId={viewerScanId} isOnline={isOnline} onClose={() => setViewerScanId(null)} />}
+      {viewerScanId && (
+        <ScanViewer
+          songId={song.id}
+          scans={song.scans}
+          initialScanId={viewerScanId}
+          isOnline={isOnline}
+          canEdit={canEdit === true}
+          onOrientationSaved={(updated) => {
+            setSong((current) => current && ({
+              ...current,
+              scans: current.scans.map((scan) => scan.id === updated.id
+                ? { ...scan, ...updated }
+                : scan),
+            }));
+            setPreparedScanShare(null);
+            void refreshOfflineLibrary().catch(() => undefined);
+          }}
+          onClose={() => setViewerScanId(null)}
+        />
+      )}
     </main>
   );
 }

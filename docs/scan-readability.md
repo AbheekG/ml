@@ -24,6 +24,12 @@ uses the derivative when provenance exists and otherwise falls back to the
 original. “Open original” deliberately continues to request the retained source.
 No public bucket, delivery URL, or unauthenticated cache is introduced.
 
+Manual quarter-turn correction is deliberately separate from derivative
+provenance: the browser applies one constrained Scan-level display value and
+creates any rotated native-share file only in temporary browser memory. It does
+not rewrite either stored representation. See
+[the Scan orientation policy](scan-orientation.md).
+
 ## Optimized-Scan sharing
 
 On capable online browsers, the Song row or viewer can fetch the authenticated
