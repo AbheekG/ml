@@ -30,6 +30,7 @@ import {
   recordingUploadProgressLabel,
 } from "./recording-upload-view";
 import { editorValuesChanged, shouldRefreshEditor, useUnsavedChanges } from "./UnsavedChanges";
+import { localIsoDate } from "./local-date";
 
 export function RecordingUploadPage({
   mode = "create",
@@ -528,7 +529,7 @@ export function RecordingUploadPage({
             </label>
             <label className="form-field compact-field">
               <span>Recorded date</span>
-              <input disabled={formLocked} type="date" max={new Date().toISOString().slice(0, 10)} value={recordedOn} onChange={(event) => setRecordedOn(event.target.value)} />
+              <input disabled={formLocked} type="date" max={localIsoDate()} value={recordedOn} onChange={(event) => setRecordedOn(event.target.value)} />
               {fieldErrors.recordedOn?.map((message) => <em key={message}>{message}</em>)}
             </label>
           </section>

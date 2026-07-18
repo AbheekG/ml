@@ -69,6 +69,7 @@ import {
   type CatalogViewState,
 } from "./catalog-view";
 import { findSimilarLookupItems } from "./lookup-similarity";
+import { localIsoDate } from "./local-date";
 import { shouldOfferDirectCameraCapture } from "./device-capabilities";
 import { scanDisplayName } from "./scan-viewer";
 import {
@@ -1452,7 +1453,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
           </label>
           <label className="form-field compact-field">
             <span>Recorded date</span>
-            <input type="date" max={new Date().toISOString().slice(0, 10)} value={recordedOn} onChange={(event) => setRecordedOn(event.target.value)} />
+            <input type="date" max={localIsoDate()} value={recordedOn} onChange={(event) => setRecordedOn(event.target.value)} />
             {fieldErrors.recordedOn?.map((message) => <em key={message}>{message}</em>)}
           </label>
         </section>

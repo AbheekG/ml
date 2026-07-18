@@ -5,21 +5,31 @@ const description = z.string()
   .max(10_000, "Recording description is too long")
   .refine((value) => value.trim().length > 0, "Recording description must not be blank");
 
-const recordedOn = z.string().nullable().optional().superRefine((value, context) => {
-  if (value === null || value === undefined || value === "") return;
-  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
-    context.addIssue({ code: "custom", message: "Use a valid date" });
-    return;
-  }
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  if (Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== value) {
-    context.addIssue({ code: "custom", message: "Use a valid date" });
-    return;
-  }
-  if (value > new Date().toISOString().slice(0, 10)) {
-    context.addIssue({ code: "custom", message: "Recorded date cannot be in the future" });
-  }
-});
+const MAX_TIMEZONE_OFFSET_HOURS = 14;
+
+export function latestCurrentCalendarDate(now: Date = new Date()): string {
+  return new Date(now.valueOf() + (MAX_TIMEZONE_OFFSET_HOURS * 60 * 60 * 1000))
+    .toISOString()
+    .slice(0, 10);
+}
+
+function recordedOn(maximumDate: string) {
+  return z.string().nullable().optional().superRefine((value, context) => {
+    if (value === null || value === undefined || value === "") return;
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+      context.addIssue({ code: "custom", message: "Use a valid date" });
+      return;
+    }
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    if (Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== value) {
+      context.addIssue({ code: "custom", message: "Use a valid date" });
+      return;
+    }
+    if (value > maximumDate) {
+      context.addIssue({ code: "custom", message: "Recorded date cannot be in the future" });
+    }
+  });
+}
 
 const creditPersonIds = z.array(z.string().min(1).max(100)).max(100).default([]);
 
@@ -36,18 +46,22 @@ function rejectDuplicateCredits(
   }
 }
 
-const updateRecordingSchema = z.object({
-  description,
-  recordedOn,
-  creditPersonIds,
-  revision: z.number().int().positive(),
-}).strict().superRefine(rejectDuplicateCredits);
+function updateRecordingSchema(maximumDate: string) {
+  return z.object({
+    description,
+    recordedOn: recordedOn(maximumDate),
+    creditPersonIds,
+    revision: z.number().int().positive(),
+  }).strict().superRefine(rejectDuplicateCredits);
+}
 
-const createRecordingMetadataSchema = z.object({
-  description: z.string().max(10_000, "Recording description is too long").nullable().optional(),
-  recordedOn,
-  creditPersonIds,
-}).strict().superRefine(rejectDuplicateCredits);
+function createRecordingMetadataSchema(maximumDate: string) {
+  return z.object({
+    description: z.string().max(10_000, "Recording description is too long").nullable().optional(),
+    recordedOn: recordedOn(maximumDate),
+    creditPersonIds,
+  }).strict().superRefine(rejectDuplicateCredits);
+}
 
 const recordingRevisionSchema = z.object({
   revision: z.number().int().positive(),
@@ -80,8 +94,11 @@ function fieldsFromError(error: z.ZodError): Record<string, string[]> {
   return fields;
 }
 
-export function parseRecordingUpdate(value: unknown): RecordingParseResult<RecordingUpdateInput> {
-  const result = updateRecordingSchema.safeParse(value);
+export function parseRecordingUpdate(
+  value: unknown,
+  now: Date = new Date(),
+): RecordingParseResult<RecordingUpdateInput> {
+  const result = updateRecordingSchema(latestCurrentCalendarDate(now)).safeParse(value);
   if (!result.success) return { success: false, fields: fieldsFromError(result.error) };
   const trimmedDescription = result.data.description.trim();
   return {
@@ -98,8 +115,9 @@ export function parseRecordingUpdate(value: unknown): RecordingParseResult<Recor
 
 export function parseRecordingCreateMetadata(
   value: unknown,
+  now: Date = new Date(),
 ): RecordingParseResult<RecordingCreateMetadataInput> {
-  const result = createRecordingMetadataSchema.safeParse(value);
+  const result = createRecordingMetadataSchema(latestCurrentCalendarDate(now)).safeParse(value);
   if (!result.success) return { success: false, fields: fieldsFromError(result.error) };
   const description = result.data.description?.trim() || null;
   return {

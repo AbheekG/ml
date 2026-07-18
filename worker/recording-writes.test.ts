@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseRecordingRevision, parseRecordingUpdate } from "./recording-writes";
+import {
+  latestCurrentCalendarDate,
+  parseRecordingRevision,
+  parseRecordingUpdate,
+} from "./recording-writes";
 
 describe("Recording validation", () => {
   it("trims descriptions without rewriting their internal content", () => {
@@ -45,6 +49,26 @@ describe("Recording validation", () => {
     expect(parseRecordingUpdate({
       description: "Take", recordedOn: null, creditPersonIds: ["p1", "p1"], revision: 1,
     })).toMatchObject({ success: false, fields: { creditPersonIds: ["Duplicate contributors are not allowed"] } });
+  });
+
+  it("accepts a local current date after UTC midnight boundaries but rejects the next global day", () => {
+    const now = new Date("2026-07-18T12:30:00.000Z");
+    expect(latestCurrentCalendarDate(now)).toBe("2026-07-19");
+    expect(parseRecordingUpdate({
+      description: "Take",
+      recordedOn: "2026-07-19",
+      creditPersonIds: [],
+      revision: 1,
+    }, now).success).toBe(true);
+    expect(parseRecordingUpdate({
+      description: "Take",
+      recordedOn: "2026-07-20",
+      creditPersonIds: [],
+      revision: 1,
+    }, now)).toMatchObject({
+      success: false,
+      fields: { recordedOn: ["Recorded date cannot be in the future"] },
+    });
   });
 
   it("requires a positive revision for Trash-state changes", () => {
