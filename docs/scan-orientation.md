@@ -2,7 +2,8 @@
 
 Status: implemented and deployed to protected staging as Worker
 `97a66e8f-0209-4ce6-920c-12165d61a451`, client/service-worker build
-`51d4d6e88633`; owner device acceptance is pending.
+`51d4d6e88633`; the owner reports that the deployed behavior works well and
+accepts this slice. The device/browser was not recorded.
 
 ## Stored state and media preservation
 
@@ -74,3 +75,7 @@ orientation, zero invalid values, zero foreign-key errors, and zero query
 writes. The new Worker receives 100% of staging traffic behind the expected
 Cloudflare Access redirect. No original or readability object was changed or
 deleted.
+
+The owner subsequently reported that the deployed feature works well. Treat the
+principal rotation, persistence, and current-view sharing behavior as accepted;
+do not infer named-platform coverage beyond that report.

@@ -1,8 +1,8 @@
 # Music Library implementation plan
 
-Status: the necessary private-beta feature set is implemented in protected
-staging. The newly selected Scan-orientation refinement is deployed and awaits
-owner device acceptance. Continue with other optional UX refinement,
+Status: the necessary private-beta feature set is implemented and accepted in
+protected staging. The Scan-orientation refinement is deployed and
+owner-accepted. Continue with other optional UX refinement,
 audit/cleanup, and production readiness only as separately prioritized and
 approved.
 
@@ -18,7 +18,8 @@ current-view sharing transform only the loaded readability image. Exact
 originals and stored readability JPEGs remain unchanged. Migration `0014` is
 fully applied; all 499 existing Scans retain the zero default and there are zero
 invalid values or foreign-key errors. The in-app browser runtime was unavailable,
-so owner device acceptance remains the current gate. The earlier audit follow-up
+but the owner subsequently reported that the deployed behavior works well and
+accepted the slice; the device/browser was not recorded. The earlier audit follow-up
 adds accessible control contrast and complete Lists-tab semantics, dirty-form
 navigation/reconnect protection, accurate active-versus-historical upload alert
 classification, and Recording-date validation. Its deployed behavior passed the
@@ -29,9 +30,8 @@ migration or integrity error, and wrote zero D1 rows. The owner confirmed the
 ordinary date selector remains normal; the conditional differing-date note is
 accepted through automated India/device boundary coverage because both locations
 showed the same date during the manual check. The bounded 2026-07-18 audit-
-improvement slice remains complete, deployed, and accepted. The only selected
-task at this checkpoint is manual acceptance of the deployed Scan-orientation
-refinement.
+improvement slice and the Scan-orientation refinement are complete, deployed,
+and accepted. No new implementation task is selected at this checkpoint.
 Production remains absent and separately approval-gated.
 
 Milestone history and operational detail: the vertical slice, online
@@ -51,7 +51,8 @@ resume, exact duplicate rejection/dismissal, audio processing/playback, metadata
 editing, retained replacement history, and child/parent Trash/restore. Its exact
 D1/R2 postflight matches every planned count and all nine retained objects.
 iOS/iPadOS compatibility remains explicit later work. Browser-only per-Scan
-orientation correction is now deployed and awaiting owner device acceptance.
+orientation correction is deployed and owner-accepted, without a recorded
+device/browser.
 Scan-viewer gesture containment is owner-accepted:
 the viewer modal suppresses browser-level touch zoom while open, and a native
 non-passive wheel boundary converts trackpad pinch into bounded image zoom
@@ -199,11 +200,11 @@ against the real staging D1 engine.
 ## Current execution order
 
 The core read/edit/recovery/search/sharing flows and safe Scan/Recording create/
-replace pipelines now work in staging. Scan orientation is deployed and its
-manual device gate is open. Continue in this order:
+replace pipelines now work in staging. Scan orientation is deployed and
+accepted. No new implementation task is selected. Continue in this order:
 
-1. complete owner testing of viewer-local rotation, editor persistence,
-   current-view sharing, Image-only mode, and unchanged original opening;
+1. begin the next session with a read-only workspace and deployment orientation,
+   then wait for the owner to select the next task;
 2. implement approved optional improvements as separate small commits with the
    existing automated and protected-staging device gates;
 3. at the next genuine Recording finalization/replacement, verify its bounded
