@@ -55,6 +55,50 @@ textarea:focus-visible {
   padding-bottom: 5rem;
 }
 
+.discard-dialog-backdrop {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(29 24 20 / 58%);
+}
+
+.discard-dialog {
+  display: grid;
+  width: min(100%, 28rem);
+  gap: 0.9rem;
+  padding: 1.4rem;
+  border: 1px solid var(--control-line);
+  border-radius: 1rem;
+  background: var(--paper);
+  box-shadow: 0 20px 60px rgb(20 15 10 / 28%);
+}
+
+.discard-dialog h2,
+.discard-dialog p {
+  margin: 0;
+}
+
+.discard-dialog h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.45rem;
+  font-weight: 600;
+}
+
+.discard-dialog p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.discard-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
 .skip-link {
   position: fixed;
   top: 0.5rem;

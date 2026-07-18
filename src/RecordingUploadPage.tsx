@@ -29,6 +29,7 @@ import {
   recordingUploadPercent,
   recordingUploadProgressLabel,
 } from "./recording-upload-view";
+import { editorValuesChanged, shouldRefreshEditor, useUnsavedChanges } from "./UnsavedChanges";
 
 export function RecordingUploadPage({
   mode = "create",
@@ -65,6 +66,22 @@ export function RecordingUploadPage({
   const [replaceTarget, setReplaceTarget] = useState<{ recordingId: string; revision: number } | null>(null);
   const [recoverableUploads, setRecoverableUploads] = useState<RecordingUploadSession[]>([]);
   const activeRequest = useRef<AbortController | null>(null);
+  const editorKey = `${mode}:${songId}:${recordingId ?? ""}`;
+  const loadedEditorKey = useRef<string | null>(null);
+  const [initialValues, setInitialValues] = useState<{
+    key: string;
+    value: { description: string; recordedOn: string; vocalistIds: string[]; fileSelected: boolean };
+  } | null>(null);
+  const currentValues = { description, recordedOn, vocalistIds, fileSelected: file !== null };
+  const uploadRequiresAttention = attempt !== null
+    && !duplicate
+    && upload?.status !== "finalized"
+    && upload?.status !== "aborted";
+  const hasUnsavedChanges = !duplicate && (
+    uploadRequiresAttention
+    || (initialValues?.key === editorKey && editorValuesChanged(initialValues.value, currentValues))
+  );
+  const { allowNextNavigation } = useUnsavedChanges(hasUnsavedChanges);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +90,8 @@ export function RecordingUploadPage({
         setIsLoading(false);
         return;
       }
+      if (!shouldRefreshEditor(loadedEditorKey.current, editorKey, hasUnsavedChanges)) return;
+      setIsLoading(true);
       try {
         const [editorOptions, song, serverUploads] = await Promise.all([
           loadRecordingEditorOptions(),
@@ -82,6 +101,13 @@ export function RecordingUploadPage({
         if (!cancelled) {
           setOptions(editorOptions);
           setSongTitle(song.titleLatin);
+          setFile(null);
+          setAttempt(null);
+          setUpload(null);
+          setProgress(null);
+          setDuplicate(null);
+          setDescriptionConflict(null);
+          setDescriptionOverride("");
           setRecoverableUploads(serverUploads.filter((candidate) => (
             candidate.intent === null
             || (mode === "create" && candidate.intent.kind === "create")
@@ -97,11 +123,31 @@ export function RecordingUploadPage({
             if (recording.processingState === "processing") {
               throw new Error("Wait for the current audio processing to finish before replacing this Recording.");
             }
-            setDescription(recording.description);
-            setRecordedOn(recording.recordedOn || "");
-            setVocalistIds(recording.credits.filter((c) => c.role === "vocals").map((c) => c.personId));
+            const nextValues = {
+              description: recording.description,
+              recordedOn: recording.recordedOn || "",
+              vocalistIds: recording.credits.filter((c) => c.role === "vocals").map((c) => c.personId),
+              fileSelected: false,
+            };
+            setDescription(nextValues.description);
+            setRecordedOn(nextValues.recordedOn);
+            setVocalistIds(nextValues.vocalistIds);
+            setInitialValues({ key: editorKey, value: nextValues });
             setReplaceTarget({ recordingId: recording.id, revision: recording.revision });
+          } else {
+            const nextValues = {
+              description: "",
+              recordedOn: "",
+              vocalistIds: [] as string[],
+              fileSelected: false,
+            };
+            setDescription(nextValues.description);
+            setRecordedOn(nextValues.recordedOn);
+            setVocalistIds(nextValues.vocalistIds);
+            setInitialValues({ key: editorKey, value: nextValues });
+            setReplaceTarget(null);
           }
+          loadedEditorKey.current = editorKey;
           setError(null);
         }
       } catch (loadError) {
@@ -116,24 +162,13 @@ export function RecordingUploadPage({
     }
     void load();
     return () => { cancelled = true; };
-  }, [canEdit, isOnline, mode, recordingId, songId]);
+  }, [canEdit, editorKey, isOnline, mode, recordingId, songId]);
 
   useEffect(() => {
     if (!isOnline) activeRequest.current?.abort();
   }, [isOnline]);
 
   useEffect(() => () => activeRequest.current?.abort(), []);
-
-  useEffect(() => {
-    if (!attempt || duplicate || upload?.status === "finalized" || upload?.status === "aborted") {
-      return undefined;
-    }
-    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-    };
-    window.addEventListener("beforeunload", warnBeforeLeaving);
-    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
-  }, [attempt, duplicate, upload?.status]);
 
   function chooseFile(nextFile: File | null): void {
     if (attempt) return;
@@ -192,6 +227,7 @@ export function RecordingUploadPage({
         return;
       }
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (saveError) {
       if (saveError instanceof DOMException && saveError.name === "AbortError") {
@@ -303,6 +339,7 @@ export function RecordingUploadPage({
         return;
       }
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (finishError) {
       setError(finishError instanceof Error

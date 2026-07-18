@@ -7,6 +7,12 @@ import { RecordingUploadPage } from "./RecordingUploadPage";
 import { CreditRows } from "./CreditRows";
 import { FeedbackMessage, useRevealFeedback } from "./FeedbackMessage";
 import { LookupTabs, lookupPanelId, lookupTabId } from "./LookupTabs";
+import {
+  UnsavedChangesProvider,
+  editorValuesChanged,
+  shouldRefreshEditor,
+  useUnsavedChanges,
+} from "./UnsavedChanges";
 import { pauseOtherAudioPlayers } from "./audio-playback";
 import { copyTextBlock, shareTextBlock, supportsSystemTextShare } from "./text-sharing";
 import {
@@ -817,6 +823,12 @@ function LyricEditorPage({
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isTrashing, setIsTrashing] = useState(false);
+  const editorKey = `${mode}:${songId}:${lyricId}`;
+  const loadedEditorKey = useRef<string | null>(null);
+  const [initialContent, setInitialContent] = useState<{ key: string; value: string } | null>(null);
+  const hasUnsavedChanges = initialContent?.key === editorKey
+    && editorValuesChanged(initialContent.value, content);
+  const { allowNextNavigation } = useUnsavedChanges(hasUnsavedChanges);
 
   useEffect(() => {
     let cancelled = false;
@@ -825,6 +837,8 @@ function LyricEditorPage({
         setIsLoading(false);
         return;
       }
+      if (!shouldRefreshEditor(loadedEditorKey.current, editorKey, hasUnsavedChanges)) return;
+      setIsLoading(true);
       try {
         const song = await refreshSong(songId);
         if (cancelled) return;
@@ -836,9 +850,16 @@ function LyricEditorPage({
             return;
           }
           setContent(lyric.content);
+          setInitialContent({ key: editorKey, value: lyric.content });
           setRevision(lyric.revision);
           setIsLegacyImport(lyric.origin === "legacy_import");
+        } else {
+          setContent("");
+          setInitialContent({ key: editorKey, value: "" });
+          setRevision(null);
+          setIsLegacyImport(false);
         }
+        loadedEditorKey.current = editorKey;
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The typed-lyrics editor could not be loaded.");
       } finally {
@@ -847,7 +868,7 @@ function LyricEditorPage({
     }
     void load();
     return () => { cancelled = true; };
-  }, [canEdit, isOnline, lyricId, mode, songId]);
+  }, [canEdit, editorKey, isOnline, lyricId, mode, songId]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -862,6 +883,7 @@ function LyricEditorPage({
         await updateLyric(songId, lyricId, content, revision ?? 0);
       }
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (saveError) {
       if (saveError instanceof ApiError) {
@@ -894,6 +916,7 @@ function LyricEditorPage({
     try {
       await trashLyric(songId, lyricId, revision);
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (trashError) {
       setError(trashError instanceof Error ? trashError.message : "The typed lyrics could not be moved to Trash.");
@@ -985,6 +1008,16 @@ function ScanEditorPage({
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isTrashing, setIsTrashing] = useState(false);
+  const editorKey = `${mode}:${songId}:${scanId}`;
+  const loadedEditorKey = useRef<string | null>(null);
+  const [initialValues, setInitialValues] = useState<{
+    key: string;
+    value: { notebookId: string; pageLabel: string; fileSelected: boolean };
+  } | null>(null);
+  const currentValues = { notebookId, pageLabel, fileSelected: file !== null };
+  const hasUnsavedChanges = initialValues?.key === editorKey
+    && editorValuesChanged(initialValues.value, currentValues);
+  const { allowNextNavigation } = useUnsavedChanges(hasUnsavedChanges);
 
   useEffect(() => {
     if (!file) {
@@ -1003,6 +1036,8 @@ function ScanEditorPage({
         setIsLoading(false);
         return;
       }
+      if (!shouldRefreshEditor(loadedEditorKey.current, editorKey, hasUnsavedChanges)) return;
+      setIsLoading(true);
       try {
         const [editorOptions, song] = await Promise.all([
           loadScanEditorOptions(),
@@ -1021,7 +1056,27 @@ function ScanEditorPage({
           setNotebookId(scan.notebookId ?? "");
           setPageLabel(scan.pageLabel ?? "");
           setRevision(scan.revision);
+          setFile(null);
+          setInitialValues({
+            key: editorKey,
+            value: {
+              notebookId: scan.notebookId ?? "",
+              pageLabel: scan.pageLabel ?? "",
+              fileSelected: false,
+            },
+          });
+        } else {
+          setFilename("");
+          setNotebookId("");
+          setPageLabel("");
+          setRevision(null);
+          setFile(null);
+          setInitialValues({
+            key: editorKey,
+            value: { notebookId: "", pageLabel: "", fileSelected: false },
+          });
         }
+        loadedEditorKey.current = editorKey;
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The Scan editor could not be loaded.");
       } finally {
@@ -1030,7 +1085,7 @@ function ScanEditorPage({
     }
     void load();
     return () => { cancelled = true; };
-  }, [canEdit, isOnline, mode, scanId, songId]);
+  }, [canEdit, editorKey, isOnline, mode, scanId, songId]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -1064,6 +1119,7 @@ function ScanEditorPage({
         });
       }
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (saveError) {
       if (saveError instanceof ApiError) {
@@ -1090,6 +1146,7 @@ function ScanEditorPage({
     try {
       await trashScan(songId, scanId, revision);
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (trashError) {
       setError(trashError instanceof Error ? trashError.message : "The Scan could not be moved to Trash.");
@@ -1256,6 +1313,16 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isTrashing, setIsTrashing] = useState(false);
+  const editorKey = `${songId}:${recordingId}`;
+  const loadedEditorKey = useRef<string | null>(null);
+  const [initialValues, setInitialValues] = useState<{
+    key: string;
+    value: { description: string; recordedOn: string; vocalistIds: string[] };
+  } | null>(null);
+  const currentValues = { description, recordedOn, vocalistIds };
+  const hasUnsavedChanges = initialValues?.key === editorKey
+    && editorValuesChanged(initialValues.value, currentValues);
+  const { allowNextNavigation } = useUnsavedChanges(hasUnsavedChanges);
 
   useEffect(() => {
     let cancelled = false;
@@ -1264,6 +1331,8 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
         setIsLoading(false);
         return;
       }
+      if (!shouldRefreshEditor(loadedEditorKey.current, editorKey, hasUnsavedChanges)) return;
+      setIsLoading(true);
       try {
         const [editorOptions, song] = await Promise.all([
           loadRecordingEditorOptions(),
@@ -1278,11 +1347,18 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
           return;
         }
         setFilename(recording.filename);
-        setDescription(recording.description);
-        setRecordedOn(recording.recordedOn ?? "");
-        setVocalistIds(recording.credits.filter((credit) => credit.role === "vocals").map((credit) => credit.personId));
+        const nextValues = {
+          description: recording.description,
+          recordedOn: recording.recordedOn ?? "",
+          vocalistIds: recording.credits.filter((credit) => credit.role === "vocals").map((credit) => credit.personId),
+        };
+        setDescription(nextValues.description);
+        setRecordedOn(nextValues.recordedOn);
+        setVocalistIds(nextValues.vocalistIds);
+        setInitialValues({ key: editorKey, value: nextValues });
         setProcessingState(recording.processingState);
         setRevision(recording.revision);
+        loadedEditorKey.current = editorKey;
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The Recording editor could not be loaded.");
       } finally {
@@ -1291,7 +1367,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
     }
     void load();
     return () => { cancelled = true; };
-  }, [canEdit, isOnline, recordingId, songId]);
+  }, [canEdit, editorKey, isOnline, recordingId, songId]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -1307,6 +1383,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
         revision,
       });
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (saveError) {
       if (saveError instanceof ApiError) {
@@ -1331,6 +1408,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
     try {
       await trashRecording(songId, recordingId, revision);
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
     } catch (trashError) {
       setError(trashError instanceof Error ? trashError.message : "The Recording could not be moved to Trash.");
@@ -1689,6 +1767,12 @@ function SongEditorPage({
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isTrashing, setIsTrashing] = useState(false);
+  const editorKey = `${mode}:${songId}`;
+  const loadedEditorKey = useRef<string | null>(null);
+  const [initialForm, setInitialForm] = useState<{ key: string; value: SongFormState } | null>(null);
+  const hasUnsavedChanges = initialForm?.key === editorKey
+    && editorValuesChanged(initialForm.value, form);
+  const { allowNextNavigation } = useUnsavedChanges(hasUnsavedChanges);
 
   useEffect(() => {
     let cancelled = false;
@@ -1697,6 +1781,8 @@ function SongEditorPage({
         setIsLoading(false);
         return;
       }
+      if (!shouldRefreshEditor(loadedEditorKey.current, editorKey, hasUnsavedChanges)) return;
+      setIsLoading(true);
       try {
         const [editorOptions, song] = await Promise.all([
           loadSongEditorOptions(),
@@ -1705,7 +1791,7 @@ function SongEditorPage({
         if (cancelled) return;
         setOptions(editorOptions);
         if (song) {
-          setForm({
+          const nextForm: SongFormState = {
             titleLatin: song.titleLatin,
             titleNative: song.titleNative ?? "",
             status: song.status === "checked" ? "checked" : "draft",
@@ -1716,13 +1802,20 @@ function SongEditorPage({
             aliasesText: song.aliases.join("\n"),
             notes: song.notes ?? "",
             revision: song.revision,
-          });
+          };
+          setForm(nextForm);
+          setInitialForm({ key: editorKey, value: nextForm });
           setChildCounts({
             lyricTexts: song.lyricTexts.length,
             scans: song.scans.length,
             recordings: song.recordings.length,
           });
+        } else {
+          setForm(EMPTY_SONG_FORM);
+          setInitialForm({ key: editorKey, value: EMPTY_SONG_FORM });
+          setChildCounts({ lyricTexts: 0, scans: 0, recordings: 0 });
         }
+        loadedEditorKey.current = editorKey;
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The editor could not be loaded.");
       } finally {
@@ -1731,7 +1824,7 @@ function SongEditorPage({
     }
     void load();
     return () => { cancelled = true; };
-  }, [canEdit, isOnline, mode, songId]);
+  }, [canEdit, editorKey, isOnline, mode, songId]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -1757,6 +1850,7 @@ function SongEditorPage({
         ? await createSong(payload)
         : await updateSong(songId, { ...payload, revision: form.revision ?? 0 });
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate(`/songs/${encodeURIComponent(saved.id)}`, { replace: true });
     } catch (saveError) {
       if (saveError instanceof ApiError) {
@@ -1782,6 +1876,7 @@ function SongEditorPage({
     try {
       await trashSong(songId, form.revision);
       await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
       navigate("/songs", { replace: true });
     } catch (trashError) {
       setError(trashError instanceof Error ? trashError.message : "The Song could not be moved to Trash.");
@@ -2275,6 +2370,7 @@ export function App() {
   const canEdit = !sessionResolved ? null : session?.role === "editor" || session?.role === "admin";
 
   return (
+    <UnsavedChangesProvider>
     <div className="app-frame">
       <a className="skip-link" href="#main-content">Skip to content</a>
       <header className="app-header">
@@ -2326,5 +2422,6 @@ export function App() {
         <Link to="/account">Account</Link>
       </nav>}
     </div>
+    </UnsavedChangesProvider>
   );
 }
