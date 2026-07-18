@@ -48,8 +48,13 @@ cutover work:
 - the global offline/read-only indicator follows browser connectivity rather than treating one slow API request as proof that the whole app is offline; online-only media handles request failures locally, and an open Scan viewer remains mounted with immediate loading feedback; the Scan/connectivity behavior is owner-accepted in Android Chrome/Brave and macOS Safari;
 - catalog search, filters, sorting, and scroll position survive in-app Song navigation and Back in private memory, while reload/logout intentionally resets them; Song details open at the top, and the navigation behavior is owner-accepted on Android and macOS; action-wide errors and duplicate outcomes reveal themselves without moving background-refresh messages or field-level validation away from their context;
 - the deployed audit follow-up gives focus and interactive controls at least 3:1 non-text contrast, completes keyboard/ARIA behavior for the Lists tabs, protects dirty editor state across navigation and reconnect, and classifies terminal pre-intent upload history as informational; the owner accepted its keyboard, unsaved-work, offline/reconnect, and date-input behavior on macOS;
-- the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date;
+- the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
 - the latest branch checkpoint passes 55 Vitest files / 369 tests, all 90 Python audio tests, all three TypeScript projects, the production/service-worker build, whitespace checks, an exact dependency tree with zero reported npm vulnerabilities, and the prior zero-write staging D1 postflight.
+
+The bounded improvements selected from the 2026-07-18 whole-application audit are
+implemented, deployed, and accepted. No further implementation slice is implied
+by this checkpoint; optional UX ideas and production-readiness gates remain
+separately prioritized work.
 
 - a reconciled forward migration enforces normalized active Song titles, statuses, controlled lookup keys, simplified typed lyrics, Recording descriptions, and Trash safety;
 - all imported row and media-reference counts remain unchanged, with legacy Scan/Recording metadata retained privately;

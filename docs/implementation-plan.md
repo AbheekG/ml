@@ -16,7 +16,12 @@ classification, and Recording-date validation. Its deployed behavior passed the
 owner's macOS keyboard, unsaved-work, offline/reconnect, and date-input checks.
 The approved `Asia/Kolkata` shared-calendar refinement is included in protected
 staging; its deployment postflight retained Access protection, found no pending
-migration or integrity error, and wrote zero D1 rows.
+migration or integrity error, and wrote zero D1 rows. The owner confirmed the
+ordinary date selector remains normal; the conditional differing-date note is
+accepted through automated India/device boundary coverage because both locations
+showed the same date during the manual check. The bounded 2026-07-18 audit-
+improvement slice is complete, deployed, and accepted. No new implementation
+task is selected at this checkpoint.
 Production remains absent and separately approval-gated.
 
 Milestone history and operational detail: the vertical slice, online
