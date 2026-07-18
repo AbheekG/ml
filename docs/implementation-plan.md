@@ -6,7 +6,7 @@ production readiness only as separately prioritized and approved.
 
 Current handoff checkpoint (2026-07-18): protected staging runs Worker
 `6f49167f-cd55-4981-8dbe-2245545e32df`, client/service-worker build
-`258dec2ffcd1`. The latest branch verification passed 55 Vitest files / 369 tests,
+`258dec2ffcd1`. The merged checkpoint verification passed 55 Vitest files / 369 tests,
 all 90 Python audio tests, all three TypeScript projects, production and service-
 worker builds, whitespace checks, an exact dependency tree with zero reported
 npm vulnerabilities, and zero-write staging-D1 postflight. The audit follow-up
