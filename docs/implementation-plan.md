@@ -1,15 +1,24 @@
 # Music Library implementation plan
 
-Status: the necessary private-beta feature set is implemented and accepted in
-protected staging. Continue with optional UX refinement, audit/cleanup, and
-production readiness only as separately prioritized and approved.
+Status: the necessary private-beta feature set is implemented in protected
+staging. The newly selected Scan-orientation refinement is deployed and awaits
+owner device acceptance. Continue with other optional UX refinement,
+audit/cleanup, and production readiness only as separately prioritized and
+approved.
 
 Current handoff checkpoint (2026-07-18): protected staging runs Worker
-`6f49167f-cd55-4981-8dbe-2245545e32df`, client/service-worker build
-`258dec2ffcd1`. The merged checkpoint verification passed 55 Vitest files / 369 tests,
+`97a66e8f-0209-4ce6-920c-12165d61a451`, client/service-worker build
+`51d4d6e88633`. The current verification passed 56 Vitest files / 379 tests,
 all 90 Python audio tests, all three TypeScript projects, production and service-
 worker builds, whitespace checks, an exact dependency tree with zero reported
-npm vulnerabilities, and zero-write staging-D1 postflight. The audit follow-up
+npm vulnerabilities, and zero-write staging-D1 postflight. Scan orientation is
+stored as a revision-guarded absolute quarter-turn value; every reader can
+rotate locally, editors persist online after a debounce, and browser display and
+current-view sharing transform only the loaded readability image. Exact
+originals and stored readability JPEGs remain unchanged. Migration `0014` is
+fully applied; all 499 existing Scans retain the zero default and there are zero
+invalid values or foreign-key errors. The in-app browser runtime was unavailable,
+so owner device acceptance remains the current gate. The earlier audit follow-up
 adds accessible control contrast and complete Lists-tab semantics, dirty-form
 navigation/reconnect protection, accurate active-versus-historical upload alert
 classification, and Recording-date validation. Its deployed behavior passed the
@@ -20,8 +29,9 @@ migration or integrity error, and wrote zero D1 rows. The owner confirmed the
 ordinary date selector remains normal; the conditional differing-date note is
 accepted through automated India/device boundary coverage because both locations
 showed the same date during the manual check. The bounded 2026-07-18 audit-
-improvement slice is complete, deployed, and accepted. No new implementation
-task is selected at this checkpoint.
+improvement slice remains complete, deployed, and accepted. The only selected
+task at this checkpoint is manual acceptance of the deployed Scan-orientation
+refinement.
 Production remains absent and separately approval-gated.
 
 Milestone history and operational detail: the vertical slice, online
@@ -40,8 +50,9 @@ gate also passed Scan and Recording create/replace, multipart interruption and
 resume, exact duplicate rejection/dismissal, audio processing/playback, metadata
 editing, retained replacement history, and child/parent Trash/restore. Its exact
 D1/R2 postflight matches every planned count and all nine retained objects.
-iOS/iPadOS compatibility and observed per-Scan orientation remain explicit
-later work. Scan-viewer gesture containment is owner-accepted:
+iOS/iPadOS compatibility remains explicit later work. Browser-only per-Scan
+orientation correction is now deployed and awaiting owner device acceptance.
+Scan-viewer gesture containment is owner-accepted:
 the viewer modal suppresses browser-level touch zoom while open, and a native
 non-passive wheel boundary converts trackpad pinch into bounded image zoom
 without scaling the controls. Android Brave testing then exposed that a single
@@ -188,12 +199,11 @@ against the real staging D1 engine.
 ## Current execution order
 
 The core read/edit/recovery/search/sharing flows and safe Scan/Recording create/
-replace pipelines now work in staging. No necessary feature slice is currently
-open. Continue in this order:
+replace pipelines now work in staging. Scan orientation is deployed and its
+manual device gate is open. Continue in this order:
 
-1. begin the next session with a read-only whole-application and workspace audit,
-   then prioritize any optional UX ideas against concrete user benefit, risk,
-   accessibility, and maintenance cost;
+1. complete owner testing of viewer-local rotation, editor persistence,
+   current-view sharing, Image-only mode, and unchanged original opening;
 2. implement approved optional improvements as separate small commits with the
    existing automated and protected-staging device gates;
 3. at the next genuine Recording finalization/replacement, verify its bounded
@@ -202,8 +212,8 @@ open. Continue in this order:
 4. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
    any deletion executor and every physical delete remain separately designed
    and owner-approved;
-5. investigate the two issue-marked Scan mappings, deferred unmatched cases,
-   per-Scan orientation, or reserved manual uploads only when prioritized; and
+5. investigate the two issue-marked Scan mappings, deferred unmatched cases, or
+   reserved manual uploads only when prioritized; and
 6. begin production readiness and cutover only after reconciliation, backup,
    quota, broader device-coverage, and explicit owner-approval gates pass.
 

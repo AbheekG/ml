@@ -1,7 +1,8 @@
 # Scan display orientation
 
-Status: implemented locally; protected-staging deployment and owner device
-acceptance are pending.
+Status: implemented and deployed to protected staging as Worker
+`97a66e8f-0209-4ce6-920c-12165d61a451`, client/service-worker build
+`51d4d6e88633`; owner device acceptance is pending.
 
 ## Stored state and media preservation
 
@@ -48,7 +49,7 @@ unsupported browser, or offline device.
 
 ## Acceptance gate
 
-Automated coverage must include schema default/check behavior, viewer write
+Automated coverage includes schema default/check behavior, viewer write
 denial, editor revision conflicts, all four display transforms, dimension
 swapping, rapid-turn coalescing, current-view sharing without a viewer write,
 generic bounded files, and replacement reset. Real-device acceptance should
@@ -57,3 +58,19 @@ turns, zoom/pan after rotation, Image-only mode, viewer-local behavior,
 editor persistence after reopening, immediate Share while a save is pending,
 the native second-tap path when it occurs naturally, and readability of the
 shared JPEG. Mirror reversal is deliberately outside this feature.
+
+## Deployment verification
+
+The automated gate passes 56 Vitest files / 379 tests, all 90 Python audio
+tests, all three TypeScript projects, the production and service-worker builds,
+the exact npm dependency tree, and an npm audit with zero reported
+vulnerabilities. The in-app browser runtime was unavailable before it could
+open the local page, so rendered interaction evidence comes from jsdom and is
+not treated as real-browser acceptance.
+
+Migration `0014_scan_display_rotation.sql` is fully applied in protected
+staging. Read-only postflight found 499 Scans, all with the default zero
+orientation, zero invalid values, zero foreign-key errors, and zero query
+writes. The new Worker receives 100% of staging traffic behind the expected
+Cloudflare Access redirect. No original or readability object was changed or
+deleted.
