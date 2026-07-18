@@ -8,8 +8,10 @@
   --muted: #716b61;
   --paper: #fffdf8;
   --line: #ded5c6;
+  --control-line: #947c64;
   --accent: #7c3f2c;
   --accent-strong: #642f20;
+  --focus-ring: #7c3f2c;
   --green: #246b45;
   --shadow: 0 12px 35px rgb(66 48 30 / 8%);
 }
@@ -38,13 +40,13 @@ pre {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible {
-  outline: 3px solid rgb(124 63 44 / 35%);
+  outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
 
 select:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid rgb(124 63 44 / 35%);
+  outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
 
@@ -196,7 +198,7 @@ h1 {
 }
 
 .secondary-action {
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   color: var(--ink);
   background: var(--paper);
 }
@@ -219,7 +221,7 @@ button:disabled {
   gap: 0.7rem;
   min-height: 3.1rem;
   padding: 0 1rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 0.8rem;
   color: var(--muted);
   background: var(--paper);
@@ -245,10 +247,17 @@ button:disabled {
   text-transform: uppercase;
 }
 
+.search-field:focus-within,
+.catalog-sort-field:focus-within,
+.catalog-filter-field:focus-within {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
 .catalog-sort-field {
   min-width: 11rem;
   padding: 0.45rem 0.75rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 0.8rem;
   background: var(--paper);
   box-shadow: var(--shadow);
@@ -326,7 +335,7 @@ button:disabled {
 
 .catalog-filter-field {
   padding: 0.65rem 0.75rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 0.7rem;
   background: var(--paper);
 }
@@ -855,7 +864,7 @@ button:disabled {
 .form-field textarea {
   width: 100%;
   padding: 0.72rem 0.8rem;
-  border: 1px solid #cfc2af;
+  border: 1px solid var(--control-line);
   border-radius: 0.65rem;
   color: var(--ink);
   background: white;
@@ -901,7 +910,7 @@ button:disabled {
   display: grid;
   gap: 0.25rem;
   padding: 0.85rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 0.75rem;
   background: #fffaf1;
   cursor: pointer;
@@ -923,7 +932,7 @@ button:disabled {
   justify-self: start;
   margin-top: 0.5rem;
   padding: 0.45rem 0.7rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 0.55rem;
   color: var(--ink);
   background: white;
@@ -982,7 +991,7 @@ button:disabled {
   display: grid;
   gap: 0.25rem;
   padding: 0.9rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 0.75rem;
   background: #fffaf1;
   cursor: pointer;
@@ -1004,7 +1013,7 @@ button:disabled {
   justify-self: start;
   margin-top: 0.5rem;
   padding: 0.45rem 0.7rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 0.55rem;
   color: var(--ink);
   background: white;
@@ -1166,7 +1175,7 @@ button:disabled {
   gap: 0.55rem;
   min-height: 2.7rem;
   padding: 0.6rem 0.7rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 0.65rem;
   background: #fffaf1;
   font-size: 0.86rem;
@@ -1609,7 +1618,7 @@ button:disabled {
   gap: 0.45rem;
   min-height: 3rem;
   padding: 0.65rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 0.75rem;
   color: var(--muted);
   background: var(--paper);

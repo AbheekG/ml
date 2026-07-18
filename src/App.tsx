@@ -6,6 +6,7 @@ import { CatalogControls } from "./CatalogControls";
 import { RecordingUploadPage } from "./RecordingUploadPage";
 import { CreditRows } from "./CreditRows";
 import { FeedbackMessage, useRevealFeedback } from "./FeedbackMessage";
+import { LookupTabs, lookupPanelId, lookupTabId } from "./LookupTabs";
 import { pauseOtherAudioPlayers } from "./audio-playback";
 import { copyTextBlock, shareTextBlock, supportsSystemTextShare } from "./text-sharing";
 import {
@@ -1832,7 +1833,7 @@ function SongEditorPage({
 
         <fieldset className="form-card choice-group">
           <legend>Languages <strong aria-hidden="true">*</strong></legend>
-          <p>Select at least one.</p>
+          <p>Required. Select at least one.</p>
           <div className="choice-grid">
             {options?.languages.map((language) => (
               <label key={language.id}><input type="checkbox" checked={form.languageIds.includes(language.id)} onChange={(event) => setForm({ ...form, languageIds: selected(form.languageIds, language.id, event.target.checked) })} /><span>{language.displayName}</span></label>
@@ -2000,6 +2001,15 @@ function ManageLookupsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: 
     }));
   }
 
+  function selectLookupKind(kind: LookupKind): void {
+    setActiveKind(kind);
+    setFilter("");
+    setAddName("");
+    setConfirmSimilar(false);
+    setEditing(null);
+    setError(null);
+  }
+
   async function addItem(event: FormEvent): Promise<void> {
     event.preventDefault();
     if (isSaving || !addName.trim() || addMatch.exact || (addMatch.similar.length > 0 && !confirmSimilar)) return;
@@ -2044,34 +2054,27 @@ function ManageLookupsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: 
         </div>
       </header>
 
-      <div className="lookup-tabs" role="tablist" aria-label="Library lists">
-        {(Object.keys(LOOKUP_LABELS) as LookupKind[]).map((kind) => (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeKind === kind}
-            className={activeKind === kind ? "active" : ""}
-            key={kind}
-            onClick={() => {
-              setActiveKind(kind);
-              setFilter("");
-              setAddName("");
-              setConfirmSimilar(false);
-              setEditing(null);
-              setError(null);
-            }}
-          >
-            {LOOKUP_LABELS[kind].plural}
-            <span>{collections?.[kind].length ?? "–"}</span>
-          </button>
-        ))}
-      </div>
+      <LookupTabs
+        activeKind={activeKind}
+        options={(Object.keys(LOOKUP_LABELS) as LookupKind[]).map((kind) => ({
+          kind,
+          label: LOOKUP_LABELS[kind].plural,
+          count: collections?.[kind].length ?? null,
+        }))}
+        onSelect={selectLookupKind}
+      />
 
-      <FeedbackMessage message={error} />
-      {!collections ? (
-        <section className="empty-state"><p>Loading library lists…</p></section>
-      ) : (
-        <div className="lookup-layout">
+      <div
+        className="lookup-tab-panel"
+        id={lookupPanelId(activeKind)}
+        role="tabpanel"
+        aria-labelledby={lookupTabId(activeKind)}
+      >
+        <FeedbackMessage message={error} />
+        {!collections ? (
+          <section className="empty-state"><p>Loading library lists…</p></section>
+        ) : (
+          <div className="lookup-layout">
           <section className="detail-card lookup-add" aria-labelledby="lookup-add-title">
             <div>
               <p className="eyebrow">New choice</p>
@@ -2148,8 +2151,9 @@ function ManageLookupsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: 
             )}
             <p className="media-note">Items cannot be deleted because Songs, Scans, or Recordings may refer to them.</p>
           </section>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </main>
   );
 }
