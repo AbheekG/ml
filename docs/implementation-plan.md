@@ -2,8 +2,8 @@
 
 Status: the necessary private-beta feature set is implemented and accepted in
 protected staging. The Scan-orientation refinement is deployed and
-owner-accepted. The credentialed PWA-manifest request is deployed and awaits an
-Android standalone-install retest. Continue with other optional UX refinement,
+owner-accepted. The credentialed PWA-manifest request is deployed and
+owner-accepted on Android Chrome. Continue with other optional UX refinement,
 audit/cleanup, and production readiness only as separately prioritized and
 approved.
 
@@ -16,8 +16,9 @@ manifest. The deployed one-line correction includes the Access session when the
 browser fetches the manifest; all three TypeScript projects, production build,
 and service-worker build pass, Access protection still returns the expected
 unauthenticated redirect, no migration is pending, and no D1 or R2 operation was
-performed. Owner Android retesting is pending. The Scan-orientation verification
-passed 56 Vitest files / 379 tests,
+performed. The owner confirms that Android Chrome now completes the intended
+standalone installation instead of creating a browser shortcut. The Scan-
+orientation verification passed 56 Vitest files / 379 tests,
 all 90 Python audio tests, all three TypeScript projects, production and service-
 worker builds, whitespace checks, an exact dependency tree with zero reported
 npm vulnerabilities, and zero-write staging-D1 postflight. Scan orientation is
@@ -211,12 +212,11 @@ against the real staging D1 engine.
 
 The core read/edit/recovery/search/sharing flows and safe Scan/Recording create/
 replace pipelines now work in staging. Scan orientation is deployed and
-accepted. The credentialed-manifest deployment has one open Android installation
-gate. Continue in this order:
+accepted. The credentialed-manifest deployment is also accepted on Android
+Chrome. No new implementation task is selected. Continue in this order:
 
-1. remove the prior Android browser shortcut, reload the authenticated app in
-   Chrome, and confirm that the install flow now offers a real installation that
-   launches standalone and appears in Android's app list;
+1. begin the next session with a read-only workspace and deployment orientation,
+   then wait for the owner to select the next task;
 2. implement approved optional improvements as separate small commits with the
    existing automated and protected-staging device gates;
 3. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
