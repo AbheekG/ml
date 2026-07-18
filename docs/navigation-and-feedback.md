@@ -6,8 +6,9 @@ client/service-worker build `90aa09dea66e`. The owner reports that direct
 Scan-row sharing, the responsive action presentation, the broader action-icon
 consistency pass, and Recording sharing work well. The specific device/browser
 was not recorded for the later UI/sharing acceptance, so no named-platform claim
-is inferred. The newly deployed unsaved-editor guard described below is awaiting
-owner real-device acceptance.
+is inferred. The owner subsequently accepted the unsaved-editor guard on macOS,
+including navigation choices and preservation of a selected Recording file when
+the offline route replaces the form until reconnect.
 
 ## Catalog Back behavior
 
