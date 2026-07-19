@@ -31,12 +31,16 @@ Do not commit song titles, lyrics, names, email addresses, media, credentials, g
 ## Current status
 
 The necessary private-beta feature set is implemented and operational in
-protected staging. Remaining work is optional UX refinement, broader device
-coverage, workspace/production-readiness review, and separately authorized
-cutover work:
+protected staging. The individual typed-lyric document reconciliation is also
+complete in staging. Remaining work includes the owner-selected private legacy
+Scan/Recording/compilation reconciliation, optional UX refinement, broader
+device coverage, workspace/production-readiness review, and separately
+authorized cutover work:
 
 - the normalized D1 schema and guarded relationships are implemented;
-- the AppSheet importer validates and loads all 454 songs plus related lyrics and media metadata into local D1;
+- the AppSheet importer reproducibly validates and loads the original 454-Song
+  workbook baseline plus related lyrics and media metadata into local D1; later
+  staging additions are tracked separately and do not rewrite that baseline;
 - the responsive catalog reads real local data and composes field-aware relevance search with offline Language/Tag/Person-role/Notebook/status/media filters and six local sort choices;
 - exact and phonetic title/alias matches outrank literal metadata and lyric-only matches; bounded Indic-roman normalization, typos, later title words, and locally joined/split words work entirely from the offline cache;
 - song detail displays metadata, typed lyrics, scan records, and recording records;
@@ -59,7 +63,8 @@ by this checkpoint; optional UX ideas and production-readiness gates remain
 separately prioritized work.
 
 The owner has approved one deferred media-presentation refinement for after the
-current private legacy Lyrics/Scan/Recording reconciliation: ordinary Song,
+remaining private legacy Scan/Recording/compilation reconciliation: ordinary
+Song,
 Scan-viewer, and Trash views should stop displaying original upload filenames,
 which are frequently opaque AppSheet-generated or generic device basenames.
 Filenames remain private provenance and upload/recovery metadata; no schema or
@@ -67,7 +72,9 @@ media deletion is implied. See
 [the media filename presentation decision](docs/media-filename-presentation.md).
 
 - a reconciled forward migration enforces normalized active Song titles, statuses, controlled lookup keys, simplified typed lyrics, Recording descriptions, and Trash safety;
-- all imported row and media-reference counts remain unchanged, with legacy Scan/Recording metadata retained privately;
+- all original AppSheet row and media-reference counts remain preserved, with
+  legacy Scan/Recording metadata retained privately; later reviewed catalog
+  additions are recorded as separate reconciliation milestones;
 - authenticated identities must map to an active `app_users` record, with reusable viewer/editor/admin authorization guards;
 - the authenticated session exposes the current viewer/editor/admin role without exposing the identity;
 - editors/admins can create and update Song titles, status, Languages, Tags, Aliases, and Notes only while online;
@@ -99,7 +106,16 @@ in [the navigation and feedback policy](docs/navigation-and-feedback.md).
 The logout/cache guarantees and remaining real-browser gate are recorded in
 [the private local-data policy](docs/logout-and-local-data.md).
 
-The private staging catalog is loaded into an APAC-primary D1 database for the application's users in India. After the retained synthetic acceptance records and four later genuine Recording uploads, it has 456 Songs, 499 Scans, 834 Recordings (833 active), and 1,978 media rows; originals/derivatives remain in private APAC storage and are delivered only through authenticated API routes. Unassigned/unlinked legacy files remain local for later identification.
+The private staging catalog is loaded into an APAC-primary D1 database for the
+application's users in India. After the retained synthetic acceptance records,
+four later genuine Recording uploads, and the completed guarded Lyrics imports,
+the verified 2026-07-19 snapshot has 580 Songs, 335 lyric rows, 499 Scans, 834
+Recordings (833 active), and 1,978 media rows, with zero foreign-key errors.
+Originals/derivatives remain in private APAC storage and are delivered only
+through authenticated API routes. Unassigned/unlinked legacy files remain local
+for later identification. Aggregate completion boundaries and the next private
+file scope are recorded in
+[the legacy file reconciliation status](docs/legacy-file-reconciliation.md).
 
 Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
 

@@ -321,6 +321,12 @@ Add roles, song forms, typed-lyric editing, child add/edit/upload, trash/restore
 
 Invite the small user group, reconcile final data, test backups/recovery, freeze AppSheet writes, perform final import, and retain AppSheet/Drive as a read-only fallback.
 
+The individual typed-lyric document reconciliation is complete in protected
+staging. Deferred visual/OCR and compilation material plus remaining legacy
+Scan/Recording candidates are still owner-led private reconciliation work; they
+do not authorize import or source movement. See
+[legacy-file-reconciliation.md](legacy-file-reconciliation.md).
+
 ### Phase 5 — search improvement (accepted baseline complete)
 
 Turn real queries into automated ranking tests. Port and correct the useful normalization, Bengali transliteration, phonetic, token, and n-gram ideas from both legacy attempts. Keep all ranking local.

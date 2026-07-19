@@ -3,11 +3,11 @@
 Status: the necessary private-beta feature set is implemented and accepted in
 protected staging. The Scan-orientation refinement is deployed and
 owner-accepted. The credentialed PWA-manifest request is deployed and
-owner-accepted on Android Chrome. Continue with other optional UX refinement,
-audit/cleanup, and production readiness only as separately prioritized and
-approved.
+owner-accepted on Android Chrome. Continue the remaining private legacy file
+reconciliation first; other optional UX refinement, audit/cleanup, and
+production readiness remain separately prioritized and approved.
 
-Current handoff checkpoint (2026-07-18): protected staging runs Worker
+Application/deployment checkpoint (2026-07-18): protected staging runs Worker
 `c06947b2-95ce-43e8-82b0-d9411746c103`, client/service-worker build
 `193893b3833a`. Chrome on Android offered only its browser-shortcut fallback for
 the protected app. The manifest itself meets the install fields, but its HTML
@@ -43,6 +43,17 @@ showed the same date during the manual check. The bounded 2026-07-18 audit-
 improvement slice and the Scan-orientation refinement are complete, deployed,
 and accepted. No new implementation task is selected at this checkpoint.
 Production remains absent and separately approval-gated.
+
+Data-reconciliation checkpoint (2026-07-19): the individual typed-lyric
+document pass is complete in protected staging. Two exact private imports
+processed all 168 active document decisions, adding 124 Songs and 151 lyric rows
+without changing Scans, Recordings, media objects, R2, migrations, or the
+deployed application. Exact aggregate postflight is 580 Songs, 335 lyric rows,
+499 Scans, 834 Recordings, 1,978 media rows, and zero foreign-key errors. The
+remaining owner-selected private work is the deferred visual/OCR and compilation
+material plus Scan/image and audio/Recording candidates outside the completed
+Drive `Final` boundary. See
+[legacy-file-reconciliation.md](legacy-file-reconciliation.md).
 
 Milestone history and operational detail: the vertical slice, online
 catalog/child editing, private Scan create/replace, and Recording
@@ -216,8 +227,12 @@ accepted. The credentialed-manifest deployment is also accepted on Android
 Chrome. The owner is currently prioritizing private legacy file reconciliation;
 no app implementation is selected during that work. Continue in this order:
 
-1. continue only the owner-selected private legacy Lyrics/Scan/Recording review,
-   preserving its no-import/no-move boundary until separately authorized;
+1. continue only the owner-selected remaining private legacy file review. The
+   individual typed-lyric documents and Drive `Final` are complete and must not
+   be reopened without new evidence. Begin the next session with a read-only
+   inventory of deferred visual/OCR and compilation material and Scan/Recording
+   candidates outside `Final`; preserve the no-import/no-move boundary until
+   separately authorized;
 2. after that reconciliation is complete, implement the approved removal of
    source filenames from ordinary media presentation while retaining private
    provenance and recovery metadata, as defined in

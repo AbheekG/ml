@@ -1,7 +1,7 @@
 # Media filename presentation
 
 Status: approved product decision; implementation is deliberately deferred until
-the current legacy Lyrics/Scan/Recording reconciliation work is complete.
+the remaining legacy Scan/Recording/compilation reconciliation work is complete.
 
 ## Decision
 
@@ -51,7 +51,7 @@ fixtures, analytics, or unauthenticated output.
 
 ## Deferred implementation scope
 
-After the owner finishes the current legacy file reconciliation:
+After the owner finishes the remaining legacy file reconciliation:
 
 1. remove filename text from the ordinary Recording rows, Scan rows, Scan viewer,
    and Trash rows;
