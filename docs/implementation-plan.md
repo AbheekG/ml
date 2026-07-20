@@ -9,24 +9,31 @@ remains owner-paused; other optional UX refinement, audit/cleanup, and productio
 readiness remain separately prioritized and approved.
 
 Application/deployment checkpoint (2026-07-20): protected staging runs Worker
-`9726321a-9f96-4d95-8a5b-d67d3e3bc803`, client/service-worker build
+`09f5b751-329c-40f2-82f2-301f84732a5a`, client/service-worker build
 `14194791219b`. Successful Trash restore/move and trashed-duplicate recovery now
 navigate to the destination Song with an explicit moved/restored status instead
 of misreading the child update plus immutable audit insertion as a stale-write
 conflict. Recording upload completion and create/replace finalization now reject
 byte-exact matches against both retained originals and generated playback
 representations; an exact app-shared MP3 reupload resolves to its owning
-Recording and can use the same guarded Trash recovery action. Migration `0016`
-changes only the duplicate checkpoint guards and is fully applied. The gate
-passed 58 Vitest files / 392 tests, all 90 Python audio tests, all three
+Recording and can use the same guarded Trash recovery action. Scan create and
+replacement uploads now likewise compare exact bytes with both registered
+originals and stored readability JPEGs, resolve a derivative through its source
+Scan, and expose the existing active/Trash outcome before writing new media.
+Browser-rotated or otherwise re-encoded shares remain outside this narrow exact-
+byte rule. Migrations `0016` and `0017` are fully applied; the latter adds only
+the readability fingerprint index and two insertion guards. The gate passed 58
+Vitest files / 394 tests, all 90 Python audio tests, all three
 TypeScript projects, production/service-worker builds with seven precache
 entries, whitespace and exact dependency checks, and an npm audit with zero
 reported vulnerabilities. Read-only postflight found the
-new Worker at 100%, the expected Access redirect, no pending migration, both new
-guards present, 581 Songs / 335 lyric rows / 499 Scans / 835 Recordings (833
-active) / 1,979 media rows, one retained owner-test playback/original exact
-overlap, zero duplicate upload sessions, zero foreign-key errors, and zero query
-writes. No test record was cleaned up implicitly. Chrome on Android
+new Worker at 100%, the expected Access redirect, no pending migration, the Scan
+readability index and both guards present, 581 Songs / 335 lyric rows / 499
+Scans / 835 Recordings (833 active) / 1,979 media rows, 945 Scan fingerprints /
+946 members / 946 readability derivatives, zero exact readability/original
+overlaps, one retained owner-test Recording playback/original exact overlap,
+zero duplicate upload sessions, zero foreign-key errors, and zero query writes.
+No test record was cleaned up implicitly. Chrome on Android
 previously offered only its browser-shortcut fallback for
 the protected app. The manifest itself meets the install fields, but its HTML
 link omitted the explicit `use-credentials` mode required for an authenticated

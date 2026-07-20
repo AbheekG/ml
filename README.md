@@ -58,7 +58,7 @@ and separately authorized cutover work:
 - catalog search, filters, sorting, and scroll position survive in-app Song navigation and Back in private memory, while reload/logout intentionally resets them; Song details open at the top, and the navigation behavior is owner-accepted on Android and macOS; action-wide errors and duplicate outcomes reveal themselves without moving background-refresh messages or field-level validation away from their context;
 - the deployed audit follow-up gives focus and interactive controls at least 3:1 non-text contrast, completes keyboard/ARIA behavior for the Lists tabs, protects dirty editor state across navigation and reconnect, and classifies terminal pre-intent upload history as informational; the owner accepted its keyboard, unsaved-work, offline/reconnect, and date-input behavior on macOS;
 - the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
-- the current application checkpoint passes 58 Vitest files / 392 tests, all 90 Python audio tests, all three TypeScript projects, the production/service-worker build, whitespace checks, an exact dependency tree with zero reported npm vulnerabilities, and a clean zero-write staging D1 postflight.
+- the current application checkpoint passes 58 Vitest files / 394 tests, all 90 Python audio tests, all three TypeScript projects, the production/service-worker build, whitespace checks, an exact dependency tree with zero reported npm vulnerabilities, and a clean zero-write staging D1 postflight.
 
 The bounded improvements selected from the 2026-07-18 whole-application audit are
 implemented, deployed, and accepted. No further implementation slice is implied
@@ -133,9 +133,10 @@ in [the legacy file reconciliation status](docs/legacy-file-reconciliation.md).
 Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
 
 Current protected-staging deployment: Worker
-`9726321a-9f96-4d95-8a5b-d67d3e3bc803`, client/service-worker build
-`14194791219b`. Migration `0016_playback_duplicate_detection.sql` is fully
-applied with both playback-aware upload guards present; no migration is pending.
+`09f5b751-329c-40f2-82f2-301f84732a5a`, client/service-worker build
+`14194791219b`. Migration `0017_scan_readability_duplicate_detection.sql` is
+fully applied with its readability fingerprint index and both insertion guards
+present; no migration is pending.
 Production resources and DNS/cutover remain separately approval-gated.
 
 Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker also validates Access JWT signatures, issuer, and audience on every API request. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.
