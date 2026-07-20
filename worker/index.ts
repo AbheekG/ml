@@ -4642,7 +4642,6 @@ app.get("/api/trash", requireRole("editor"), async (context) => {
         scans.id,
         scans.song_id AS songId,
         songs.title_latin AS songTitle,
-        media_objects.original_filename AS filename,
         notebooks.display_name AS notebookName,
         scans.page_label AS pageLabel,
         scans.revision,
@@ -4650,7 +4649,6 @@ app.get("/api/trash", requireRole("editor"), async (context) => {
         CASE WHEN songs.trashed_at IS NULL THEN 0 ELSE 1 END AS songIsTrashed
       FROM scans
       JOIN songs ON songs.id = scans.song_id
-      JOIN media_objects ON media_objects.id = scans.media_id
       LEFT JOIN notebooks ON notebooks.id = scans.notebook_id
       WHERE scans.trashed_at IS NOT NULL
       ORDER BY scans.trashed_at DESC, scans.id
@@ -4658,7 +4656,6 @@ app.get("/api/trash", requireRole("editor"), async (context) => {
       id: string;
       songId: string;
       songTitle: string;
-      filename: string;
       notebookName: string | null;
       pageLabel: string | null;
       revision: number;
@@ -4672,13 +4669,11 @@ app.get("/api/trash", requireRole("editor"), async (context) => {
         songs.title_latin AS songTitle,
         recordings.description,
         recordings.recorded_on AS recordedOn,
-        original_media.original_filename AS filename,
         recordings.revision,
         recordings.trashed_at AS trashedAt,
         CASE WHEN songs.trashed_at IS NULL THEN 0 ELSE 1 END AS songIsTrashed
       FROM recordings
       JOIN songs ON songs.id = recordings.song_id
-      JOIN media_objects AS original_media ON original_media.id = recordings.original_media_id
       WHERE recordings.trashed_at IS NOT NULL
       ORDER BY recordings.trashed_at DESC, recordings.id
     `).all<{
@@ -4687,7 +4682,6 @@ app.get("/api/trash", requireRole("editor"), async (context) => {
       songTitle: string;
       description: string;
       recordedOn: string | null;
-      filename: string;
       revision: number;
       trashedAt: string;
       songIsTrashed: number;

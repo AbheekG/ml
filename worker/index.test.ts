@@ -702,8 +702,11 @@ describe("Worker API", () => {
   });
 
   it("lists trashed Songs and child content only for editors", async () => {
+    const queries: string[] = [];
     const database = {
-      prepare: (query: string) => ({
+      prepare: (query: string) => {
+        queries.push(query);
+        return ({
         all: async () => ({ results: query.includes("WHERE songs.trashed_at IS NOT NULL") ? [{
           id: "song-1",
           titleLatin: "A song",
@@ -726,7 +729,6 @@ describe("Worker API", () => {
           id: "scan-1",
           songId: "song-1",
           songTitle: "A song",
-          filename: "page.jpg",
           notebookName: "Book",
           pageLabel: "3",
           revision: 2,
@@ -738,12 +740,12 @@ describe("Worker API", () => {
           songTitle: "A song",
           description: "Old verse",
           recordedOn: null,
-          filename: "take.mp3",
           revision: 4,
           trashedAt: "2026-07-13T00:00:00.000Z",
           songIsTrashed: 1,
         }] }),
-      }),
+        });
+      },
     } as unknown as D1Database;
 
     const editorResponse = await app.request(
@@ -758,6 +760,11 @@ describe("Worker API", () => {
       scans: [{ id: "scan-1", songIsTrashed: true }],
       recordings: [{ id: "recording-1", songIsTrashed: true }],
     });
+    const mediaQueries = queries.filter((query) => (
+      query.includes("scans.id,") || query.includes("recordings.id,")
+    ));
+    expect(mediaQueries).toHaveLength(2);
+    expect(mediaQueries.every((query) => !query.includes("original_filename"))).toBe(true);
 
     const viewerResponse = await app.request(
       "http://local.test/api/trash",

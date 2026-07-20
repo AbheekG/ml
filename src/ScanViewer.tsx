@@ -22,6 +22,7 @@ import {
   scanViewAfterLayoutChange,
   scanViewAfterWheel,
   scanDisplayName,
+  scanPositionLabel,
   SCAN_ZOOM_STEP,
   type ScanPoint,
   type ScanSize,
@@ -125,6 +126,7 @@ export function ScanViewer({
   const previousId = currentScan ? adjacentScanId(scans, currentScan.id, -1) : null;
   const nextId = currentScan ? adjacentScanId(scans, currentScan.id, 1) : null;
   const currentIndex = currentScan ? scans.findIndex((scan) => scan.id === currentScan.id) : -1;
+  const currentPosition = scanPositionLabel(currentIndex, scans.length);
   const mediaUrl = currentScan ? `/api/scans/${encodeURIComponent(currentScan.id)}/image` : "";
   const originalMediaUrl = currentScan ? `/api/media/${encodeURIComponent(currentScan.mediaId)}` : "";
   const effectiveRotation = currentScan
@@ -610,7 +612,7 @@ export function ScanViewer({
           <header className="scan-viewer-header">
             <div>
               <h2 id="scan-viewer-title">{scanDisplayName(currentScan)}</h2>
-              <span>{scans.length > 1 ? `${currentIndex + 1} of ${scans.length} · ` : ""}{currentScan.filename}</span>
+              {currentPosition && <span>{currentPosition}</span>}
             </div>
             <button className="scan-icon-action scan-close-action" ref={closeButtonRef} type="button" onClick={closeViewer} aria-label="Close scan viewer">×</button>
           </header>

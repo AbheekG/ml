@@ -93,6 +93,6 @@ file move, transcription/OCR run, or deletion from this list.
 6. Keep source movement, any catalog import, and any cloud/media operation as
    later, separately reviewed and explicitly authorized actions.
 
-After this remaining private legacy work is complete, the approved filename-
-presentation refinement may be selected as a separate app change. It remains a
-presentation change only and does not authorize removal of filename provenance.
+The owner separately selected the filename-presentation refinement while this
+private legacy work remains paused. The app change does not resume any item
+above and does not authorize removal of filename provenance.

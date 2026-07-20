@@ -64,11 +64,10 @@ implemented, deployed, and accepted. No further implementation slice is implied
 by this checkpoint; optional UX ideas and production-readiness gates remain
 separately prioritized work.
 
-The owner has approved one deferred media-presentation refinement for after the
-remaining private legacy Scan/Recording/compilation reconciliation: ordinary
-Song,
-Scan-viewer, and Trash views should stop displaying original upload filenames,
-which are frequently opaque AppSheet-generated or generic device basenames.
+The media-presentation refinement now keeps original upload filenames out of
+ordinary Song, Scan-viewer, and Trash views because they are frequently opaque
+AppSheet-generated or generic device basenames. Semantic Recording descriptions,
+Scan Notebook/Page labels, and Scan position identify the media instead.
 Filenames remain private provenance and upload/recovery metadata; no schema or
 media deletion is implied. See
 [the media filename presentation decision](docs/media-filename-presentation.md).

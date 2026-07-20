@@ -156,8 +156,8 @@ The first migration stores each existing workbook `LyricsTyped` block intact and
 
 Mixed legacy formats remain preserved. Import or post-upload processing creates and verifies a browser-compatible playback derivative once when needed, stores it privately, and never discards the original. Playback only streams an already prepared source.
 
-The approved filename-presentation boundary and its deliberately deferred
-implementation are defined in [media-filename-presentation.md](media-filename-presentation.md).
+The implemented filename-presentation boundary is defined in
+[media-filename-presentation.md](media-filename-presentation.md).
 
 ## Editing workflow
 

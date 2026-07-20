@@ -71,7 +71,7 @@ import {
 } from "./catalog-view";
 import { findSimilarLookupItems } from "./lookup-similarity";
 import { shouldOfferDirectCameraCapture } from "./device-capabilities";
-import { scanDisplayName } from "./scan-viewer";
+import { scanDisplayName, scanPositionLabel } from "./scan-viewer";
 import {
   isShareAbort,
   loadOptimizedScanShareFile,
@@ -651,7 +651,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                   <li key={recording.id}>
                     <div className="recording-item">
                       <strong>{recording.description}</strong>
-                      <span>{[recording.recordedOn, recording.filename].filter(Boolean).join(" · ")}</span>
+                      {recording.recordedOn && <span>{recording.recordedOn}</span>}
                       {recording.credits.length > 0 && <span>{recording.credits.map((credit) => `${credit.role === "vocals" ? "Vocals" : credit.role}: ${credit.fullName}`).join(" · ")}</span>}
                       {recording.processingState === "ready"
                         ? <audio
@@ -752,15 +752,18 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
             <section className="detail-card" aria-labelledby="scans-title">
               <h2 id="scans-title">Scanned lyrics and notation <span>{song.scans.length}</span></h2>
               <ul className="media-list">
-                {song.scans.map((scan) => (
+                {song.scans.map((scan, index) => {
+                  const position = scanPositionLabel(index, song.scans.length);
+                  const displayName = scanDisplayName(scan);
+                  return (
                   <li key={scan.id}>
-                    <div><strong>{scanDisplayName(scan)}</strong><span>{scan.filename}</span></div>
+                    <div><strong>{displayName}</strong>{position && <span>{position}</span>}</div>
                     <div className="media-item-actions">
                       <button
                         className="media-action compact-action"
                         type="button"
                         disabled={!isOnline}
-                        aria-label="View Scan"
+                        aria-label={`View ${displayName}${position ? `, ${position}` : ""}`}
                         title={isOnline ? "View Scan" : "Scans require an internet connection"}
                         onClick={() => setViewerScanId(scan.id)}
                       ><ActionContent kind="view" label="View" /></button>
@@ -787,7 +790,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                         <Link
                           className="media-action compact-action"
                           to={`/songs/${encodeURIComponent(song.id)}/scans/${encodeURIComponent(scan.id)}/edit`}
-                          aria-label="Edit Scan"
+                          aria-label={`Edit ${displayName}${position ? `, ${position}` : ""}`}
                           title="Edit Scan"
                         ><ActionContent kind="edit" label="Edit" /></Link>
                       )}
@@ -800,7 +803,8 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                       )}
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </section>
           )}
@@ -1676,7 +1680,7 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
                         {recording.songIsTrashed
                           ? <strong>{recording.songTitle}</strong>
                           : <Link to={`/songs/${encodeURIComponent(recording.songId)}`}>{recording.songTitle}</Link>}
-                        <small>{[recording.recordedOn, recording.filename].filter(Boolean).join(" · ")} · moved {new Date(recording.trashedAt).toLocaleString()}</small>
+                        <small>{recording.recordedOn ? `${recording.recordedOn} · ` : ""}moved {new Date(recording.trashedAt).toLocaleString()}</small>
                       </div>
                       <button className="primary-action" type="button" disabled={restoringId !== null || recording.songIsTrashed} onClick={() => { void restoreTrashedRecording(recording); }}>{restoringId === recording.id ? "Restoring…" : "Restore"}</button>
                     </div>
@@ -1694,11 +1698,11 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
                   <li className="detail-card trash-item" key={scan.id}>
                     <div className="trash-item-heading">
                       <div>
-                        <span>Scan · {[scan.notebookName, scan.pageLabel].filter(Boolean).join(" · ") || "External"}</span>
+                        <span>Scan · {scanDisplayName(scan)}</span>
                         {scan.songIsTrashed
                           ? <strong>{scan.songTitle}</strong>
                           : <Link to={`/songs/${encodeURIComponent(scan.songId)}`}>{scan.songTitle}</Link>}
-                        <small>{scan.filename} · moved {new Date(scan.trashedAt).toLocaleString()}</small>
+                        <small>Moved {new Date(scan.trashedAt).toLocaleString()}</small>
                       </div>
                       <button className="primary-action" type="button" disabled={restoringId !== null || scan.songIsTrashed} onClick={() => { void restoreTrashedScan(scan); }}>{restoringId === scan.id ? "Restoring…" : "Restore"}</button>
                     </div>

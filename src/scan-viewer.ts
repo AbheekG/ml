@@ -61,8 +61,14 @@ export function adjacentScanId(
   return index >= 0 && next >= 0 && next < scans.length ? scans[next].id : null;
 }
 
-export function scanDisplayName(scan: SongScan): string {
+export function scanDisplayName(
+  scan: Pick<SongScan, "notebookName" | "pageLabel">,
+): string {
   return [scan.notebookName, scan.pageLabel].filter(Boolean).join(" · ") || "Scanned page";
+}
+
+export function scanPositionLabel(index: number, total: number): string | null {
+  return total > 1 && index >= 0 && index < total ? `${index + 1} of ${total}` : null;
 }
 
 export function fitScanSize(natural: ScanSize, viewport: ScanSize): ScanSize {

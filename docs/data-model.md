@@ -95,5 +95,5 @@ Scan ── optional Notebook
 
 The filename storage-versus-presentation boundary is recorded in
 [media-filename-presentation.md](media-filename-presentation.md). Removing
-filename text from ordinary views is a deferred presentation change and does not
+filename text from ordinary views is an implemented presentation change and does not
 authorize a schema migration or provenance deletion.

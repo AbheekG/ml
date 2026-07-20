@@ -233,11 +233,11 @@ no app implementation is selected during that work. Continue in this order:
    inventory of deferred visual/OCR and compilation material and Scan/Recording
    candidates outside `Final`; preserve the no-import/no-move boundary until
    separately authorized;
-2. after that reconciliation is complete, implement the approved removal of
-   source filenames from ordinary media presentation while retaining private
-   provenance and recovery metadata, as defined in
+2. keep the implemented removal of source filenames from ordinary media
+   presentation separate from the paused legacy work; private provenance,
+   editor selection, and upload-recovery metadata remain retained as defined in
    [media-filename-presentation.md](media-filename-presentation.md);
-3. implement any other approved optional improvements as separate small commits
+3. implement other approved optional improvements as separate small commits
    with the existing automated and protected-staging device gates;
 4. rerun the terminal unreferenced-upload inventory no earlier than 2026-08-16;
    any deletion executor and every physical delete remain separately designed

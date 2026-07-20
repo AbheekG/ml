@@ -1,7 +1,7 @@
 # Media filename presentation
 
-Status: approved product decision; implementation is deliberately deferred until
-the remaining legacy Scan/Recording/compilation reconciliation work is complete.
+Status: implemented locally; protected-staging deployment is pending. Legacy
+file work remains separately owner-paused and was not resumed by this change.
 
 ## Decision
 
@@ -49,21 +49,21 @@ R2 object keys, media IDs, hashes, or generated storage names.
 Filenames remain private and must not enter routine logs, public URLs, tracked
 fixtures, analytics, or unauthenticated output.
 
-## Deferred implementation scope
+## Implemented scope
 
-After the owner finishes the remaining legacy file reconciliation:
+The selected presentation slice:
 
 1. remove filename text from the ordinary Recording rows, Scan rows, Scan viewer,
    and Trash rows;
-2. adjust nearby responsive-layout documentation and tests that currently expect
-   filename text;
+2. use semantic Scan labels plus list/viewer position where multiple Scans need
+   disambiguation;
 3. preserve editor file-selection and upload-recovery feedback;
-4. review duplicate panels and media response headers against the boundary above;
-5. verify reader, editor, mobile, desktop, offline, viewer, Trash, and accessible-
-   name behavior; and
-6. deploy only after the normal protected-staging gate and explicit owner
-   authorization.
+4. preserve duplicate panels and authenticated original-media response headers
+   as bounded operational contexts;
+5. omit filenames from the editor-only Trash API response; and
+6. cover semantic labels, positions, viewer filename absence, and the minimized
+   Trash queries in automated tests.
 
-This is a presentation/API-minimization follow-up, not a schema migration or a
-request to erase existing provenance. It must not rename, rewrite, move, or
+This is a presentation/API-minimization change, not a schema migration or a
+request to erase existing provenance. It does not rename, rewrite, move, or
 delete any legacy file, D1 media row, R2 object, original, or derivative.

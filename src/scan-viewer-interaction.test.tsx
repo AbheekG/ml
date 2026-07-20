@@ -89,6 +89,7 @@ describe("Scan viewer rotation", () => {
       />,
     );
     const image = loadDisplayedScan();
+    expect(screen.queryByText(scan.filename)).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Rotate Scan clockwise" }));
     expect(image.style.transform).toContain("rotate(90deg)");

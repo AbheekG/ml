@@ -282,7 +282,6 @@ export type TrashedScan = {
   id: string;
   songId: string;
   songTitle: string;
-  filename: string;
   notebookName: string | null;
   pageLabel: string | null;
   revision: number;
@@ -300,7 +299,6 @@ export type TrashedRecording = {
   songTitle: string;
   description: string;
   recordedOn: string | null;
-  filename: string;
   revision: number;
   trashedAt: string;
   songIsTrashed: boolean;

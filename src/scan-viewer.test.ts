@@ -11,6 +11,7 @@ import {
   scanViewAfterLayoutChange,
   scanViewAfterWheel,
   scanDisplayName,
+  scanPositionLabel,
   zoomScanAtPoint,
 } from "./scan-viewer";
 
@@ -35,6 +36,9 @@ describe("scan viewer helpers", () => {
   it("uses Notebook and Page when available and a clean fallback otherwise", () => {
     expect(scanDisplayName(scans[0])).toBe("Book · 1");
     expect(scanDisplayName(scans[1])).toBe("Scanned page");
+    expect(scanPositionLabel(0, 1)).toBeNull();
+    expect(scanPositionLabel(1, 4)).toBe("2 of 4");
+    expect(scanPositionLabel(-1, 4)).toBeNull();
   });
 
   it("zooms relative to the fitted page instead of the full viewer width", () => {
