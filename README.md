@@ -128,8 +128,9 @@ in [the legacy file reconciliation status](docs/legacy-file-reconciliation.md).
 Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
 
 Current protected-staging deployment: Worker
-`31242783-052d-4520-8313-ca1a2bce9531`, client/service-worker build
-`b9c8a5f52641`. Production resources and DNS/cutover remain separately
+`37f9c4a6-f3b8-4d36-98e3-8e450f845953`, client/service-worker build
+`921656381900`. Migration `0015_media_parent_moves.sql` is fully applied;
+its audit table is empty at deployment. Production resources and DNS/cutover remain separately
 approval-gated.
 
 Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker also validates Access JWT signatures, issuer, and audience on every API request. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.

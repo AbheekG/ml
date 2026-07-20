@@ -510,7 +510,7 @@ Deliverable: safe online maintenance by the primary editor.
   sharing are now implemented locally for all readers and remain available while
   offline; real Safari/iOS and Chrome/Android clipboard/share-sheet checks remain;
 - favorites, playlists, set lists, or recently viewed only if actual use calls for them;
-- contextual trashed-media recovery is implemented locally: Trash offers a
+- contextual trashed-media recovery is deployed to protected staging: Trash offers a
   searchable `Move to Song…` action for Scans and Recordings, while an exact
   duplicate upload that matches a trashed child offers the same restore/move at
   the point of need. The revision-guarded transaction preserves child/media IDs
