@@ -498,6 +498,13 @@ Deliverable: safe online maintenance by the primary editor.
   sharing are now implemented locally for all readers and remain available while
   offline; real Safari/iOS and Chrome/Android clipboard/share-sheet checks remain;
 - favorites, playlists, set lists, or recently viewed only if actual use calls for them;
+- add an explicit editor/admin workflow to move an existing Recording to another
+  active Song without Trash or re-upload. Require confirmation, current-revision
+  conflict protection, target-Song description uniqueness, and an auditable
+  update of the Recording plus both parent Songs while preserving the Recording
+  ID, private media IDs, fingerprints, credits, and replacement history. Design
+  the finalized-upload-session case deliberately instead of bypassing its stored
+  Song-identity invariant;
 - automated transcription/OCR only after the core library is trusted.
 
 ## Feedback loop
