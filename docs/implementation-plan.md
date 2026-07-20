@@ -33,7 +33,11 @@ Scans / 835 Recordings (833 active) / 1,979 media rows, 945 Scan fingerprints /
 946 members / 946 readability derivatives, zero exact readability/original
 overlaps, one retained owner-test Recording playback/original exact overlap,
 zero duplicate upload sessions, zero foreign-key errors, and zero query writes.
-No test record was cleaned up implicitly. Chrome on Android
+No test record was cleaned up implicitly. The owner subsequently accepted the
+deployed Trash and `Move to Song…` behavior. The exact Recording-playback and
+Scan-readability duplicate extensions remain automatically verified rather than
+manually re-exercised; revisit them only if natural use exposes a problem.
+Chrome on Android
 previously offered only its browser-shortcut fallback for
 the protected app. The manifest itself meets the install fields, but its HTML
 link omitted the explicit `use-credentials` mode required for an authenticated
@@ -529,7 +533,10 @@ Deliverable: safe online maintenance by the primary editor.
   the point of need. The revision-guarded transaction preserves child/media IDs
   and history, enforces destination validity/Recording-description uniqueness,
   updates both parents, records cross-Song moves immutably, and leaves active
-  children non-transferable. Consider a broader active-child transfer only if
+  children non-transferable. The owner accepted the Trash and move interaction;
+  the derivative-duplicate extensions are automatically covered and may be
+  rechecked during natural use without creating dedicated retained fixtures.
+  Consider a broader active-child transfer only if
   real use shows the Trash-first recovery flow is insufficient;
 - automated transcription/OCR only after the core library is trusted.
 

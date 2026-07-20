@@ -5,7 +5,10 @@ is deployed as Worker version `09f5b751-329c-40f2-82f2-301f84732a5a`,
 client/service-worker build `14194791219b`. The owner previously accepted the
 ten highest-risk local visual candidates and reports that optimized sharing and
 responsive actions work well. The specific device/browser was not recorded, and
-broader iPadOS compatibility remains a later non-blocking gate.
+broader iPadOS compatibility remains a later non-blocking gate. The narrow exact
+readability-reupload extension is automatically verified but was not manually
+re-exercised with another retained Scan upload; revisit it if natural use
+exposes a problem.
 
 ## Policy
 

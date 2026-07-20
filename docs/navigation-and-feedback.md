@@ -1,14 +1,15 @@
 # Catalog navigation and action feedback
 
 Status: navigation behavior is deployed and owner-accepted. Current protected
-staging is Worker version `6f49167f-cd55-4981-8dbe-2245545e32df`;
-client/service-worker build `258dec2ffcd1`. The owner reports that direct
+staging is Worker version `09f5b751-329c-40f2-82f2-301f84732a5a`;
+client/service-worker build `14194791219b`. The owner reports that direct
 Scan-row sharing, the responsive action presentation, the broader action-icon
 consistency pass, and Recording sharing work well. The specific device/browser
 was not recorded for the later UI/sharing acceptance, so no named-platform claim
 is inferred. The owner subsequently accepted the unsaved-editor guard on macOS,
 including navigation choices and preservation of a selected Recording file when
-the offline route replaces the form until reconnect.
+the offline route replaces the form until reconnect, and accepted the deployed
+Trash and `Move to Song…` flow including its successful destination feedback.
 
 ## Catalog Back behavior
 
@@ -123,6 +124,7 @@ online and editor-only.
 6. Recheck normal online and offline logout; no prior catalog query or filter may
    reappear after private-data clearing.
 
-The navigation portion is accepted. Feedback visibility should be observed
-during the next natural error or duplicate operation; do not manufacture a
-retained upload solely for this check.
+Navigation and successful Trash/move feedback are accepted. Exact
+Recording-playback and Scan-readability duplicate outcomes remain automatically
+covered but were not manually re-exercised; observe them during natural use and
+do not manufacture a retained upload solely for this check.

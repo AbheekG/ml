@@ -1,7 +1,10 @@
 # Recording original upload
 
 Status: implemented, deployed to protected staging, and manually accepted with
-exact D1/R2 postflight; production remains separately approval-gated.
+exact D1/R2 postflight; production remains separately approval-gated. The later
+exact-playback-reupload extension is automatically verified and deployed but was
+not manually re-exercised with another retained test upload; revisit it if
+natural use exposes a problem.
 
 ## Decision
 
