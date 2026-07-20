@@ -32,10 +32,12 @@ Do not commit song titles, lyrics, names, email addresses, media, credentials, g
 
 The necessary private-beta feature set is implemented and operational in
 protected staging. The individual typed-lyric document reconciliation is also
-complete in staging. Remaining work includes the owner-selected private legacy
-Scan/Recording/compilation reconciliation, optional UX refinement, broader
-device coverage, workspace/production-readiness review, and separately
-authorized cutover work:
+complete in staging, and the additional Drive Recording inventory is triaged.
+Private legacy file work is now owner-paused: the remaining boundary is an
+owner-review set of unassigned Recordings plus deferred visual/OCR,
+compilation/index, and notation material. Other possible work includes optional
+UX refinement, broader device coverage, workspace/production-readiness review,
+and separately authorized cutover work:
 
 - the normalized D1 schema and guarded relationships are implemented;
 - the AppSheet importer reproducibly validates and loads the original 454-Song
@@ -108,14 +110,15 @@ The logout/cache guarantees and remaining real-browser gate are recorded in
 
 The private staging catalog is loaded into an APAC-primary D1 database for the
 application's users in India. After the retained synthetic acceptance records,
-four later genuine Recording uploads, and the completed guarded Lyrics imports,
-the verified 2026-07-19 snapshot has 580 Songs, 335 lyric rows, 499 Scans, 834
-Recordings (833 active), and 1,978 media rows, with zero foreign-key errors.
+four later genuine Recording uploads, the completed guarded Lyrics imports, and
+the accepted Drive Recording metadata/reparent reconciliation, the verified
+2026-07-20 snapshot has 581 Songs, 335 lyric rows, 499 Scans, 834 Recordings
+(833 active), and 1,978 media rows, with zero foreign-key errors.
 Originals/derivatives remain in private APAC storage and are delivered only
-through authenticated API routes. Unassigned/unlinked legacy files remain local
-for later identification. Aggregate completion boundaries and the next private
-file scope are recorded in
-[the legacy file reconciliation status](docs/legacy-file-reconciliation.md).
+through authenticated API routes. The owner-review Recording copies and all
+unassigned/unlinked legacy sources remain local; legacy sources are immutable.
+Aggregate completion boundaries and the paused private-file scope are recorded
+in [the legacy file reconciliation status](docs/legacy-file-reconciliation.md).
 
 Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
 
