@@ -143,10 +143,13 @@ the session is created.
   an R2 abort failure leaves only a private incomplete upload for lifecycle
   cleanup.
 - A streaming hash duplicate stops before Recording creation and identifies the
-  existing private record. Reusing identical media for a genuinely distinct
-  Recording requires a later explicit confirmation path and removal of the
-  current `recordings.original_media_id` uniqueness constraint; finalization
-  must not imply or bypass that schema decision.
+  existing private record. If that Recording is trashed, the duplicate panel can
+  atomically restore/move the existing Recording to the upload's active Song and
+  dismiss the duplicate session without deleting its retained upload object.
+  This preserves one Recording and one referenced original media row. Reusing
+  identical media for two simultaneously active, genuinely distinct Recordings
+  remains unsupported and would require a separate schema/product decision;
+  finalization must not imply or bypass it.
 - Finalization is one D1 transaction: media, Recording, copied credits, job, Song
   timestamp, and session outcome either all commit or all roll back. A response
   lost after commit is retried idempotently from the terminal session. The

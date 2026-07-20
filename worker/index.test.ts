@@ -716,6 +716,10 @@ describe("Worker API", () => {
           lyricCount: 1,
           scanCount: 1,
           recordingCount: 1,
+        }] : query.includes("WHERE trashed_at IS NULL") ? [{
+          id: "song-active",
+          titleLatin: "Active song",
+          titleNative: null,
         }] : query.includes("FROM lyric_texts") ? [{
           id: "lyrics-1",
           songId: "song-1",
@@ -759,6 +763,7 @@ describe("Worker API", () => {
       lyrics: [{ id: "lyrics-1", songIsTrashed: true }],
       scans: [{ id: "scan-1", songIsTrashed: true }],
       recordings: [{ id: "recording-1", songIsTrashed: true }],
+      activeSongs: [{ id: "song-active", titleLatin: "Active song" }],
     });
     const mediaQueries = queries.filter((query) => (
       query.includes("scans.id,") || query.includes("recordings.id,")
@@ -1222,6 +1227,189 @@ describe("Worker API", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: "duplicate_recording_description" });
+  });
+
+  it("moves a trashed Scan to another active Song without copying or deleting media", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    let batch: FakeStatement[] = [];
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+          first: async () => query.includes("FROM scans\n    JOIN media_objects")
+            ? { songId: "song-1", revision: 3, trashedAt: "now", mediaState: "trashed" }
+            : query.includes("SELECT id FROM songs") ? { id: "song-2" } : null,
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => {
+        batch = statements;
+        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/trash/scans/scan-1/move",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: 3, targetSongId: "song-2" }),
+      },
+      localBindings(database, "editor"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(batch[0].query).toContain("SET song_id = ?");
+    expect(batch[1].query).toContain("UPDATE media_objects");
+    expect(batch).toHaveLength(4);
+    expect(batch.every((statement) => !statement.query.includes("DELETE"))).toBe(true);
+    await expect(response.json()).resolves.toEqual({
+      scan: { id: "scan-1", songId: "song-2", revision: 4 },
+    });
+  });
+
+  it("rejects a Scan move when the destination Song is not active", async () => {
+    const database = {
+      prepare: (query: string) => ({
+        bind: () => ({
+          first: async () => query.includes("FROM scans\n    JOIN media_objects")
+            ? { songId: "song-1", revision: 3, trashedAt: "now", mediaState: "trashed" }
+            : null,
+        }),
+      }),
+    } as unknown as D1Database;
+    const response = await app.request(
+      "http://local.test/api/trash/scans/scan-1/move",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: 3, targetSongId: "song-missing" }),
+      },
+      localBindings(database, "editor"),
+    );
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "media_move_target_not_found" });
+  });
+
+  it("moves a duplicate trashed Recording and dismisses its upload checkpoint atomically", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    let batch: FakeStatement[] = [];
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          query,
+          values: [] as unknown[],
+          bind(...values: unknown[]) {
+            statement.values = values;
+            return statement;
+          },
+          first: async () => {
+            if (query.includes("FROM recordings\n    JOIN media_objects AS original_media")) {
+              return {
+                songId: "song-1",
+                originalMediaId: "media-1",
+                revision: 4,
+                trashedAt: "now",
+                originalMediaState: "trashed",
+                playbackMediaState: "trashed",
+              };
+            }
+            if (query.includes("SELECT id FROM songs")) return { id: "song-2" };
+            if (query.includes("FROM recording_upload_sessions")) {
+              return {
+                id: "upload-1",
+                songId: "song-2",
+                status: "duplicate",
+                revision: 6,
+                duplicateMediaId: "media-1",
+              };
+            }
+            return null;
+          },
+        } as unknown as FakeStatement;
+        return statement;
+      },
+      batch: async (statements: FakeStatement[]) => {
+        batch = statements;
+        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/trash/recordings/recording-1/move",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          revision: 4,
+          targetSongId: "song-2",
+          duplicateUpload: { sessionId: "upload-1", revision: 6 },
+        }),
+      },
+      localBindings(database, "editor"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(batch[0].query).toContain("UPDATE recordings");
+    expect(batch[2].query).toContain("UPDATE recording_upload_sessions");
+    expect(batch[2].query).toContain("user_discarded");
+    expect(batch).toHaveLength(5);
+    expect(batch.every((statement) => !statement.query.includes("DELETE"))).toBe(true);
+    await expect(response.json()).resolves.toEqual({
+      recording: { id: "recording-1", songId: "song-2", revision: 5 },
+    });
+  });
+
+  it("preserves a trashed Recording when its duplicate upload checkpoint is stale", async () => {
+    let batchCalled = false;
+    const database = {
+      prepare: (query: string) => ({
+        bind: () => ({
+          first: async () => {
+            if (query.includes("FROM recordings\n    JOIN media_objects AS original_media")) {
+              return {
+                songId: "song-1",
+                originalMediaId: "media-1",
+                revision: 4,
+                trashedAt: "now",
+                originalMediaState: "trashed",
+                playbackMediaState: null,
+              };
+            }
+            if (query.includes("SELECT id FROM songs")) return { id: "song-2" };
+            if (query.includes("FROM recording_upload_sessions")) {
+              return { id: "upload-1", songId: "song-2", status: "failed", revision: 7 };
+            }
+            return null;
+          },
+        }),
+      }),
+      batch: async () => {
+        batchCalled = true;
+        return [];
+      },
+    } as unknown as D1Database;
+    const response = await app.request(
+      "http://local.test/api/trash/recordings/recording-1/move",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          revision: 4,
+          targetSongId: "song-2",
+          duplicateUpload: { sessionId: "upload-1", revision: 6 },
+        }),
+      },
+      localBindings(database, "editor"),
+    );
+    expect(response.status).toBe(409);
+    expect(batchCalled).toBe(false);
+    await expect(response.json()).resolves.toEqual({ error: "recording_upload_conflict" });
   });
 
   it("reports a healthy service", async () => {
@@ -1766,6 +1954,7 @@ describe("Scan upload API", () => {
                 filename: "existing.jpg",
                 notebookName: "Blue Book",
                 pageLabel: "12A",
+                scanRevision: 5,
                 scanIsTrashed: 0,
                 songIsTrashed: 0,
               },
@@ -1792,6 +1981,7 @@ describe("Scan upload API", () => {
         filename: "existing.jpg",
         notebookName: "Blue Book",
         pageLabel: "12A",
+        revision: 5,
         isTrashed: false,
       },
     });

@@ -304,6 +304,12 @@ export type TrashedRecording = {
   songIsTrashed: boolean;
 };
 
+export type ActiveSongOption = {
+  id: string;
+  titleLatin: string;
+  titleNative: string | null;
+};
+
 export type RecordingEditorOptions = {
   people: Array<{ id: string; fullName: string }>;
 };
@@ -320,6 +326,7 @@ export type DuplicateScanDetails = {
   filename: string;
   notebookName: string | null;
   pageLabel: string | null;
+  revision: number;
   isTrashed: boolean;
 };
 
@@ -376,6 +383,8 @@ function apiErrorMessage(code: string): string {
     recording_not_trashed: "This Recording has already been restored.",
     recording_parent_trashed: "Restore the parent Song before restoring this Recording.",
     recording_media_unavailable: "The Recording files are not in the expected recovery state.",
+    invalid_media_parent_move: "Choose a valid destination Song and try again.",
+    media_move_target_not_found: "The destination Song is no longer active. Reload and choose another Song.",
     recording_processing_active: "Wait for this Recording’s audio processing to finish before moving it to Trash.",
     invalid_audio_processing_retry: "Reload the Recording before retrying audio preparation.",
     audio_processing_job_not_found: "This Recording has no audio preparation job to retry.",
@@ -583,12 +592,14 @@ export async function loadTrash(): Promise<{
   lyrics: TrashedLyric[];
   scans: TrashedScan[];
   recordings: TrashedRecording[];
+  activeSongs: ActiveSongOption[];
 }> {
   return apiJson<{
     songs: TrashedSong[];
     lyrics: TrashedLyric[];
     scans: TrashedScan[];
     recordings: TrashedRecording[];
+    activeSongs: ActiveSongOption[];
   }>("/api/trash");
 }
 
@@ -707,6 +718,21 @@ export async function restoreScan(
   return response.scan;
 }
 
+export async function moveTrashedScan(
+  scanId: string,
+  revision: number,
+  targetSongId: string,
+): Promise<{ id: string; songId: string; revision: number }> {
+  const response = await apiJson<{
+    scan: { id: string; songId: string; revision: number };
+  }>(`/api/trash/scans/${encodeURIComponent(scanId)}/move`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ revision, targetSongId }),
+  });
+  return response.scan;
+}
+
 export async function loadRecordingEditorOptions(): Promise<RecordingEditorOptions> {
   return apiJson<RecordingEditorOptions>("/api/recording-editor/options");
 }
@@ -772,6 +798,22 @@ export async function restoreRecording(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ revision }),
+  });
+  return response.recording;
+}
+
+export async function moveTrashedRecording(
+  recordingId: string,
+  revision: number,
+  targetSongId: string,
+  duplicateUpload?: { sessionId: string; revision: number },
+): Promise<{ id: string; songId: string; revision: number }> {
+  const response = await apiJson<{
+    recording: { id: string; songId: string; revision: number };
+  }>(`/api/trash/recordings/${encodeURIComponent(recordingId)}/move`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ revision, targetSongId, ...(duplicateUpload ? { duplicateUpload } : {}) }),
   });
   return response.recording;
 }

@@ -510,13 +510,14 @@ Deliverable: safe online maintenance by the primary editor.
   sharing are now implemented locally for all readers and remain available while
   offline; real Safari/iOS and Chrome/Android clipboard/share-sheet checks remain;
 - favorites, playlists, set lists, or recently viewed only if actual use calls for them;
-- add an explicit editor/admin workflow to move an existing Recording to another
-  active Song without Trash or re-upload. Require confirmation, current-revision
-  conflict protection, target-Song description uniqueness, and an auditable
-  update of the Recording plus both parent Songs while preserving the Recording
-  ID, private media IDs, fingerprints, credits, and replacement history. Design
-  the finalized-upload-session case deliberately instead of bypassing its stored
-  Song-identity invariant;
+- contextual trashed-media recovery is implemented locally: Trash offers a
+  searchable `Move to Song…` action for Scans and Recordings, while an exact
+  duplicate upload that matches a trashed child offers the same restore/move at
+  the point of need. The revision-guarded transaction preserves child/media IDs
+  and history, enforces destination validity/Recording-description uniqueness,
+  updates both parents, records cross-Song moves immutably, and leaves active
+  children non-transferable. Consider a broader active-child transfer only if
+  real use shows the Trash-first recovery flow is insufficient;
 - automated transcription/OCR only after the core library is trusted.
 
 ## Feedback loop

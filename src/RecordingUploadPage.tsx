@@ -5,6 +5,7 @@ import { RecordingDateField } from "./RecordingDateField";
 import { FeedbackMessage, useRevealFeedback } from "./FeedbackMessage";
 import {
   loadRecordingEditorOptions,
+  moveTrashedRecording,
   refreshOfflineLibrary,
   refreshSong,
   type RecordingEditorOptions,
@@ -373,6 +374,42 @@ export function RecordingUploadPage({
     }
   }
 
+  async function recoverDuplicateRecording(): Promise<void> {
+    if (
+      !duplicate?.trashed
+      || !duplicate.id
+      || !duplicate.songId
+      || duplicate.revision === null
+      || !upload
+      || isSaving
+      || !isOnline
+      || canEdit !== true
+    ) return;
+    const restoringHere = duplicate.songId === songId;
+    if (!window.confirm(
+      `${restoringHere ? "Restore" : "Move"} the existing Recording ${restoringHere ? "to this Song" : `to “${songTitle}”`}? The stored audio will be reused and the duplicate upload checkpoint will be dismissed. Nothing will be copied or deleted.`,
+    )) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await moveTrashedRecording(
+        duplicate.id,
+        duplicate.revision,
+        songId,
+        { sessionId: upload.id, revision: upload.revision },
+      );
+      await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
+      navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
+    } catch (moveError) {
+      setError(moveError instanceof Error
+        ? moveError.message
+        : "The existing Recording could not be recovered.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function abortRecoverableUpload(candidate: RecordingUploadSession): Promise<void> {
     if (!isOnline || canEdit !== true || isSaving) return;
     if (!window.confirm("Cancel this incomplete upload? It cannot be resumed afterward.")) return;
@@ -478,6 +515,11 @@ export function RecordingUploadPage({
             {duplicate.trashed && <span>The matching Recording is currently in Trash.</span>}
           </div>
           <div className="recording-upload-notice-actions">
+            {duplicate.trashed && duplicate.id && duplicate.songId && duplicate.revision !== null && upload && (
+              <button className="primary-action" type="button" disabled={isSaving} onClick={() => { void recoverDuplicateRecording(); }}>
+                {isSaving ? "Moving…" : duplicate.songId === songId ? "Restore existing Recording" : "Move existing Recording here"}
+              </button>
+            )}
             {duplicate.id && duplicate.songId && (
               <Link className="secondary-action action-link" to={duplicate.trashed ? "/trash" : `/songs/${encodeURIComponent(duplicate.songId)}`}>{duplicate.trashed ? "Open Trash" : "Open existing Song"}</Link>
             )}

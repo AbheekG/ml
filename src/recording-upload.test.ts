@@ -177,7 +177,7 @@ describe("Recording browser upload orchestration", () => {
           completedParts: [],
           status: "duplicate",
           revision: 5,
-          duplicateRecording: { id: "recording-existing", songId: "song-existing", trashed: false },
+          duplicateRecording: { id: "recording-existing", songId: "song-existing", trashed: false, revision: 3 },
         };
         return json({ upload: current });
       }
@@ -193,7 +193,7 @@ describe("Recording browser upload orchestration", () => {
       creditPersonIds: [],
     }, { fetcher })).resolves.toMatchObject({
       kind: "duplicate",
-      duplicateRecording: { id: "recording-existing", songId: "song-existing", trashed: false },
+      duplicateRecording: { id: "recording-existing", songId: "song-existing", trashed: false, revision: 3 },
     });
     expect(fetcher.mock.calls.some(([url]) => String(url).endsWith("/finalize"))).toBe(false);
   });

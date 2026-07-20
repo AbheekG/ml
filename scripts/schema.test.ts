@@ -18,7 +18,8 @@ const audioDispatchMigration = readFileSync(resolve("migrations/0011_audio_dispa
 const scanIntegrityMigration = readFileSync(resolve("migrations/0012_scan_integrity_and_readability.sql"), "utf8");
 const scanMaintenanceLeasesMigration = readFileSync(resolve("migrations/0013_scan_maintenance_leases.sql"), "utf8");
 const scanDisplayRotationMigration = readFileSync(resolve("migrations/0014_scan_display_rotation.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}`;
+const mediaParentMovesMigration = readFileSync(resolve("migrations/0015_media_parent_moves.sql"), "utf8");
+const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}`;
 const timestamp = "2026-07-12T00:00:00.000Z";
 
 function runSql(sql: string): string {
@@ -101,6 +102,84 @@ describe("initial database schema", () => {
         '${timestamp}', 'test', '${timestamp}', 'test'
       );
     `)).toThrow(/CHECK constraint failed/);
+  });
+
+  it("moves only trashed Scans and Recordings to active Songs and records immutable audits", () => {
+    const later = "2026-07-12T01:00:00.000Z";
+    const output = runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES
+        ('song-1', 'Source', 'source', 'draft', '${timestamp}', 'test', '${timestamp}', 'test'),
+        ('song-2', 'Target', 'target', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES
+        ('scan-media-1', 'scans/scan-1.jpg', 'scan.jpg', 4, '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'),
+        ('recording-media-1', 'recordings/recording-1', 'recording.wav', 4, '${"b".repeat(64)}', 'original_audio', '${timestamp}', 'test');
+      INSERT INTO scans (
+        id, song_id, media_id, revision, created_at, created_by, updated_at, updated_by
+      ) VALUES ('scan-1', 'song-1', 'scan-media-1', 1, '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO recordings (
+        id, song_id, original_media_id, description, normalized_description,
+        processing_state, revision, created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'recording-1', 'song-1', 'recording-media-1', 'Take one', 'take one',
+        'ready', 1, '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      UPDATE scans SET trashed_at = '${timestamp}', trashed_by = 'test', revision = 2 WHERE id = 'scan-1';
+      UPDATE recordings SET trashed_at = '${timestamp}', trashed_by = 'test', revision = 2 WHERE id = 'recording-1';
+      UPDATE media_objects SET state = 'trashed', trashed_at = '${timestamp}', trashed_by = 'test';
+      UPDATE scans
+      SET song_id = 'song-2', trashed_at = NULL, trashed_by = NULL,
+          revision = 3, updated_at = '${later}', updated_by = 'editor'
+      WHERE id = 'scan-1';
+      UPDATE recordings
+      SET song_id = 'song-2', trashed_at = NULL, trashed_by = NULL,
+          revision = 3, updated_at = '${later}', updated_by = 'editor'
+      WHERE id = 'recording-1';
+      SELECT scan_id || '|' || from_song_id || '|' || to_song_id || '|' || moved_by
+      FROM media_parent_moves WHERE scan_id = 'scan-1';
+      SELECT recording_id || '|' || from_song_id || '|' || to_song_id || '|' || moved_by
+      FROM media_parent_moves WHERE recording_id = 'recording-1';
+      PRAGMA foreign_key_check;
+    `);
+    expect(output).toBe(
+      "scan-1|song-1|song-2|editor\nrecording-1|song-1|song-2|editor\n",
+    );
+
+    expect(() => runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES
+        ('song-1', 'Source', 'source', 'draft', '${timestamp}', 'test', '${timestamp}', 'test'),
+        ('song-2', 'Target', 'target', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES ('scan-media-1', 'scans/scan-1.jpg', 'scan.jpg', 4, '${"a".repeat(64)}', 'scan', '${timestamp}', 'test');
+      INSERT INTO scans (
+        id, song_id, media_id, created_at, created_by, updated_at, updated_by
+      ) VALUES ('scan-1', 'song-1', 'scan-media-1', '${timestamp}', 'test', '${timestamp}', 'test');
+      UPDATE scans
+      SET song_id = 'song-2', revision = 2, updated_at = '${later}', updated_by = 'editor'
+      WHERE id = 'scan-1';
+    `)).toThrow(/invalid_scan_parent_move/);
+
+    expect(() => runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES
+        ('song-1', 'Source', 'source', 'draft', '${timestamp}', 'test', '${timestamp}', 'test'),
+        ('song-2', 'Target', 'target', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_parent_moves (
+        id, scan_id, from_song_id, to_song_id, moved_at, moved_by
+      ) VALUES ('move-1', 'missing', 'song-1', 'song-2', '${timestamp}', 'test');
+    `)).toThrow(/FOREIGN KEY constraint failed/);
   });
 
   it("enforces durable Recording upload session, credit, and exact part relationships", () => {

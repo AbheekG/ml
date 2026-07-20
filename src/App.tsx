@@ -6,6 +6,7 @@ import { CatalogControls } from "./CatalogControls";
 import { RecordingUploadPage } from "./RecordingUploadPage";
 import { RecordingDateField } from "./RecordingDateField";
 import { CreditRows } from "./CreditRows";
+import { MoveToSongForm } from "./MoveToSongForm";
 import { FeedbackMessage, useRevealFeedback } from "./FeedbackMessage";
 import { LookupTabs, lookupPanelId, lookupTabId } from "./LookupTabs";
 import {
@@ -26,6 +27,8 @@ import {
   loadRecordingEditorOptions,
   loadLookups,
   loadTrash,
+  moveTrashedRecording,
+  moveTrashedScan,
   loadScanEditorOptions,
   loadSession,
   loadSongEditorOptions,
@@ -49,6 +52,7 @@ import {
   updateLookup,
   updateSong,
   type AppSession,
+  type ActiveSongOption,
   type CatalogSong,
   type DuplicateScanDetails,
   type RecordingEditorOptions,
@@ -1169,6 +1173,26 @@ function ScanEditorPage({
     }
   }
 
+  async function recoverDuplicateScan(): Promise<void> {
+    if (!duplicateScan?.isTrashed || isSaving || !isOnline || canEdit !== true) return;
+    const action = duplicateScan.songId === songId ? "restore" : "move";
+    if (!window.confirm(
+      `${action === "restore" ? "Restore" : "Move"} the existing Scan ${action === "restore" ? "to this Song" : `from “${duplicateScan.songTitle}” to “${songTitle}”`}? No file will be copied or deleted.`,
+    )) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await moveTrashedScan(duplicateScan.scanId, duplicateScan.revision, songId);
+      await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
+      navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : "The existing Scan could not be recovered.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function moveToTrash(): Promise<void> {
     if (!isOnline || canEdit !== true || revision === null || isSaving || isTrashing) return;
     const confirmed = window.confirm(
@@ -1228,7 +1252,14 @@ function ScanEditorPage({
             {duplicateScan.pageLabel && <span>Page: {duplicateScan.pageLabel}</span>}
             {duplicateScan.isTrashed && <span>This Scan or its Song is currently in Trash.</span>}
           </div>
-          <Link className="secondary-action action-link" to={duplicateScan.isTrashed ? "/trash" : `/songs/${encodeURIComponent(duplicateScan.songId)}`}>{duplicateScan.isTrashed ? "Open Trash" : "Open Song"}</Link>
+          <div className="duplicate-notice-actions">
+            {duplicateScan.isTrashed && (
+              <button className="primary-action" type="button" disabled={isSaving} onClick={() => { void recoverDuplicateScan(); }}>
+                {isSaving ? "Moving…" : duplicateScan.songId === songId ? "Restore existing Scan" : "Move existing Scan here"}
+              </button>
+            )}
+            <Link className="secondary-action action-link" to={duplicateScan.isTrashed ? "/trash" : `/songs/${encodeURIComponent(duplicateScan.songId)}`}>{duplicateScan.isTrashed ? "Open Trash" : "Open Song"}</Link>
+          </div>
         </section>
       )}
       <form className="song-form" onSubmit={(event) => { void submit(event); }}>
@@ -1520,10 +1551,13 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
 }
 
 function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
+  const navigate = useNavigate();
   const [songs, setSongs] = useState<TrashedSong[]>([]);
   const [lyrics, setLyrics] = useState<TrashedLyric[]>([]);
   const [scans, setScans] = useState<TrashedScan[]>([]);
   const [recordings, setRecordings] = useState<TrashedRecording[]>([]);
+  const [activeSongs, setActiveSongs] = useState<ActiveSongOption[]>([]);
+  const [moveOpen, setMoveOpen] = useState<{ kind: "scan" | "recording"; id: string } | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -1542,6 +1576,7 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
           setLyrics(result.lyrics);
           setScans(result.scans);
           setRecordings(result.recordings);
+          setActiveSongs(result.activeSongs);
           setError(null);
         }
       } catch (loadError) {
@@ -1618,6 +1653,44 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
     }
   }
 
+  async function moveScanToSong(scan: TrashedScan, target: ActiveSongOption): Promise<void> {
+    const moveKey = `move:scan:${scan.id}`;
+    if (!isOnline || canEdit !== true || restoringId !== null) return;
+    if (!window.confirm(
+      `Move this Scan from “${scan.songTitle}” to “${target.titleLatin}”? The existing private file will be reused; nothing will be copied or deleted.`,
+    )) return;
+    setRestoringId(moveKey);
+    setError(null);
+    try {
+      await moveTrashedScan(scan.id, scan.revision, target.id);
+      await refreshOfflineLibrary().catch(() => undefined);
+      navigate(`/songs/${encodeURIComponent(target.id)}`);
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : "The Scan could not be moved.");
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
+  async function moveRecordingToSong(recording: TrashedRecording, target: ActiveSongOption): Promise<void> {
+    const moveKey = `move:recording:${recording.id}`;
+    if (!isOnline || canEdit !== true || restoringId !== null) return;
+    if (!window.confirm(
+      `Move “${recording.description}” from “${recording.songTitle}” to “${target.titleLatin}”? The existing private audio will be reused; nothing will be copied or deleted.`,
+    )) return;
+    setRestoringId(moveKey);
+    setError(null);
+    try {
+      await moveTrashedRecording(recording.id, recording.revision, target.id);
+      await refreshOfflineLibrary().catch(() => undefined);
+      navigate(`/songs/${encodeURIComponent(target.id)}`);
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : "The Recording could not be moved.");
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
   if (!isOnline) {
     return <main className="page-shell" id="main-content"><section className="empty-state"><h1>Trash is available online</h1><p>Reconnect to review or restore removed items. Your saved library remains available to read.</p></section></main>;
   }
@@ -1682,9 +1755,21 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
                           : <Link to={`/songs/${encodeURIComponent(recording.songId)}`}>{recording.songTitle}</Link>}
                         <small>{recording.recordedOn ? `${recording.recordedOn} · ` : ""}moved {new Date(recording.trashedAt).toLocaleString()}</small>
                       </div>
-                      <button className="primary-action" type="button" disabled={restoringId !== null || recording.songIsTrashed} onClick={() => { void restoreTrashedRecording(recording); }}>{restoringId === recording.id ? "Restoring…" : "Restore"}</button>
+                      <div className="trash-item-actions">
+                        <button className="primary-action" type="button" disabled={restoringId !== null || recording.songIsTrashed} onClick={() => { void restoreTrashedRecording(recording); }}>{restoringId === recording.id ? "Restoring…" : "Restore"}</button>
+                        <button className="secondary-action" type="button" disabled={restoringId !== null || activeSongs.every((song) => song.id === recording.songId)} onClick={() => setMoveOpen({ kind: "recording", id: recording.id })}>Move to Song…</button>
+                      </div>
                     </div>
                     {recording.songIsTrashed && <p className="media-note">Restore the parent Song before restoring this Recording.</p>}
+                    {moveOpen?.kind === "recording" && moveOpen.id === recording.id && (
+                      <MoveToSongForm
+                        songs={activeSongs}
+                        sourceSongId={recording.songId}
+                        busy={restoringId === `move:recording:${recording.id}`}
+                        onCancel={() => setMoveOpen(null)}
+                        onMove={(target) => { void moveRecordingToSong(recording, target); }}
+                      />
+                    )}
                   </li>
                 ))}
               </ol>
@@ -1704,9 +1789,21 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
                           : <Link to={`/songs/${encodeURIComponent(scan.songId)}`}>{scan.songTitle}</Link>}
                         <small>Moved {new Date(scan.trashedAt).toLocaleString()}</small>
                       </div>
-                      <button className="primary-action" type="button" disabled={restoringId !== null || scan.songIsTrashed} onClick={() => { void restoreTrashedScan(scan); }}>{restoringId === scan.id ? "Restoring…" : "Restore"}</button>
+                      <div className="trash-item-actions">
+                        <button className="primary-action" type="button" disabled={restoringId !== null || scan.songIsTrashed} onClick={() => { void restoreTrashedScan(scan); }}>{restoringId === scan.id ? "Restoring…" : "Restore"}</button>
+                        <button className="secondary-action" type="button" disabled={restoringId !== null || activeSongs.every((song) => song.id === scan.songId)} onClick={() => setMoveOpen({ kind: "scan", id: scan.id })}>Move to Song…</button>
+                      </div>
                     </div>
                     {scan.songIsTrashed && <p className="media-note">Restore the parent Song before restoring this Scan.</p>}
+                    {moveOpen?.kind === "scan" && moveOpen.id === scan.id && (
+                      <MoveToSongForm
+                        songs={activeSongs}
+                        sourceSongId={scan.songId}
+                        busy={restoringId === `move:scan:${scan.id}`}
+                        onCancel={() => setMoveOpen(null)}
+                        onMove={(target) => { void moveScanToSong(scan, target); }}
+                      />
+                    )}
                   </li>
                 ))}
               </ol>

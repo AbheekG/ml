@@ -62,6 +62,7 @@ import {
   parseRecordingUpdate,
   type RecordingUpdateInput,
 } from "./recording-writes";
+import { parseMediaParentMove } from "./media-parent-moves";
 import {
   RECORDING_UPLOAD_EXPIRY_MS,
   RECORDING_UPLOAD_PART_BYTES,
@@ -258,6 +259,7 @@ type RecordingUploadDuplicateRow = {
   recordingId: string | null;
   songId: string | null;
   recordingTrashedAt: string | null;
+  recordingRevision: number | null;
 };
 
 type FinalizedRecordingRow = {
@@ -381,6 +383,7 @@ type DuplicateScanRow = {
   filename: string;
   notebookName: string | null;
   pageLabel: string | null;
+  scanRevision: number | null;
   scanIsTrashed: number | null;
   songIsTrashed: number | null;
 };
@@ -397,6 +400,7 @@ async function loadDuplicateScan(
       media_objects.original_filename AS filename,
       notebooks.display_name AS notebookName,
       scans.page_label AS pageLabel,
+      scans.revision AS scanRevision,
       CASE WHEN scans.trashed_at IS NULL THEN 0 ELSE 1 END AS scanIsTrashed,
       CASE WHEN songs.trashed_at IS NULL THEN 0 ELSE 1 END AS songIsTrashed
     FROM scan_fingerprints
@@ -623,6 +627,7 @@ function publicRecordingUploadSession(
       id: duplicate?.recordingId ?? null,
       songId: duplicate?.songId ?? null,
       trashed: duplicate ? duplicate.recordingTrashedAt !== null : null,
+      revision: duplicate?.recordingRevision ?? null,
     };
   }
   return result;
@@ -704,7 +709,8 @@ async function findDuplicateRecordingOriginal(
       media_objects.id AS mediaId,
       recordings.id AS recordingId,
       recordings.song_id AS songId,
-      recordings.trashed_at AS recordingTrashedAt
+      recordings.trashed_at AS recordingTrashedAt,
+      recordings.revision AS recordingRevision
     FROM media_objects
     LEFT JOIN recordings ON recordings.original_media_id = media_objects.id
     WHERE media_objects.kind = 'original_audio'
@@ -725,7 +731,8 @@ async function loadRecordingUploadDuplicate(
       media_objects.id AS mediaId,
       recordings.id AS recordingId,
       recordings.song_id AS songId,
-      recordings.trashed_at AS recordingTrashedAt
+      recordings.trashed_at AS recordingTrashedAt,
+      recordings.revision AS recordingRevision
     FROM media_objects
     LEFT JOIN recordings ON recordings.original_media_id = media_objects.id
     WHERE media_objects.id = ? AND media_objects.kind = 'original_audio'
@@ -740,8 +747,8 @@ async function loadFinalizedRecording(
   return database.prepare(`
     SELECT id, revision, processing_state AS processingState
     FROM recordings
-    WHERE id = ? AND song_id = ?
-  `).bind(session.recordingId, session.songId).first<FinalizedRecordingRow>();
+    WHERE id = ?
+  `).bind(session.recordingId).first<FinalizedRecordingRow>();
 }
 
 async function loadAudioProcessingJob(
@@ -3709,7 +3716,10 @@ app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
   const fingerprint = await sha256Hex(bytes);
   const duplicate = await loadDuplicateScan(context.env.DB, fingerprint);
   if (duplicate) {
-    if (duplicate.scanId === null || duplicate.songId === null || duplicate.songTitle === null) {
+    if (duplicate.scanId === null
+      || duplicate.songId === null
+      || duplicate.songTitle === null
+      || duplicate.scanRevision === null) {
       return context.json({
         error: "duplicate_scan_file",
         fields: { file: ["This file is already retained in the library"] },
@@ -3724,6 +3734,7 @@ app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
         filename: duplicate.filename,
         notebookName: duplicate.notebookName,
         pageLabel: duplicate.pageLabel,
+        revision: duplicate.scanRevision,
         isTrashed: Boolean(duplicate.scanIsTrashed || duplicate.songIsTrashed),
       },
     }, 409);
@@ -4589,7 +4600,7 @@ app.post("/api/songs/:songId/recordings/:recordingId/trash", requireRole("editor
 });
 
 app.get("/api/trash", requireRole("editor"), async (context) => {
-  const [songs, lyrics, scans, recordings] = await Promise.all([
+  const [songs, lyrics, scans, recordings, activeSongs] = await Promise.all([
     context.env.DB.prepare(`
       SELECT
         songs.id,
@@ -4686,6 +4697,12 @@ app.get("/api/trash", requireRole("editor"), async (context) => {
       trashedAt: string;
       songIsTrashed: number;
     }>(),
+    context.env.DB.prepare(`
+      SELECT id, title_latin AS titleLatin, title_native AS titleNative
+      FROM songs
+      WHERE trashed_at IS NULL
+      ORDER BY title_latin COLLATE NOCASE, id
+    `).all<{ id: string; titleLatin: string; titleNative: string | null }>(),
   ]);
   return context.json({
     songs: songs.results,
@@ -4701,6 +4718,7 @@ app.get("/api/trash", requireRole("editor"), async (context) => {
       ...recording,
       songIsTrashed: recording.songIsTrashed === 1,
     })),
+    activeSongs: activeSongs.results,
   });
 });
 
@@ -4879,6 +4897,116 @@ app.post("/api/trash/scans/:scanId/restore", requireRole("editor"), async (conte
   }
 });
 
+app.post("/api/trash/scans/:scanId/move", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseMediaParentMove(body);
+  if (!parsed.success || parsed.data.duplicateUpload) {
+    return context.json({ error: "invalid_media_parent_move" }, 400);
+  }
+
+  const scanId = context.req.param("scanId");
+  const current = await context.env.DB.prepare(`
+    SELECT
+      scans.song_id AS songId,
+      scans.revision,
+      scans.trashed_at AS trashedAt,
+      media_objects.state AS mediaState
+    FROM scans
+    JOIN media_objects ON media_objects.id = scans.media_id
+    WHERE scans.id = ?
+  `).bind(scanId).first<{
+    songId: string;
+    revision: number;
+    trashedAt: string | null;
+    mediaState: "active" | "trashed";
+  }>();
+  if (!current) return context.json({ error: "scan_not_found" }, 404);
+  const target = await context.env.DB.prepare(`
+    SELECT id FROM songs WHERE id = ? AND trashed_at IS NULL
+  `).bind(parsed.data.targetSongId).first<{ id: string }>();
+  if (!target) return context.json({ error: "media_move_target_not_found" }, 404);
+  if (current.trashedAt === null) {
+    return context.json({ error: "scan_not_trashed", currentRevision: current.revision }, 409);
+  }
+  if (current.mediaState !== "trashed") {
+    return context.json({ error: "scan_media_unavailable" }, 409);
+  }
+
+  const timestamp = new Date().toISOString();
+  const actor = context.get("appUser").identity;
+  const newRevision = parsed.data.revision + 1;
+  const statements: D1PreparedStatement[] = [
+    context.env.DB.prepare(`
+      UPDATE scans
+      SET song_id = ?, trashed_at = NULL, trashed_by = NULL,
+          revision = revision + 1, updated_at = ?, updated_by = ?
+      WHERE id = ? AND revision = ? AND trashed_at IS NOT NULL
+        AND EXISTS (SELECT 1 FROM songs WHERE id = ? AND trashed_at IS NULL)
+        AND EXISTS (
+          SELECT 1 FROM media_objects
+          WHERE id = scans.media_id AND kind = 'scan' AND state = 'trashed'
+        )
+    `).bind(
+      parsed.data.targetSongId, timestamp, actor, scanId, parsed.data.revision,
+      parsed.data.targetSongId,
+    ),
+    context.env.DB.prepare(`
+      UPDATE media_objects
+      SET state = 'active', trashed_at = NULL, trashed_by = NULL
+      WHERE kind = 'scan' AND state = 'trashed'
+        AND id = (
+          SELECT media_id FROM scans
+          WHERE id = ? AND song_id = ? AND revision = ?
+            AND trashed_at IS NULL AND updated_at = ? AND updated_by = ?
+        )
+    `).bind(scanId, parsed.data.targetSongId, newRevision, timestamp, actor),
+    context.env.DB.prepare(`
+      UPDATE songs SET updated_at = ?, updated_by = ?
+      WHERE id = ?
+        AND EXISTS (
+          SELECT 1 FROM scans
+          WHERE id = ? AND song_id = ? AND revision = ?
+            AND trashed_at IS NULL AND updated_at = ? AND updated_by = ?
+        )
+    `).bind(
+      timestamp, actor, current.songId, scanId, parsed.data.targetSongId,
+      newRevision, timestamp, actor,
+    ),
+  ];
+  if (current.songId !== parsed.data.targetSongId) {
+    statements.push(context.env.DB.prepare(`
+      UPDATE songs SET updated_at = ?, updated_by = ?
+      WHERE id = ? AND trashed_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM scans
+          WHERE id = ? AND song_id = songs.id AND revision = ?
+            AND trashed_at IS NULL AND updated_at = ? AND updated_by = ?
+        )
+    `).bind(
+      timestamp, actor, parsed.data.targetSongId, scanId,
+      newRevision, timestamp, actor,
+    ));
+  }
+
+  try {
+    const results = await context.env.DB.batch(statements);
+    if (results[0].meta.changes !== 1) {
+      return context.json({ error: "scan_edit_conflict", currentRevision: current.revision }, 409);
+    }
+    return context.json({
+      scan: { id: scanId, songId: parsed.data.targetSongId, revision: newRevision },
+    });
+  } catch (error) {
+    const response = scanWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
 app.post("/api/trash/recordings/:recordingId/restore", requireRole("editor"), async (context) => {
   let body: unknown;
   try {
@@ -4977,6 +5105,173 @@ app.post("/api/trash/recordings/:recordingId/restore", requireRole("editor"), as
     }
     return context.json({
       recording: { id: recordingId, songId: current.songId, revision: newRevision },
+    });
+  } catch (error) {
+    const response = recordingWriteError(error);
+    return context.json({ error: response.error }, response.status);
+  }
+});
+
+app.post("/api/trash/recordings/:recordingId/move", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseMediaParentMove(body);
+  if (!parsed.success) return context.json({ error: "invalid_media_parent_move" }, 400);
+
+  const recordingId = context.req.param("recordingId");
+  const current = await context.env.DB.prepare(`
+    SELECT
+      recordings.song_id AS songId,
+      recordings.original_media_id AS originalMediaId,
+      recordings.revision,
+      recordings.trashed_at AS trashedAt,
+      original_media.state AS originalMediaState,
+      playback_media.state AS playbackMediaState
+    FROM recordings
+    JOIN media_objects AS original_media ON original_media.id = recordings.original_media_id
+    LEFT JOIN media_objects AS playback_media ON playback_media.id = recordings.playback_media_id
+    WHERE recordings.id = ?
+  `).bind(recordingId).first<{
+    songId: string;
+    originalMediaId: string;
+    revision: number;
+    trashedAt: string | null;
+    originalMediaState: "active" | "trashed";
+    playbackMediaState: "active" | "trashed" | null;
+  }>();
+  if (!current) return context.json({ error: "recording_not_found" }, 404);
+  const target = await context.env.DB.prepare(`
+    SELECT id FROM songs WHERE id = ? AND trashed_at IS NULL
+  `).bind(parsed.data.targetSongId).first<{ id: string }>();
+  if (!target) return context.json({ error: "media_move_target_not_found" }, 404);
+  if (current.trashedAt === null) {
+    return context.json({ error: "recording_not_trashed", currentRevision: current.revision }, 409);
+  }
+  if (current.originalMediaState !== "trashed") {
+    return context.json({ error: "recording_media_unavailable" }, 409);
+  }
+
+  const actor = context.get("appUser").identity;
+  const duplicateUpload = parsed.data.duplicateUpload;
+  if (duplicateUpload) {
+    const session = await loadRecordingUploadSession(
+      context.env.DB, duplicateUpload.sessionId, actor,
+    );
+    if (!session
+      || session.status !== "duplicate"
+      || session.revision !== duplicateUpload.revision
+      || session.songId !== parsed.data.targetSongId
+      || session.duplicateMediaId !== current.originalMediaId) {
+      return context.json({ error: "recording_upload_conflict" }, 409);
+    }
+  }
+
+  const timestamp = new Date().toISOString();
+  const newRevision = parsed.data.revision + 1;
+  const sessionId = duplicateUpload?.sessionId ?? null;
+  const sessionRevision = duplicateUpload?.revision ?? null;
+  const statements: D1PreparedStatement[] = [
+    context.env.DB.prepare(`
+      UPDATE recordings
+      SET song_id = ?, trashed_at = NULL, trashed_by = NULL,
+          revision = revision + 1, updated_at = ?, updated_by = ?
+      WHERE id = ? AND revision = ? AND trashed_at IS NOT NULL
+        AND EXISTS (SELECT 1 FROM songs WHERE id = ? AND trashed_at IS NULL)
+        AND EXISTS (
+          SELECT 1 FROM media_objects
+          WHERE id = recordings.original_media_id AND state = 'trashed'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM audio_processing_jobs
+          WHERE recording_id = recordings.id AND status IN ('pending', 'running')
+        )
+        AND (
+          ? IS NULL OR EXISTS (
+            SELECT 1 FROM recording_upload_sessions
+            WHERE id = ? AND created_by = ? AND revision = ?
+              AND status = 'duplicate' AND song_id = ?
+              AND duplicate_media_id = recordings.original_media_id
+          )
+        )
+    `).bind(
+      parsed.data.targetSongId, timestamp, actor, recordingId, parsed.data.revision,
+      parsed.data.targetSongId,
+      sessionId, sessionId, actor, sessionRevision, parsed.data.targetSongId,
+    ),
+    context.env.DB.prepare(`
+      UPDATE media_objects
+      SET state = 'active', trashed_at = NULL, trashed_by = NULL
+      WHERE state = 'trashed'
+        AND id IN (
+          SELECT original_media_id FROM recordings
+          WHERE id = ? AND song_id = ? AND revision = ?
+            AND trashed_at IS NULL AND updated_at = ? AND updated_by = ?
+          UNION
+          SELECT playback_media_id FROM recordings
+          WHERE id = ? AND song_id = ? AND revision = ?
+            AND trashed_at IS NULL AND updated_at = ? AND updated_by = ?
+            AND playback_media_id IS NOT NULL
+        )
+    `).bind(
+      recordingId, parsed.data.targetSongId, newRevision, timestamp, actor,
+      recordingId, parsed.data.targetSongId, newRevision, timestamp, actor,
+    ),
+  ];
+  if (duplicateUpload) {
+    statements.push(context.env.DB.prepare(`
+      UPDATE recording_upload_sessions
+      SET status = 'failed', duplicate_media_id = NULL,
+          error_code = 'user_discarded', revision = revision + 1,
+          updated_at = ?, updated_by = ?
+      WHERE id = ? AND created_by = ? AND revision = ?
+        AND status = 'duplicate' AND song_id = ?
+        AND duplicate_media_id = (
+          SELECT original_media_id FROM recordings
+          WHERE id = ? AND song_id = ? AND revision = ? AND trashed_at IS NULL
+        )
+    `).bind(
+      timestamp, actor, duplicateUpload.sessionId, actor, duplicateUpload.revision,
+      parsed.data.targetSongId, recordingId, parsed.data.targetSongId, newRevision,
+    ));
+  }
+  statements.push(context.env.DB.prepare(`
+    UPDATE songs SET updated_at = ?, updated_by = ?
+    WHERE id = ?
+      AND EXISTS (
+        SELECT 1 FROM recordings
+        WHERE id = ? AND song_id = ? AND revision = ?
+          AND trashed_at IS NULL AND updated_at = ? AND updated_by = ?
+      )
+  `).bind(
+    timestamp, actor, current.songId, recordingId, parsed.data.targetSongId,
+    newRevision, timestamp, actor,
+  ));
+  if (current.songId !== parsed.data.targetSongId) {
+    statements.push(context.env.DB.prepare(`
+      UPDATE songs SET updated_at = ?, updated_by = ?
+      WHERE id = ? AND trashed_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM recordings
+          WHERE id = ? AND song_id = songs.id AND revision = ?
+            AND trashed_at IS NULL AND updated_at = ? AND updated_by = ?
+        )
+    `).bind(
+      timestamp, actor, parsed.data.targetSongId, recordingId,
+      newRevision, timestamp, actor,
+    ));
+  }
+
+  try {
+    const results = await context.env.DB.batch(statements);
+    if (results[0].meta.changes !== 1) {
+      return context.json({ error: "recording_edit_conflict", currentRevision: current.revision }, 409);
+    }
+    return context.json({
+      recording: { id: recordingId, songId: parsed.data.targetSongId, revision: newRevision },
     });
   } catch (error) {
     const response = recordingWriteError(error);

@@ -84,6 +84,15 @@ Rules should be enforced at every relevant layer:
   [media-filename-presentation.md](media-filename-presentation.md).
 - Inspect actual file signatures/codecs rather than trusting extensions and calculate a SHA-256 content fingerprint before finalizing an upload.
 - Reject an accidental exact-content duplicate and link to the existing record. When the same media legitimately belongs in another context, reuse the private stored object rather than uploading duplicate bytes.
+- When an exact duplicate belongs to a trashed Scan or Recording, the duplicate
+  panel may restore that existing child directly into the requested active Song.
+  The same recovery is available contextually from Trash with a searchable
+  destination-Song picker. It changes the existing child parent and Trash state
+  atomically, reactivates its existing media rows, preserves IDs, metadata,
+  credits, fingerprints, upload/replacement history, and private objects, and
+  never creates or deletes a child or media row. An actual cross-Song move is
+  recorded in an immutable parent-move audit row; restoring to the same parent is
+  an ordinary restore. Active children cannot be re-parented through this path.
 - Upload/validation/database finalization is atomic: a failed or incomplete upload cannot create an active orphan record or replace a working file.
 - Always retain original audio privately. Normally play a valid MP3 original directly; generate one MP3 derivative for other formats and only for a materially reducible oversized MP3 under the thresholds in [audio-processing.md](audio-processing.md).
 - Never transcode audio in response to a playback request. Asynchronous conversion uses a `processing` state and exposes the player only after the derivative is verified and the Recording becomes `ready`; a failed job preserves the original and reports a retryable error.
@@ -108,6 +117,10 @@ Rules should be enforced at every relevant layer:
 - Moving a Song to Trash is blocked while it has any active typed lyric, Scan, or Recording. The error identifies and links to those dependencies. Once all active children are separately trashed, the Song may also be trashed.
 - Permanent Song deletion remains blocked while any child exists, including trashed children; there is never a cascading Song deletion.
 - Restore rejects normalized-title or per-Song Recording-description conflicts and requires the editor to resolve them rather than overwriting newer data.
+- Moving a trashed Recording to another Song applies the same per-Song
+  description uniqueness rule. A stale child revision, stale duplicate-upload
+  checkpoint, inactive destination Song, unexpected media state, or active audio
+  job blocks the whole transaction without a partial move.
 - Successful mutations record the acting identity and timestamps.
 - Read/detail views omit empty optional fields and empty sections. Edit forms may still show those fields so the user can add missing information.
 

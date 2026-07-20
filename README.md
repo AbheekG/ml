@@ -58,7 +58,7 @@ and separately authorized cutover work:
 - catalog search, filters, sorting, and scroll position survive in-app Song navigation and Back in private memory, while reload/logout intentionally resets them; Song details open at the top, and the navigation behavior is owner-accepted on Android and macOS; action-wide errors and duplicate outcomes reveal themselves without moving background-refresh messages or field-level validation away from their context;
 - the deployed audit follow-up gives focus and interactive controls at least 3:1 non-text contrast, completes keyboard/ARIA behavior for the Lists tabs, protects dirty editor state across navigation and reconnect, and classifies terminal pre-intent upload history as informational; the owner accepted its keyboard, unsaved-work, offline/reconnect, and date-input behavior on macOS;
 - the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
-- the current application checkpoint passes 56 Vitest files / 379 tests, all 90 Python audio tests, all three TypeScript projects, the production/service-worker build, whitespace checks, an exact dependency tree with zero reported npm vulnerabilities, and a clean zero-write staging D1 postflight.
+- the current application checkpoint passes 58 Vitest files / 389 tests, all 90 Python audio tests, all three TypeScript projects, the production/service-worker build, whitespace checks, an exact dependency tree with zero reported npm vulnerabilities, and a clean zero-write staging D1 postflight.
 
 The bounded improvements selected from the 2026-07-18 whole-application audit are
 implemented, deployed, and accepted. No further implementation slice is implied
@@ -87,6 +87,11 @@ media deletion is implied. See
 - editors/admins can move an active-child-free Song to recoverable Trash and restore it; Songs with active typed lyrics, Scans, or Recordings are blocked with dependency guidance;
 - editors/admins can edit Scan Notebook/Page metadata and move existing Scans and their private media to recoverable Trash or restore them;
 - editors/admins can edit existing Recording descriptions, dates, and Vocals credits, and move Recordings and unshared private media to recoverable Trash or restore them;
+- editors/admins can recover a trashed Scan or Recording into another active Song
+  from a searchable contextual Trash action; exact duplicate uploads that match
+  a trashed child offer the same move at the point of need. The operation reuses
+  the existing private media without creating or deleting rows/objects, applies
+  revision and destination guards, and immutably audits actual parent changes;
 - Song and Recording contributor forms now use compact repeatable rows with a searchable existing-Person picker, controlled Role selection, duplicate Person/Role prevention, and per-row removal instead of rendering every Person as a checkbox; the protected-staging interaction is manually accepted, while real-device accessibility remains a later gate;
 - editors/admins can add and rename controlled Languages, Tags, Notebooks, and People from a compact searchable screen; normalized duplicates are blocked, likely similar names require confirmation, and deletion is intentionally unavailable;
 - editors/admins can create and replace private JPEG, PNG, or WebP Scans up to the Cloudflare Images 20 MB input limit; the Worker verifies signatures and SHA-256, rejects exact content globally with race-safe D1 fingerprints, retains immutable originals/history, and creates a bounded private JPEG readability derivative before finalization;

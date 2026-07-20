@@ -15,6 +15,7 @@ export type DuplicateRecording = {
   id: string | null;
   songId: string | null;
   trashed: boolean | null;
+  revision: number | null;
 };
 
 export type RecordingUploadIntent =
@@ -204,12 +205,14 @@ function parseDuplicateRecording(value: unknown): DuplicateRecording | undefined
   const id = value.id;
   const songId = value.songId;
   const trashed = value.trashed;
+  const revision = value.revision ?? null;
   if (
     !(typeof id === "string" || id === null)
     || !(typeof songId === "string" || songId === null)
     || !(typeof trashed === "boolean" || trashed === null)
+    || !(revision === null || (Number.isSafeInteger(revision) && Number(revision) > 0))
   ) return undefined;
-  return { id, songId, trashed };
+  return { id, songId, trashed, revision: revision as number | null };
 }
 
 function parseRecordingUploadIntent(value: unknown): RecordingUploadIntent | null | undefined {

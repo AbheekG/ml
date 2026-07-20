@@ -20,6 +20,7 @@ Recording upload session ── immutable create/replace intent
 Recording ── Audio processing job[] ── dispatch attempt[]
 Scan ── optional Notebook
   └── fingerprint member / readability derivative
+Trashed Scan/Recording ── immutable parent-move audit ── source/target Song
 ```
 
 ## Core records
@@ -38,6 +39,11 @@ Scan ── optional Notebook
 - `audio_processing_dispatch_attempts` is the immutable audit trail for immediate Cloud Run invocation. A pending job creates a `started` attempt, which transitions once to `accepted` or a bounded failure code; failed dispatch never changes the pending job, so Scheduler can recover it.
 - `scan_fingerprints` and `scan_fingerprint_members` form the global race-safe content registry. New duplicate bytes are rejected; duplicate imported history is preserved and marked instead of merged.
 - `scan_readability_derivatives` immutably binds a private bounded JPEG derivative to the exact source hash/size and policy. `scan_maintenance_failures` records bounded retry state and `scan_maintenance_leases` prevents overlapping repair runs from racing on one object.
+- `media_parent_moves` is an immutable audit of the exceptional cross-Song
+  recovery of an already-trashed Scan or Recording. Database triggers permit a
+  parent change only when the same revision-guarded update restores the child to
+  an active target Song with its retained media in the expected Trash state;
+  active or still-trashed re-parenting is rejected.
 - `people`, `song_credits`, and `recording_credits` model contributors using stable contribution codes (`lyrics`, `music`, `vocals`, and later instrument/production codes) with friendly display labels.
 - `languages`, `tags`, and `notebooks` are controlled lookup records.
 - join tables model Song languages and tags without comma-separated IDs.
@@ -53,6 +59,10 @@ Scan ── optional Notebook
 - Revisions support optimistic edit-conflict detection when online editing is added.
 - Song Trash is also blocked while a Recording upload is live, stored but not finalized, or awaiting duplicate review. Recording Trash is blocked while its processing job is pending or running.
 - Recording source replacement is blocked while processing is active. Scan/Recording replacement history is immutable, and historical media remains referenced/recoverable.
+- A trashed Scan or Recording may be restored under another active Song without
+  copying its private objects or creating another child/media row. Both parent
+  timestamps are updated, Recording description uniqueness is enforced at the
+  destination, and a pending/running audio job blocks a Recording move.
 
 ## Import pipeline
 

@@ -6,23 +6,24 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { app } from "../worker/index";
 
-const migration = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-  .map((number) => readFileSync(
-    resolve(`migrations/${String(number).padStart(4, "0")}_${[
-      "initial",
-      "editing_foundation",
-      "song_writes",
-      "audio_derivatives",
-      "audio_processing_jobs",
-      "recording_upload_sessions",
-      "audio_processing_control",
-      "audio_processing_concurrency",
-      "media_replacements",
-      "non_unique_audio_processing_jobs",
-      "audio_dispatch_and_replacement_guards",
-    ][number - 1]}.sql`),
-    "utf8",
-  ))
+const migration = [
+  "0001_initial.sql",
+  "0002_editing_foundation.sql",
+  "0003_song_writes.sql",
+  "0004_audio_derivatives.sql",
+  "0005_audio_processing_jobs.sql",
+  "0006_recording_upload_sessions.sql",
+  "0007_audio_processing_control.sql",
+  "0008_audio_processing_concurrency.sql",
+  "0009_media_replacements.sql",
+  "0010_non_unique_audio_processing_jobs.sql",
+  "0011_audio_dispatch_and_replacement_guards.sql",
+  "0012_scan_integrity_and_readability.sql",
+  "0013_scan_maintenance_leases.sql",
+  "0014_scan_display_rotation.sql",
+  "0015_media_parent_moves.sql",
+]
+  .map((filename) => readFileSync(resolve("migrations", filename), "utf8"))
   .join("\n");
 
 type NativeRunResult = { changes: number | bigint };
@@ -419,6 +420,96 @@ describe("Recording upload finalization transaction", () => {
           (SELECT COUNT(*) FROM recordings) AS recordingCount,
           (SELECT COUNT(*) FROM audio_processing_jobs) AS jobCount
       `).get()).toEqual({ mediaCount: 0, recordingCount: 0, jobCount: 0 });
+    } finally {
+      native.close();
+    }
+  });
+
+  it("atomically moves a trashed duplicate Recording and dismisses only its duplicate upload", async () => {
+    const { binding, native } = createD1();
+    try {
+      seedStoredUpload(native, { sha256: "b".repeat(64) });
+      native.prepare(`
+        INSERT INTO songs (
+          id, title_latin, normalized_title_latin, status,
+          created_at, created_by, updated_at, updated_by
+        ) VALUES ('song-source', 'Wrong Song', 'wrong song', 'draft', ?, ?, ?, ?)
+      `).run(timestamp, actor, timestamp, actor);
+      native.prepare(`
+        INSERT INTO media_objects (
+          id, object_key, original_filename, byte_size, sha256, kind,
+          state, created_at, created_by
+        ) VALUES (
+          'existing-media', 'recordings/original/existing-media', 'existing.bin',
+          3, ?, 'original_audio', 'active', ?, ?
+        )
+      `).run("b".repeat(64), timestamp, actor);
+      native.prepare(`
+        INSERT INTO recordings (
+          id, song_id, original_media_id, description, normalized_description,
+          processing_state, revision, created_at, created_by, updated_at, updated_by
+        ) VALUES (
+          'existing-recording', 'song-source', 'existing-media', 'Existing', 'existing',
+          'ready', 1, ?, ?, ?, ?
+        )
+      `).run(timestamp, actor, timestamp, actor);
+      native.exec(`
+        UPDATE recording_upload_sessions
+        SET status = 'duplicate', duplicate_media_id = 'existing-media', revision = 5
+        WHERE id = 'upload-1';
+        UPDATE recordings
+        SET trashed_at = '${timestamp}', trashed_by = '${actor}', revision = 2
+        WHERE id = 'existing-recording';
+        UPDATE media_objects
+        SET state = 'trashed', trashed_at = '${timestamp}', trashed_by = '${actor}'
+        WHERE id = 'existing-media';
+      `);
+
+      const response = await app.request(
+        "http://local.test/api/trash/recordings/existing-recording/move",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            revision: 2,
+            targetSongId: "song-1",
+            duplicateUpload: { sessionId: "upload-1", revision: 5 },
+          }),
+        },
+        bindings(binding),
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        recording: { id: "existing-recording", songId: "song-1", revision: 3 },
+      });
+      expect(native.prepare(`
+        SELECT song_id AS songId, trashed_at AS trashedAt, revision
+        FROM recordings WHERE id = 'existing-recording'
+      `).get()).toEqual({ songId: "song-1", trashedAt: null, revision: 3 });
+      expect(native.prepare(`
+        SELECT state, trashed_at AS trashedAt FROM media_objects WHERE id = 'existing-media'
+      `).get()).toEqual({ state: "active", trashedAt: null });
+      expect(native.prepare(`
+        SELECT status, duplicate_media_id AS duplicateMediaId, error_code AS errorCode, revision
+        FROM recording_upload_sessions WHERE id = 'upload-1'
+      `).get()).toEqual({
+        status: "failed",
+        duplicateMediaId: null,
+        errorCode: "user_discarded",
+        revision: 6,
+      });
+      expect(native.prepare(`
+        SELECT recording_id AS recordingId, from_song_id AS fromSongId, to_song_id AS toSongId
+        FROM media_parent_moves
+      `).get()).toEqual({
+        recordingId: "existing-recording",
+        fromSongId: "song-source",
+        toSongId: "song-1",
+      });
+      expect(native.prepare("SELECT COUNT(*) AS count FROM recordings").get()).toEqual({ count: 1 });
+      expect(native.prepare("SELECT COUNT(*) AS count FROM media_objects").get()).toEqual({ count: 1 });
+      expect(native.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     } finally {
       native.close();
     }
