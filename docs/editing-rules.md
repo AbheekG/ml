@@ -90,6 +90,10 @@ Rules should be enforced at every relevant layer:
   byte/hash matching rather than perceptual matching across arbitrary
   re-encodes. When the same media legitimately belongs in another context,
   reuse the private stored object rather than uploading duplicate bytes.
+  For Scans, apply the same exact hash-and-size check to both registered
+  originals and stored readability JPEGs, resolving a readability match through
+  its immutable source provenance. A browser-rotated or otherwise re-encoded
+  share has different bytes and remains outside this narrow rule.
 - When an exact duplicate belongs to a trashed Scan or Recording, the duplicate
   panel may restore that existing child directly into the requested active Song.
   The same recovery is available contextually from Trash with a searchable
@@ -104,7 +108,7 @@ Rules should be enforced at every relevant layer:
 - Never transcode audio in response to a playback request. Asynchronous conversion uses a `processing` state and exposes the player only after the derivative is verified and the Recording becomes `ready`; a failed job preserves the original and reports a retryable error.
 - The stored playback-media reference is the default browser source. Capability detection may verify or fall back among already prepared sources, but never changes the stored original or starts conversion.
 - Generate correctly oriented, readability-preserving Scan derivatives suitable for A4 pages. Retain Scan originals until derivative quality and backups are accepted; only then consider a deliberate archival/deletion policy.
-- The implemented Scan pipeline accepts browser-compatible JPEG, PNG, or WebP originals up to 20,000,000 bytes, verifies signatures and full decode, records SHA-256, rejects exact duplicates globally, retains immutable originals/replacement history, and prepares a private JPEG readability derivative before committing the new current media. The derivative is at most 2400 pixels on its longest edge at quality 85; the authenticated viewer falls back to the original only while historical repair is incomplete or has a recorded failure.
+- The implemented Scan pipeline accepts browser-compatible JPEG, PNG, or WebP originals up to 20,000,000 bytes, verifies signatures and full decode, records SHA-256, rejects exact duplicates against both registered originals and stored readability JPEGs, retains immutable originals/replacement history, and prepares a private JPEG readability derivative before committing the new current media. The derivative is at most 2400 pixels on its longest edge at quality 85; the authenticated viewer falls back to the original only while historical repair is incomplete or has a recorded failure.
 - Implemented one-tap Scan and Recording sharing sends authenticated, bounded
   derivative/playback bytes through the device share interface where supported,
   with safe fallbacks; it does not expose originals or create a permanent public

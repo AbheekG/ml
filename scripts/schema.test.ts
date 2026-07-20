@@ -20,7 +20,8 @@ const scanMaintenanceLeasesMigration = readFileSync(resolve("migrations/0013_sca
 const scanDisplayRotationMigration = readFileSync(resolve("migrations/0014_scan_display_rotation.sql"), "utf8");
 const mediaParentMovesMigration = readFileSync(resolve("migrations/0015_media_parent_moves.sql"), "utf8");
 const playbackDuplicateDetectionMigration = readFileSync(resolve("migrations/0016_playback_duplicate_detection.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}\n${playbackDuplicateDetectionMigration}`;
+const scanReadabilityDuplicateDetectionMigration = readFileSync(resolve("migrations/0017_scan_readability_duplicate_detection.sql"), "utf8");
+const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}\n${playbackDuplicateDetectionMigration}\n${scanReadabilityDuplicateDetectionMigration}`;
 const timestamp = "2026-07-12T00:00:00.000Z";
 
 function runSql(sql: string): string {
@@ -1326,6 +1327,35 @@ describe("initial database schema", () => {
       ) VALUES (
         'scan-media-2', 'scans/scan-media-2.jpg', 'two.jpg', 'image/jpeg', 4,
         '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+    `)).toThrow(/duplicate_or_invalid_scan_fingerprint/);
+  });
+
+  it("rejects exact stored readability bytes as a new Scan original", () => {
+    expect(() => runSql(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', 'scans/scan-media-1.png', 'one.png', 'image/png', 4,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO scan_readability_derivatives (
+        source_media_id, source_sha256, source_byte_size, object_key,
+        mime_type, byte_size, sha256, width, height, policy_id,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', '${"a".repeat(64)}', 4,
+        'scans/readability/scan-media-1.jpg', 'image/jpeg', 3,
+        '${"b".repeat(64)}', 1200, 900, 'scan-jpeg-v1-2400-q85',
+        '${timestamp}', 'test'
+      );
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-2', 'scans/scan-media-2.jpg', 'shared.jpg', 'image/jpeg', 3,
+        '${"b".repeat(64)}', 'scan', '${timestamp}', 'test'
       );
     `)).toThrow(/duplicate_or_invalid_scan_fingerprint/);
   });

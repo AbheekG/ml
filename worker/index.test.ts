@@ -1952,23 +1952,28 @@ describe("Scan upload API", () => {
     await expect(response.json()).resolves.toMatchObject({ scan: { revision: 1, filename: "page.txt" } });
   });
 
-  it("rejects duplicate bytes before writing to private storage", async () => {
+  it("rejects exact original or readability bytes before writing to private storage", async () => {
+    let duplicateQuery = "";
+    let duplicateValues: unknown[] = [];
     const database = {
       prepare: (query: string) => ({
-        bind: () => ({
-          first: async () => query.includes("FROM songs")
-            ? { id: "song-1" }
-            : {
-                scanId: "scan-existing",
-                songId: "song-existing",
-                songTitle: "Existing Song",
-                filename: "existing.jpg",
-                notebookName: "Blue Book",
-                pageLabel: "12A",
-                scanRevision: 5,
-                scanIsTrashed: 0,
-                songIsTrashed: 0,
-              },
+        bind: (...values: unknown[]) => ({
+          first: async () => {
+            if (query.includes("SELECT id FROM songs")) return { id: "song-1" };
+            duplicateQuery = query;
+            duplicateValues = values;
+            return {
+              scanId: "scan-existing",
+              songId: "song-existing",
+              songTitle: "Existing Song",
+              filename: "existing.jpg",
+              notebookName: "Blue Book",
+              pageLabel: "12A",
+              scanRevision: 5,
+              scanIsTrashed: 0,
+              songIsTrashed: 0,
+            };
+          },
         }),
       }),
     } as unknown as D1Database;
@@ -1983,6 +1988,12 @@ describe("Scan upload API", () => {
 
     expect(response.status).toBe(409);
     expect(wroteMedia).toBe(false);
+    expect(duplicateQuery).toContain("FROM scan_readability_derivatives");
+    expect(duplicateQuery).toContain("FROM scan_fingerprint_members");
+    expect(duplicateValues).toHaveLength(4);
+    expect(duplicateValues[0]).toBe(duplicateValues[2]);
+    expect(duplicateValues[1]).toBe(4);
+    expect(duplicateValues[3]).toBe(4);
     await expect(response.json()).resolves.toEqual({
       error: "duplicate_scan_file",
       existing: {
@@ -1995,6 +2006,51 @@ describe("Scan upload API", () => {
         revision: 5,
         isTrashed: false,
       },
+    });
+  });
+
+  it("rejects exact readability bytes when replacing Scan media", async () => {
+    const queries: string[] = [];
+    const database = {
+      prepare: (query: string) => ({
+        bind: () => ({
+          first: async () => {
+            queries.push(query);
+            if (query.includes("SELECT scans.revision")) {
+              return { revision: 3, media_id: "media-current", sha256: "a".repeat(64) };
+            }
+            return {
+              scanId: "scan-existing",
+              songId: "song-existing",
+              songTitle: "Existing Song",
+              filename: "existing.jpg",
+              notebookName: null,
+              pageLabel: null,
+              scanRevision: 2,
+              scanIsTrashed: 0,
+              songIsTrashed: 0,
+            };
+          },
+        }),
+      }),
+    } as unknown as D1Database;
+    let wroteMedia = false;
+    const media = { put: async () => { wroteMedia = true; } } as unknown as R2Bucket;
+    const body = scanUploadBody();
+    body.set("revision", "3");
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/scans/scan-1/media",
+      { method: "POST", body },
+      { ...localBindings(database), MEDIA: media },
+    );
+
+    expect(response.status).toBe(409);
+    expect(wroteMedia).toBe(false);
+    expect(queries.some((query) => query.includes("FROM scan_readability_derivatives"))).toBe(true);
+    await expect(response.json()).resolves.toEqual({
+      error: "duplicate_scan_file",
+      fields: { file: ["This file is already retained elsewhere in the library"] },
     });
   });
 

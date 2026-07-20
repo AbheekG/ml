@@ -45,14 +45,22 @@ memory and a second tap completes the share without another download. Canceling
 the native sheet is quiet; unsupported browsers do not show the action, and the
 action is disabled while offline.
 
+An upload of the exact stored readability JPEG is rejected as a duplicate and
+resolves through immutable derivative provenance to the existing Scan, including
+its normal Trash recovery option. Rotation applied for current-view sharing is
+rendered and JPEG-encoded in the browser, so those bytes differ from the stored
+readability object; the narrow exact-content rule does not attempt perceptual
+matching of that rotated or otherwise re-encoded file.
+
 ## Integrity and replacement
 
 D1 owns a global SHA-256 registry. New media insertion requires a valid hash and
-rejects an existing fingerprint inside the database, closing the race left by a
-preflight-only duplicate check. Existing imported equal-content files remain
-separate historical members and are never silently merged. Provenance binds each
-derivative immutably to the exact source media ID, source hash/size, output
-hash/size/dimensions, policy, time, and actor.
+rejects an existing original fingerprint or exact stored readability hash/size
+inside the database, closing the race left by a preflight-only duplicate check.
+Existing imported equal-content files remain separate historical members and
+are never silently merged. Provenance binds each derivative immutably to the
+exact source media ID, source hash/size, output hash/size/dimensions, policy,
+time, and actor.
 
 Replacement first prepares and stores both new objects, then atomically records
 the previous current media in immutable history and advances the Scan revision.

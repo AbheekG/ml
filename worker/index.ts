@@ -391,8 +391,25 @@ type DuplicateScanRow = {
 async function loadDuplicateScan(
   database: D1Database,
   fingerprint: string,
+  byteSize: number,
 ): Promise<DuplicateScanRow | null> {
   return database.prepare(`
+    WITH duplicate_media(media_id, representation_priority) AS (
+      SELECT
+        scan_fingerprint_members.media_id,
+        0
+      FROM scan_fingerprint_members
+      JOIN media_objects ON media_objects.id = scan_fingerprint_members.media_id
+      WHERE scan_fingerprint_members.sha256 = ?
+        AND media_objects.byte_size = ?
+      UNION ALL
+      SELECT
+        scan_readability_derivatives.source_media_id,
+        1
+      FROM scan_readability_derivatives
+      WHERE scan_readability_derivatives.sha256 = ?
+        AND scan_readability_derivatives.byte_size = ?
+    )
     SELECT
       scans.id AS scanId,
       scans.song_id AS songId,
@@ -403,14 +420,24 @@ async function loadDuplicateScan(
       scans.revision AS scanRevision,
       CASE WHEN scans.trashed_at IS NULL THEN 0 ELSE 1 END AS scanIsTrashed,
       CASE WHEN songs.trashed_at IS NULL THEN 0 ELSE 1 END AS songIsTrashed
-    FROM scan_fingerprints
-    JOIN media_objects ON media_objects.id = scan_fingerprints.canonical_media_id
+    FROM duplicate_media
+    JOIN media_objects ON media_objects.id = duplicate_media.media_id
     LEFT JOIN scans ON scans.media_id = media_objects.id
     LEFT JOIN songs ON songs.id = scans.song_id
     LEFT JOIN notebooks ON notebooks.id = scans.notebook_id
-    WHERE scan_fingerprints.sha256 = ?
+    ORDER BY
+      scans.id IS NULL,
+      scans.trashed_at IS NOT NULL,
+      duplicate_media.representation_priority,
+      scans.id,
+      media_objects.id
     LIMIT 1
-  `).bind(fingerprint).first<DuplicateScanRow>();
+  `).bind(
+    fingerprint,
+    byteSize,
+    fingerprint,
+    byteSize,
+  ).first<DuplicateScanRow>();
 }
 
 async function removeUncommittedScanObjects(
@@ -3738,7 +3765,7 @@ app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
   }
 
   const fingerprint = await sha256Hex(bytes);
-  const duplicate = await loadDuplicateScan(context.env.DB, fingerprint);
+  const duplicate = await loadDuplicateScan(context.env.DB, fingerprint, bytes.byteLength);
   if (duplicate) {
     if (duplicate.scanId === null
       || duplicate.songId === null
@@ -4324,7 +4351,7 @@ app.post("/api/songs/:songId/scans/:scanId/media", requireRole("editor"), async 
   if (fingerprint === currentScan.sha256) {
     return context.json({ error: "duplicate_scan_file", fields: { file: ["This file is identical to the current scan media"] } }, 409);
   }
-  if (await loadDuplicateScan(context.env.DB, fingerprint)) {
+  if (await loadDuplicateScan(context.env.DB, fingerprint, bytes.byteLength)) {
     return context.json({
       error: "duplicate_scan_file",
       fields: { file: ["This file is already retained elsewhere in the library"] },
