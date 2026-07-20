@@ -52,12 +52,13 @@ and separately authorized cutover work:
 - the Scan viewer supports clockwise quarter-turn correction: every reader may rotate locally, online editors persist one revision-guarded orientation value, and browser display/share transforms leave both retained originals and readability derivatives unchanged;
 - capable online browsers can share the authenticated optimized JPEG for an individual Scan directly from its Song row or from the viewer through the native system share sheet; original Scan bytes, public URLs, and persistent media caches are not involved, and the owner reports that the deployed behavior works well;
 - private Recording playback sharing is deployed with a Recording-scoped ready-MP3 route, a 50 MiB safety bound, generic filenames, and no client-selected storage identifier or public URL; the owner accepted the principal device behavior after checking correct-row sharing, quiet cancellation, offline disabling, and multiple Recordings on one Song, while the deliberately oversized and slow-download second-tap paths remain automatically covered rather than manually forced;
+- ordinary Recording rows, Scan rows/viewer headers, and Trash now use semantic descriptions, Notebook/Page labels, and positions without exposing original upload filenames; editor file selection, upload recovery, duplicate diagnostics, and private provenance metadata retain filenames where operationally useful;
 - repeated Song, typed-lyric, Recording, and Scan actions use accessible symbols with text on wider layouts and 44-pixel icon-only touch targets where compactness helps on narrow layouts; Add, Replace, and higher-consequence actions retain descriptive text;
 - the global offline/read-only indicator follows browser connectivity rather than treating one slow API request as proof that the whole app is offline; online-only media handles request failures locally, and an open Scan viewer remains mounted with immediate loading feedback; the Scan/connectivity behavior is owner-accepted in Android Chrome/Brave and macOS Safari;
 - catalog search, filters, sorting, and scroll position survive in-app Song navigation and Back in private memory, while reload/logout intentionally resets them; Song details open at the top, and the navigation behavior is owner-accepted on Android and macOS; action-wide errors and duplicate outcomes reveal themselves without moving background-refresh messages or field-level validation away from their context;
 - the deployed audit follow-up gives focus and interactive controls at least 3:1 non-text contrast, completes keyboard/ARIA behavior for the Lists tabs, protects dirty editor state across navigation and reconnect, and classifies terminal pre-intent upload history as informational; the owner accepted its keyboard, unsaved-work, offline/reconnect, and date-input behavior on macOS;
 - the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
-- the current Scan-orientation checkpoint passes 56 Vitest files / 379 tests, all 90 Python audio tests, all three TypeScript projects, the production/service-worker build, whitespace checks, an exact dependency tree with zero reported npm vulnerabilities, and a clean zero-write staging D1 postflight.
+- the current application checkpoint passes 56 Vitest files / 379 tests, all 90 Python audio tests, all three TypeScript projects, the production/service-worker build, whitespace checks, an exact dependency tree with zero reported npm vulnerabilities, and a clean zero-write staging D1 postflight.
 
 The bounded improvements selected from the 2026-07-18 whole-application audit are
 implemented, deployed, and accepted. No further implementation slice is implied
@@ -122,8 +123,8 @@ in [the legacy file reconciliation status](docs/legacy-file-reconciliation.md).
 Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
 
 Current protected-staging deployment: Worker
-`c06947b2-95ce-43e8-82b0-d9411746c103`, client/service-worker build
-`193893b3833a`. Production resources and DNS/cutover remain separately
+`31242783-052d-4520-8313-ca1a2bce9531`, client/service-worker build
+`b9c8a5f52641`. Production resources and DNS/cutover remain separately
 approval-gated.
 
 Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker also validates Access JWT signatures, issuer, and audience on every API request. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.

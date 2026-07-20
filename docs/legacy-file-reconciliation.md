@@ -68,10 +68,11 @@ reconciliation on 2026-07-20 is:
 - 1,978 media rows; and
 - zero foreign-key errors.
 
-The protected application deployment remains Worker
-`c06947b2-95ce-43e8-82b0-d9411746c103` with client/service-worker build
-`193893b3833a`. The Lyrics and Recording reconciliation operations did not
-deploy another build.
+The protected application deployment is Worker
+`31242783-052d-4520-8313-ca1a2bce9531` with client/service-worker build
+`b9c8a5f52641`. The later filename-presentation deployment made no catalog,
+media, or legacy-file change; the Lyrics and Recording reconciliation operations
+did not deploy an application build.
 
 ## Paused private file work
 

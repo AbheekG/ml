@@ -3,13 +3,25 @@
 Status: the necessary private-beta feature set is implemented and accepted in
 protected staging. The Scan-orientation refinement is deployed and
 owner-accepted. The credentialed PWA-manifest request is deployed and
-owner-accepted on Android Chrome. Continue the remaining private legacy file
-reconciliation first; other optional UX refinement, audit/cleanup, and
-production readiness remain separately prioritized and approved.
+owner-accepted on Android Chrome. The filename-presentation refinement is
+deployed and awaits owner device/browser acceptance. Private legacy file work
+remains owner-paused; other optional UX refinement, audit/cleanup, and production
+readiness remain separately prioritized and approved.
 
-Application/deployment checkpoint (2026-07-18): protected staging runs Worker
-`c06947b2-95ce-43e8-82b0-d9411746c103`, client/service-worker build
-`193893b3833a`. Chrome on Android offered only its browser-shortcut fallback for
+Application/deployment checkpoint (2026-07-20): protected staging runs Worker
+`31242783-052d-4520-8313-ca1a2bce9531`, client/service-worker build
+`b9c8a5f52641`. Ordinary Recording rows, Scan rows/viewer headers, and Trash no
+longer display original upload filenames; semantic descriptions, Notebook/Page,
+and Scan position replace them while editor selection, upload recovery,
+duplicate diagnostics, and provenance metadata remain intact. The editor-only
+Trash API no longer selects or returns filenames. The gate passed 56 Vitest
+files / 379 tests, all 90 Python audio tests, all three TypeScript projects,
+production/service-worker builds with seven precache entries, whitespace and
+dependency checks, and zero reported npm vulnerabilities. Read-only postflight
+found the new Worker at 100%, the expected Access redirect, no pending migration,
+581 Songs / 335 lyric rows / 499 Scans / 834 Recordings (833 active) / 1,978
+media rows, zero foreign-key errors, and zero query writes. Chrome on Android
+previously offered only its browser-shortcut fallback for
 the protected app. The manifest itself meets the install fields, but its HTML
 link omitted the explicit `use-credentials` mode required for an authenticated
 manifest. The deployed one-line correction includes the Access session when the

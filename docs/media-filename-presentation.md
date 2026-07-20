@@ -1,7 +1,9 @@
 # Media filename presentation
 
-Status: implemented locally; protected-staging deployment is pending. Legacy
-file work remains separately owner-paused and was not resumed by this change.
+Status: implemented and deployed to protected staging as Worker
+`31242783-052d-4520-8313-ca1a2bce9531`, client/service-worker build
+`b9c8a5f52641`. Legacy file work remains separately owner-paused and was not
+resumed by this change. Owner device/browser acceptance remains pending.
 
 ## Decision
 
@@ -67,3 +69,18 @@ The selected presentation slice:
 This is a presentation/API-minimization change, not a schema migration or a
 request to erase existing provenance. It does not rename, rewrite, move, or
 delete any legacy file, D1 media row, R2 object, original, or derivative.
+
+## Verification and deployment
+
+The gate passed 56 Vitest files / 379 tests, all 90 Python audio tests, all three
+TypeScript projects, the production/service-worker build, whitespace checks, an
+exact dependency tree, and an npm audit with zero reported vulnerabilities.
+The deployed build has seven precache entries; the existing greater-than-500-kB
+client advisory remains non-blocking.
+
+Read-only staging postflight confirms the new Worker receives 100% of traffic,
+Cloudflare Access still returns the expected unauthenticated redirect, no D1
+migration is pending, and the catalog remains at 581 Songs / 335 lyric rows /
+499 Scans / 834 Recordings (833 active) / 1,978 media rows / zero foreign-key
+errors. The queries wrote zero rows. No D1/R2/media, legacy, production, DNS, or
+Git-remote mutation accompanied the deployment.
