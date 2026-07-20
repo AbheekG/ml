@@ -151,8 +151,8 @@ the session is created.
   existing private record. If that Recording is trashed, the duplicate panel can
   atomically restore/move the existing Recording to the upload's active Song and
   dismiss the duplicate session without deleting its retained upload object.
-  This preserves one Recording and one referenced original media row. Reusing
-  identical media for two simultaneously active, genuinely distinct Recordings
+  This preserves one existing Recording and all of its referenced media rows.
+  Reusing identical media for two simultaneously active, genuinely distinct Recordings
   remains unsupported and would require a separate schema/product decision;
   finalization must not imply or bypass it.
 - Finalization is one D1 transaction: media, Recording, copied credits, job, Song

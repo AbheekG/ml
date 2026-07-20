@@ -58,7 +58,7 @@ and separately authorized cutover work:
 - catalog search, filters, sorting, and scroll position survive in-app Song navigation and Back in private memory, while reload/logout intentionally resets them; Song details open at the top, and the navigation behavior is owner-accepted on Android and macOS; action-wide errors and duplicate outcomes reveal themselves without moving background-refresh messages or field-level validation away from their context;
 - the deployed audit follow-up gives focus and interactive controls at least 3:1 non-text contrast, completes keyboard/ARIA behavior for the Lists tabs, protects dirty editor state across navigation and reconnect, and classifies terminal pre-intent upload history as informational; the owner accepted its keyboard, unsaved-work, offline/reconnect, and date-input behavior on macOS;
 - the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
-- the current application checkpoint passes 58 Vitest files / 389 tests, all 90 Python audio tests, all three TypeScript projects, the production/service-worker build, whitespace checks, an exact dependency tree with zero reported npm vulnerabilities, and a clean zero-write staging D1 postflight.
+- the current application checkpoint passes 58 Vitest files / 392 tests, all 90 Python audio tests, all three TypeScript projects, the production/service-worker build, whitespace checks, an exact dependency tree with zero reported npm vulnerabilities, and a clean zero-write staging D1 postflight.
 
 The bounded improvements selected from the 2026-07-18 whole-application audit are
 implemented, deployed, and accepted. No further implementation slice is implied
@@ -119,8 +119,11 @@ The private staging catalog is loaded into an APAC-primary D1 database for the
 application's users in India. After the retained synthetic acceptance records,
 four later genuine Recording uploads, the completed guarded Lyrics imports, and
 the accepted Drive Recording metadata/reparent reconciliation, the verified
-2026-07-20 snapshot has 581 Songs, 335 lyric rows, 499 Scans, 834 Recordings
-(833 active), and 1,978 media rows, with zero foreign-key errors.
+2026-07-20 snapshot has 581 Songs, 335 lyric rows, 499 Scans, 835 Recordings
+(833 active), and 1,979 media rows, with zero foreign-key errors. The additional
+retained owner-test Recording/media row is not cleaned up implicitly; read-only
+postflight records one exact playback/original overlap while leaving its review
+to a separate owner decision.
 Originals/derivatives remain in private APAC storage and are delivered only
 through authenticated API routes. The owner-review Recording copies and all
 unassigned/unlinked legacy sources remain local; legacy sources are immutable.
@@ -130,10 +133,10 @@ in [the legacy file reconciliation status](docs/legacy-file-reconciliation.md).
 Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
 
 Current protected-staging deployment: Worker
-`37f9c4a6-f3b8-4d36-98e3-8e450f845953`, client/service-worker build
-`921656381900`. Migration `0015_media_parent_moves.sql` is fully applied;
-its audit table is empty at deployment. Production resources and DNS/cutover remain separately
-approval-gated.
+`9726321a-9f96-4d95-8a5b-d67d3e3bc803`, client/service-worker build
+`14194791219b`. Migration `0016_playback_duplicate_detection.sql` is fully
+applied with both playback-aware upload guards present; no migration is pending.
+Production resources and DNS/cutover remain separately approval-gated.
 
 Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker also validates Access JWT signatures, issuer, and audience on every API request. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.
 

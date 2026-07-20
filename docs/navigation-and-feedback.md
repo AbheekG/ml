@@ -70,6 +70,11 @@ Feedback follows the scope of the operation:
   same way;
 - duplicate Scan and Recording panels reveal themselves directly and retain
   their relevant follow-up actions.
+- a successful Trash restore/move or trashed-duplicate recovery navigates to the
+  destination Song, closes the source picker/upload flow, and reports
+  `Scan/Recording moved to “Song”` as a one-time status. The D1 child update may
+  also fire an immutable parent-audit insertion, so only zero affected changes
+  is a conflict; the audit row must not make a committed move look stale.
 
 The reveal uses immediate `scrollIntoView({ block: "nearest" })`. It does not
 force every message to the top, add animated scrolling, steal keyboard focus, or
