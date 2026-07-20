@@ -22,6 +22,7 @@ const migration = [
   "0013_scan_maintenance_leases.sql",
   "0014_scan_display_rotation.sql",
   "0015_media_parent_moves.sql",
+  "0016_playback_duplicate_detection.sql",
 ]
   .map((filename) => readFileSync(resolve("migrations", filename), "utf8"))
   .join("\n");
@@ -335,6 +336,60 @@ describe("Recording upload finalization transaction", () => {
     }
   });
 
+  it("treats an exact generated playback reupload as the existing Recording", async () => {
+    const { binding, native } = createD1();
+    try {
+      seedStoredUpload(native);
+      seedExistingRecording(native, { sha256: "b".repeat(64) });
+      native.prepare(`
+        INSERT INTO media_objects (
+          id, object_key, original_filename, byte_size, sha256, kind,
+          state, created_at, created_by
+        ) VALUES (
+          'existing-playback', 'recordings/playback/existing-playback', 'shared.mp3',
+          3, ?, 'playback_audio', 'active', ?, ?
+        )
+      `).run("a".repeat(64), timestamp, actor);
+      native.prepare(`
+        INSERT INTO audio_derivatives (
+          playback_media_id, source_media_id, policy_id,
+          source_sha256, source_byte_size, derivative_sha256, derivative_byte_size
+        ) VALUES (
+          'existing-playback', 'existing-media', 'mp3-v1-libmp3lame-q2',
+          ?, 3, ?, 3
+        )
+      `).run("b".repeat(64), "a".repeat(64));
+      native.exec(`
+        UPDATE recordings SET playback_media_id = 'existing-playback'
+        WHERE id = 'existing-recording';
+      `);
+
+      const response = await finalize(binding);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        upload: {
+          status: "duplicate",
+          revision: 5,
+          recordingId: null,
+          duplicateRecording: { id: "existing-recording", songId: "song-1" },
+        },
+      });
+      expect(native.prepare(`
+        SELECT duplicate_media_id AS duplicateMediaId
+        FROM recording_upload_sessions WHERE id = 'upload-1'
+      `).get()).toEqual({ duplicateMediaId: "existing-playback" });
+      expect(native.prepare("SELECT COUNT(*) AS count FROM audio_processing_jobs").get())
+        .toEqual({ count: 0 });
+      expect(native.prepare("SELECT COUNT(*) AS count FROM recordings").get())
+        .toEqual({ count: 1 });
+      expect(native.prepare("SELECT COUNT(*) AS count FROM media_objects").get())
+        .toEqual({ count: 2 });
+      expect(native.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      native.close();
+    }
+  });
+
   it("keeps bytes stored across a description conflict and accepts an explicit retry", async () => {
     const { binding, native } = createD1();
     try {
@@ -425,7 +480,7 @@ describe("Recording upload finalization transaction", () => {
     }
   });
 
-  it("atomically moves a trashed duplicate Recording and dismisses only its duplicate upload", async () => {
+  it("atomically moves a trashed playback duplicate and dismisses only its duplicate upload", async () => {
     const { binding, native } = createD1();
     try {
       seedStoredUpload(native, { sha256: "b".repeat(64) });
@@ -439,30 +494,44 @@ describe("Recording upload finalization transaction", () => {
         INSERT INTO media_objects (
           id, object_key, original_filename, byte_size, sha256, kind,
           state, created_at, created_by
-        ) VALUES (
+        ) VALUES
+        (
           'existing-media', 'recordings/original/existing-media', 'existing.bin',
           3, ?, 'original_audio', 'active', ?, ?
+        ),
+        (
+          'existing-playback', 'recordings/playback/existing-playback', 'shared.mp3',
+          3, ?, 'playback_audio', 'active', ?, ?
         )
-      `).run("b".repeat(64), timestamp, actor);
+      `).run("c".repeat(64), timestamp, actor, "b".repeat(64), timestamp, actor);
+      native.prepare(`
+        INSERT INTO audio_derivatives (
+          playback_media_id, source_media_id, policy_id,
+          source_sha256, source_byte_size, derivative_sha256, derivative_byte_size
+        ) VALUES (
+          'existing-playback', 'existing-media', 'mp3-v1-libmp3lame-q2',
+          ?, 3, ?, 3
+        )
+      `).run("c".repeat(64), "b".repeat(64));
       native.prepare(`
         INSERT INTO recordings (
-          id, song_id, original_media_id, description, normalized_description,
+          id, song_id, original_media_id, playback_media_id, description, normalized_description,
           processing_state, revision, created_at, created_by, updated_at, updated_by
         ) VALUES (
-          'existing-recording', 'song-source', 'existing-media', 'Existing', 'existing',
+          'existing-recording', 'song-source', 'existing-media', 'existing-playback', 'Existing', 'existing',
           'ready', 1, ?, ?, ?, ?
         )
       `).run(timestamp, actor, timestamp, actor);
       native.exec(`
         UPDATE recording_upload_sessions
-        SET status = 'duplicate', duplicate_media_id = 'existing-media', revision = 5
+        SET status = 'duplicate', duplicate_media_id = 'existing-playback', revision = 5
         WHERE id = 'upload-1';
         UPDATE recordings
         SET trashed_at = '${timestamp}', trashed_by = '${actor}', revision = 2
         WHERE id = 'existing-recording';
         UPDATE media_objects
         SET state = 'trashed', trashed_at = '${timestamp}', trashed_by = '${actor}'
-        WHERE id = 'existing-media';
+        WHERE id IN ('existing-media', 'existing-playback');
       `);
 
       const response = await app.request(
@@ -488,8 +557,10 @@ describe("Recording upload finalization transaction", () => {
         FROM recordings WHERE id = 'existing-recording'
       `).get()).toEqual({ songId: "song-1", trashedAt: null, revision: 3 });
       expect(native.prepare(`
-        SELECT state, trashed_at AS trashedAt FROM media_objects WHERE id = 'existing-media'
-      `).get()).toEqual({ state: "active", trashedAt: null });
+        SELECT COUNT(*) AS count FROM media_objects
+        WHERE id IN ('existing-media', 'existing-playback')
+          AND state = 'active' AND trashed_at IS NULL
+      `).get()).toEqual({ count: 2 });
       expect(native.prepare(`
         SELECT status, duplicate_media_id AS duplicateMediaId, error_code AS errorCode, revision
         FROM recording_upload_sessions WHERE id = 'upload-1'
@@ -508,7 +579,7 @@ describe("Recording upload finalization transaction", () => {
         toSongId: "song-1",
       });
       expect(native.prepare("SELECT COUNT(*) AS count FROM recordings").get()).toEqual({ count: 1 });
-      expect(native.prepare("SELECT COUNT(*) AS count FROM media_objects").get()).toEqual({ count: 1 });
+      expect(native.prepare("SELECT COUNT(*) AS count FROM media_objects").get()).toEqual({ count: 2 });
       expect(native.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     } finally {
       native.close();

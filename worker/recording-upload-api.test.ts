@@ -423,7 +423,7 @@ describe("Recording upload API", () => {
     const parts = [{ partNumber: 1, etag: "server-etag", byteSize: 3 }];
     const duplicate = {
       mediaId: "existing-media", recordingId: "existing-recording",
-      songId: "existing-song", recordingTrashedAt: null,
+      songId: "existing-song", recordingTrashedAt: null, recordingRevision: 2,
     };
     const queries: string[] = [];
     const database = {
@@ -500,6 +500,11 @@ describe("Recording upload API", () => {
         },
       });
       expect(queries.some((query) => query.includes("INSERT INTO recordings"))).toBe(false);
+      expect(queries.some((query) => (
+        query.includes("FROM media_objects")
+        && query.includes("playback_audio")
+        && query.includes("recordings.playback_media_id")
+      ))).toBe(true);
     } finally {
       restoreDigestStream();
     }

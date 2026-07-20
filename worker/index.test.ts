@@ -1317,6 +1317,7 @@ describe("Worker API", () => {
               return {
                 songId: "song-1",
                 originalMediaId: "media-1",
+                playbackMediaId: "playback-media-1",
                 revision: 4,
                 trashedAt: "now",
                 originalMediaState: "trashed",
@@ -1330,7 +1331,7 @@ describe("Worker API", () => {
                 songId: "song-2",
                 status: "duplicate",
                 revision: 6,
-                duplicateMediaId: "media-1",
+                duplicateMediaId: "playback-media-1",
               };
             }
             return null;
@@ -1366,6 +1367,8 @@ describe("Worker API", () => {
     expect(batch[0].query).toContain("UPDATE recordings");
     expect(batch[2].query).toContain("UPDATE recording_upload_sessions");
     expect(batch[2].query).toContain("user_discarded");
+    expect(batch[0].query).toContain("recordings.playback_media_id");
+    expect(batch[2].query).toContain("recordings.playback_media_id");
     expect(batch).toHaveLength(5);
     expect(batch.every((statement) => !statement.query.includes("DELETE"))).toBe(true);
     await expect(response.json()).resolves.toEqual({

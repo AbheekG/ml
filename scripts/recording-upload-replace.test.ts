@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { app } from "../worker/index";
 
-const migration = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+const migration = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
   .map((number) => readFileSync(
     resolve(`migrations/${String(number).padStart(4, "0")}_${[
       "initial",
@@ -20,6 +20,11 @@ const migration = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
       "media_replacements",
       "non_unique_audio_processing_jobs",
       "audio_dispatch_and_replacement_guards",
+      "scan_integrity_and_readability",
+      "scan_maintenance_leases",
+      "scan_display_rotation",
+      "media_parent_moves",
+      "playback_duplicate_detection",
     ][number - 1]}.sql`),
     "utf8",
   ))
@@ -243,11 +248,13 @@ function seedStoredUploadSession(
   options: {
     sessionId?: string;
     sha256?: string;
+    byteSize?: number;
     targetRevision?: number;
   } = {},
 ): void {
   const sessionId = options.sessionId ?? "upload-replace-1";
   const sha256 = options.sha256 ?? "a".repeat(64); // different from "b".repeat(64)
+  const byteSize = options.byteSize ?? 3;
 
   native.prepare(`
     INSERT INTO recording_upload_sessions (
@@ -258,7 +265,7 @@ function seedStoredUploadSession(
     ) VALUES (
       ?, 'song-1', 'replace-mutation-1', ?,
       'First Recording', NULL, 'new.wav',
-      3, 8388608, 1,
+      ?, 8388608, 1,
       ?,
       'creating', 1, '2027-07-12T00:00:00.000Z',
       ?, ?, ?, ?
@@ -266,6 +273,7 @@ function seedStoredUploadSession(
   `).run(
     sessionId,
     "f".repeat(64),
+    byteSize,
     `recordings/original/${sessionId}`,
     timestamp, actor, timestamp, actor,
   );
@@ -401,6 +409,41 @@ describe("Recording upload /replace endpoint", () => {
       `).get() as { processingState: string; revision: number };
       expect(rec.processingState).toBe("ready"); // unchanged
       expect(rec.revision).toBe(1); // unchanged
+    } finally {
+      native.close();
+    }
+  });
+
+  it("marks replacement as duplicate when it matches an existing playback representation", async () => {
+    const { binding, native } = createD1();
+    try {
+      seedReadyRecordingWithSucceededJob(native);
+      seedStoredUploadSession(native, { sha256: "d".repeat(64), byteSize: 5 });
+
+      const response = await replace(binding, "song-1", "upload-replace-1", "recording-1", {
+        targetRecordingId: "recording-1",
+        targetRecordingRevision: 1,
+        sessionRevision: 4,
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        upload: {
+          status: "duplicate",
+          duplicateRecording: { id: "recording-1", songId: "song-1" },
+        },
+      });
+      expect(native.prepare(`
+        SELECT duplicate_media_id AS duplicateMediaId
+        FROM recording_upload_sessions WHERE id = 'upload-replace-1'
+      `).get()).toEqual({ duplicateMediaId: "derivative-media-1" });
+      expect(native.prepare(`
+        SELECT processing_state AS processingState, revision
+        FROM recordings WHERE id = 'recording-1'
+      `).get()).toEqual({ processingState: "ready", revision: 1 });
+      expect(native.prepare("SELECT COUNT(*) AS count FROM media_objects").get())
+        .toEqual({ count: 2 });
+      expect(native.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     } finally {
       native.close();
     }

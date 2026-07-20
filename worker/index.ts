@@ -699,7 +699,7 @@ async function loadRecordingUploadParts(
   return parts.results;
 }
 
-async function findDuplicateRecordingOriginal(
+async function findDuplicateRecordingMedia(
   database: D1Database,
   sha256: string,
   byteSize: number,
@@ -712,11 +712,18 @@ async function findDuplicateRecordingOriginal(
       recordings.trashed_at AS recordingTrashedAt,
       recordings.revision AS recordingRevision
     FROM media_objects
-    LEFT JOIN recordings ON recordings.original_media_id = media_objects.id
-    WHERE media_objects.kind = 'original_audio'
+    LEFT JOIN recordings ON
+      recordings.original_media_id = media_objects.id
+      OR recordings.playback_media_id = media_objects.id
+    WHERE media_objects.kind IN ('original_audio', 'playback_audio')
       AND media_objects.sha256 = ?
       AND media_objects.byte_size = ?
-    ORDER BY recordings.id IS NULL, recordings.trashed_at IS NOT NULL, recordings.id
+    ORDER BY
+      recordings.id IS NULL,
+      recordings.trashed_at IS NOT NULL,
+      media_objects.kind <> 'original_audio',
+      recordings.id,
+      media_objects.id
     LIMIT 1
   `).bind(sha256, byteSize).first<RecordingUploadDuplicateRow>();
 }
@@ -734,8 +741,11 @@ async function loadRecordingUploadDuplicate(
       recordings.trashed_at AS recordingTrashedAt,
       recordings.revision AS recordingRevision
     FROM media_objects
-    LEFT JOIN recordings ON recordings.original_media_id = media_objects.id
-    WHERE media_objects.id = ? AND media_objects.kind = 'original_audio'
+    LEFT JOIN recordings ON
+      recordings.original_media_id = media_objects.id
+      OR recordings.playback_media_id = media_objects.id
+    WHERE media_objects.id = ?
+      AND media_objects.kind IN ('original_audio', 'playback_audio')
   `).bind(session.duplicateMediaId).first<RecordingUploadDuplicateRow>();
 }
 
@@ -2584,7 +2594,7 @@ app.post("/api/recording-uploads/:sessionId/complete", requireRole("editor"), as
     }
     let duplicate: RecordingUploadDuplicateRow | null;
     try {
-      duplicate = await findDuplicateRecordingOriginal(
+      duplicate = await findDuplicateRecordingMedia(
         context.env.DB, session.sha256, session.byteSize,
       );
     } catch {
@@ -2691,11 +2701,18 @@ app.post("/api/recording-uploads/:sessionId/finalize", requireRole("editor"), as
     WITH duplicate(media_id) AS (
       SELECT media_objects.id
       FROM media_objects
-      LEFT JOIN recordings ON recordings.original_media_id = media_objects.id
-      WHERE media_objects.kind = 'original_audio'
+      LEFT JOIN recordings ON
+        recordings.original_media_id = media_objects.id
+        OR recordings.playback_media_id = media_objects.id
+      WHERE media_objects.kind IN ('original_audio', 'playback_audio')
         AND media_objects.sha256 = ?
         AND media_objects.byte_size = ?
-      ORDER BY recordings.id IS NULL, recordings.trashed_at IS NOT NULL, recordings.id
+      ORDER BY
+        recordings.id IS NULL,
+        recordings.trashed_at IS NOT NULL,
+        media_objects.kind <> 'original_audio',
+        recordings.id,
+        media_objects.id
       LIMIT 1
     )
     UPDATE recording_upload_sessions
@@ -3018,11 +3035,18 @@ app.post("/api/songs/:songId/recording-uploads/:sessionId/replace", requireRole(
         WITH duplicate AS (
           SELECT media_objects.id
           FROM media_objects
-          LEFT JOIN recordings ON recordings.original_media_id = media_objects.id
-          WHERE media_objects.kind = 'original_audio'
+          LEFT JOIN recordings ON
+            recordings.original_media_id = media_objects.id
+            OR recordings.playback_media_id = media_objects.id
+          WHERE media_objects.kind IN ('original_audio', 'playback_audio')
             AND media_objects.sha256 = ?
             AND media_objects.byte_size = ?
-          ORDER BY recordings.id IS NULL, recordings.trashed_at IS NOT NULL, recordings.id
+          ORDER BY
+            recordings.id IS NULL,
+            recordings.trashed_at IS NOT NULL,
+            media_objects.kind <> 'original_audio',
+            recordings.id,
+            media_objects.id
           LIMIT 1
         )
         UPDATE recording_upload_sessions
@@ -5127,6 +5151,7 @@ app.post("/api/trash/recordings/:recordingId/move", requireRole("editor"), async
     SELECT
       recordings.song_id AS songId,
       recordings.original_media_id AS originalMediaId,
+      recordings.playback_media_id AS playbackMediaId,
       recordings.revision,
       recordings.trashed_at AS trashedAt,
       original_media.state AS originalMediaState,
@@ -5138,6 +5163,7 @@ app.post("/api/trash/recordings/:recordingId/move", requireRole("editor"), async
   `).bind(recordingId).first<{
     songId: string;
     originalMediaId: string;
+    playbackMediaId: string | null;
     revision: number;
     trashedAt: string | null;
     originalMediaState: "active" | "trashed";
@@ -5165,7 +5191,10 @@ app.post("/api/trash/recordings/:recordingId/move", requireRole("editor"), async
       || session.status !== "duplicate"
       || session.revision !== duplicateUpload.revision
       || session.songId !== parsed.data.targetSongId
-      || session.duplicateMediaId !== current.originalMediaId) {
+      || (
+        session.duplicateMediaId !== current.originalMediaId
+        && session.duplicateMediaId !== current.playbackMediaId
+      )) {
       return context.json({ error: "recording_upload_conflict" }, 409);
     }
   }
@@ -5194,7 +5223,10 @@ app.post("/api/trash/recordings/:recordingId/move", requireRole("editor"), async
             SELECT 1 FROM recording_upload_sessions
             WHERE id = ? AND created_by = ? AND revision = ?
               AND status = 'duplicate' AND song_id = ?
-              AND duplicate_media_id = recordings.original_media_id
+              AND duplicate_media_id IN (
+                recordings.original_media_id,
+                recordings.playback_media_id
+              )
           )
         )
     `).bind(
@@ -5229,9 +5261,13 @@ app.post("/api/trash/recordings/:recordingId/move", requireRole("editor"), async
           updated_at = ?, updated_by = ?
       WHERE id = ? AND created_by = ? AND revision = ?
         AND status = 'duplicate' AND song_id = ?
-        AND duplicate_media_id = (
-          SELECT original_media_id FROM recordings
+        AND EXISTS (
+          SELECT 1 FROM recordings
           WHERE id = ? AND song_id = ? AND revision = ? AND trashed_at IS NULL
+            AND recording_upload_sessions.duplicate_media_id IN (
+              recordings.original_media_id,
+              recordings.playback_media_id
+            )
         )
     `).bind(
       timestamp, actor, duplicateUpload.sessionId, actor, duplicateUpload.revision,

@@ -19,7 +19,8 @@ const scanIntegrityMigration = readFileSync(resolve("migrations/0012_scan_integr
 const scanMaintenanceLeasesMigration = readFileSync(resolve("migrations/0013_scan_maintenance_leases.sql"), "utf8");
 const scanDisplayRotationMigration = readFileSync(resolve("migrations/0014_scan_display_rotation.sql"), "utf8");
 const mediaParentMovesMigration = readFileSync(resolve("migrations/0015_media_parent_moves.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}`;
+const playbackDuplicateDetectionMigration = readFileSync(resolve("migrations/0016_playback_duplicate_detection.sql"), "utf8");
+const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}\n${playbackDuplicateDetectionMigration}`;
 const timestamp = "2026-07-12T00:00:00.000Z";
 
 function runSql(sql: string): string {
@@ -429,6 +430,62 @@ describe("initial database schema", () => {
       SELECT status || '|' || recording_id FROM recording_upload_sessions WHERE id = 'upload-1';
     `);
     expect(finalized).toBe("finalized|recording-1\n");
+  });
+
+  it("accepts an exact generated playback representation as a duplicate checkpoint", () => {
+    const output = runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO recording_upload_sessions (
+        id, song_id, client_mutation_id, request_fingerprint,
+        original_filename, byte_size, part_size, part_count, object_key,
+        status, revision, expires_at, created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'shared.mp3', 1, 8388608, 1, 'recordings/original/upload-1',
+        'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      UPDATE recording_upload_sessions
+      SET r2_upload_id = 'multipart-1', status = 'open', revision = 2
+      WHERE id = 'upload-1';
+      UPDATE recording_upload_sessions SET status = 'completing', revision = 3 WHERE id = 'upload-1';
+      UPDATE recording_upload_sessions
+      SET status = 'stored', sha256 = '${"b".repeat(64)}', revision = 4
+      WHERE id = 'upload-1';
+      INSERT INTO media_objects (
+        id, object_key, original_filename, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES
+        ('source-media', 'recordings/source/original', 'source.wav', 2,
+         '${"c".repeat(64)}', 'original_audio', '${timestamp}', 'test'),
+        ('playback-media', 'recordings/source/playback', 'shared.mp3', 1,
+         '${"b".repeat(64)}', 'playback_audio', '${timestamp}', 'test');
+      INSERT INTO audio_derivatives (
+        playback_media_id, source_media_id, policy_id,
+        source_sha256, source_byte_size, derivative_sha256, derivative_byte_size
+      ) VALUES (
+        'playback-media', 'source-media', 'mp3-v1-libmp3lame-q2',
+        '${"c".repeat(64)}', 2, '${"b".repeat(64)}', 1
+      );
+      INSERT INTO recordings (
+        id, song_id, original_media_id, playback_media_id,
+        description, normalized_description, processing_state,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'recording-existing', 'song-1', 'source-media', 'playback-media',
+        'Existing', 'existing', 'ready',
+        '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      UPDATE recording_upload_sessions
+      SET status = 'duplicate', duplicate_media_id = 'playback-media', revision = 5
+      WHERE id = 'upload-1';
+      SELECT status || '|' || duplicate_media_id
+      FROM recording_upload_sessions WHERE id = 'upload-1';
+      PRAGMA foreign_key_check;
+    `);
+    expect(output).toBe("duplicate|playback-media\n");
   });
 
   it("creates a durable pending audio job only for its active fingerprinted original", () => {

@@ -83,7 +83,13 @@ Rules should be enforced at every relevant layer:
   erase it through a presentation-only change. See
   [media-filename-presentation.md](media-filename-presentation.md).
 - Inspect actual file signatures/codecs rather than trusting extensions and calculate a SHA-256 content fingerprint before finalizing an upload.
-- Reject an accidental exact-content duplicate and link to the existing record. When the same media legitimately belongs in another context, reuse the private stored object rather than uploading duplicate bytes.
+- Reject an accidental exact-content duplicate and link to the existing record.
+  For Recordings, compare the upload with both retained originals and generated
+  playback representations, so reuploading the app-shared MP3 resolves to its
+  owning Recording instead of creating a second copy. This remains exact
+  byte/hash matching rather than perceptual matching across arbitrary
+  re-encodes. When the same media legitimately belongs in another context,
+  reuse the private stored object rather than uploading duplicate bytes.
 - When an exact duplicate belongs to a trashed Scan or Recording, the duplicate
   panel may restore that existing child directly into the requested active Song.
   The same recovery is available contextually from Trash with a searchable

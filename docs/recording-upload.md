@@ -42,8 +42,10 @@ completion endpoint uses only server-held part ETags, recovers a lost R2
 completion response by checking the opaque private object, verifies its exact
 size, and streams it through Cloudflare's native SHA-256 `DigestStream`. It then
 stops durably at `stored`, or at `duplicate` with the existing private Recording
-identity when a fingerprinted original already exists. It never creates a media
-row, Recording, or processing job in either state.
+identity when the exact bytes already exist as either its retained original or
+its generated playback representation. This covers reuploading an MP3 obtained
+through the app's Recording share/download path. It never creates a media row,
+Recording, or processing job in either state.
 
 The implemented finalization endpoint rechecks duplicate content inside the same
 D1 transaction that creates the fingerprinted `original_audio` media row,
@@ -51,7 +53,10 @@ processing Recording, copied credits, and pending audio-processing job. The job
 snapshots the original media ID, hash, size, and policy. This second duplicate
 check is required even after completion because another upload could finalize
 concurrently. A successful transaction moves the session to `finalized`; a
-concurrent exact-content match moves only the session to `duplicate`.
+concurrent exact-content match against an original or generated playback object
+moves only the session to `duplicate`. This is intentionally byte-exact
+deduplication; an independently re-encoded version of the same performance is
+not inferred to be identical.
 
 A supplied description must remain normalized-unique within its Song. A conflict
 leaves the verified object and session safely at `stored`, identifies the
