@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
-import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ScanViewer } from "./ScanViewer";
 import { ActionContent } from "./ActionContent";
 import { CatalogControls } from "./CatalogControls";
@@ -287,8 +287,11 @@ function contributionLabel(role: string): string {
 
 function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean | null }) {
   const { songId = "" } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [song, setSong] = useState<SongDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [viewerScanId, setViewerScanId] = useState<string | null>(null);
   const [scanShareBusy, setScanShareBusy] = useState<{ scanId: string; phase: "preparing" | "sharing" } | null>(null);
@@ -320,6 +323,17 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
   useLayoutEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [songId]);
+
+  useEffect(() => {
+    setActionNotice(null);
+  }, [songId]);
+
+  useEffect(() => {
+    const state = location.state as { statusMessage?: unknown } | null;
+    if (typeof state?.statusMessage !== "string" || !state.statusMessage) return;
+    setActionNotice(state.statusMessage);
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+  }, [location.key, location.pathname, location.search, location.state, navigate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -592,6 +606,8 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
         {song.titleNative && <p className="native-title" lang="und">{song.titleNative}</p>}
         {error && <p className="catalog-message error-message" role="alert">Showing saved copy · {error}</p>}
       </header>
+
+      <FeedbackMessage message={actionNotice} tone="status" />
 
       <div className="detail-grid">
         <div className="detail-main">
@@ -1185,7 +1201,10 @@ function ScanEditorPage({
       await moveTrashedScan(duplicateScan.scanId, duplicateScan.revision, songId);
       await refreshOfflineLibrary().catch(() => undefined);
       allowNextNavigation();
-      navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
+      navigate(`/songs/${encodeURIComponent(songId)}`, {
+        replace: true,
+        state: { statusMessage: `Scan ${action === "restore" ? "restored to" : "moved to"} “${songTitle}”.` },
+      });
     } catch (moveError) {
       setError(moveError instanceof Error ? moveError.message : "The existing Scan could not be recovered.");
     } finally {
@@ -1664,7 +1683,9 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
     try {
       await moveTrashedScan(scan.id, scan.revision, target.id);
       await refreshOfflineLibrary().catch(() => undefined);
-      navigate(`/songs/${encodeURIComponent(target.id)}`);
+      navigate(`/songs/${encodeURIComponent(target.id)}`, {
+        state: { statusMessage: `Scan moved to “${target.titleLatin}”.` },
+      });
     } catch (moveError) {
       setError(moveError instanceof Error ? moveError.message : "The Scan could not be moved.");
     } finally {
@@ -1683,7 +1704,9 @@ function TrashPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boolean 
     try {
       await moveTrashedRecording(recording.id, recording.revision, target.id);
       await refreshOfflineLibrary().catch(() => undefined);
-      navigate(`/songs/${encodeURIComponent(target.id)}`);
+      navigate(`/songs/${encodeURIComponent(target.id)}`, {
+        state: { statusMessage: `Recording moved to “${target.titleLatin}”.` },
+      });
     } catch (moveError) {
       setError(moveError instanceof Error ? moveError.message : "The Recording could not be moved.");
     } finally {

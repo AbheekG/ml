@@ -4995,7 +4995,7 @@ app.post("/api/trash/scans/:scanId/move", requireRole("editor"), async (context)
 
   try {
     const results = await context.env.DB.batch(statements);
-    if (results[0].meta.changes !== 1) {
+    if (results[0].meta.changes === 0) {
       return context.json({ error: "scan_edit_conflict", currentRevision: current.revision }, 409);
     }
     return context.json({
@@ -5267,7 +5267,7 @@ app.post("/api/trash/recordings/:recordingId/move", requireRole("editor"), async
 
   try {
     const results = await context.env.DB.batch(statements);
-    if (results[0].meta.changes !== 1) {
+    if (results[0].meta.changes === 0) {
       return context.json({ error: "recording_edit_conflict", currentRevision: current.revision }, 409);
     }
     return context.json({

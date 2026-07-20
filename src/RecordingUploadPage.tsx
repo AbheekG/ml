@@ -400,7 +400,12 @@ export function RecordingUploadPage({
       );
       await refreshOfflineLibrary().catch(() => undefined);
       allowNextNavigation();
-      navigate(`/songs/${encodeURIComponent(songId)}`, { replace: true });
+      navigate(`/songs/${encodeURIComponent(songId)}`, {
+        replace: true,
+        state: {
+          statusMessage: `Recording ${restoringHere ? "restored to" : "moved to"} “${songTitle}”.`,
+        },
+      });
     } catch (moveError) {
       setError(moveError instanceof Error
         ? moveError.message

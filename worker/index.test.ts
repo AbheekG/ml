@@ -1249,7 +1249,11 @@ describe("Worker API", () => {
       },
       batch: async (statements: FakeStatement[]) => {
         batch = statements;
-        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+        return statements.map((_, index) => ({
+          success: true,
+          results: [],
+          meta: { changes: index === 0 ? 2 : 1 },
+        }));
       },
     } as unknown as D1Database;
 
@@ -1336,7 +1340,11 @@ describe("Worker API", () => {
       },
       batch: async (statements: FakeStatement[]) => {
         batch = statements;
-        return statements.map(() => ({ success: true, results: [], meta: { changes: 1 } }));
+        return statements.map((_, index) => ({
+          success: true,
+          results: [],
+          meta: { changes: index === 0 ? 2 : 1 },
+        }));
       },
     } as unknown as D1Database;
 
