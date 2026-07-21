@@ -58,7 +58,7 @@ and separately authorized cutover work:
 - catalog search, filters, sorting, and scroll position survive in-app Song navigation and Back in private memory, while reload/logout intentionally resets them; Song details open at the top, and the navigation behavior is owner-accepted on Android and macOS; action-wide errors and duplicate outcomes reveal themselves without moving background-refresh messages or field-level validation away from their context;
 - the deployed audit follow-up gives focus and interactive controls at least 3:1 non-text contrast, completes keyboard/ARIA behavior for the Lists tabs, protects dirty editor state across navigation and reconnect, and classifies terminal pre-intent upload history as informational; the owner accepted its keyboard, unsaved-work, offline/reconnect, and date-input behavior on macOS;
 - the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
-- the current application checkpoint passes 58 Vitest files / 394 tests, all 90 Python audio tests, all three TypeScript projects, the production/service-worker build, whitespace checks, an exact dependency tree with zero reported npm vulnerabilities, and a clean zero-write staging D1 postflight.
+- the current application checkpoint passes 61 Vitest files / 428 tests, all 91 Python audio tests, all three TypeScript projects, the production/service-worker build, a constrained 512 MiB audio conversion inside the reviewed 2 GiB/1,152 MiB runtime limits, whitespace checks, and a clean zero-write staging D1 postflight.
 
 The bounded improvements selected from the 2026-07-18 whole-application audit are
 implemented, deployed, and accepted. No further implementation slice is implied
@@ -136,6 +136,18 @@ in [the legacy file reconciliation status](docs/legacy-file-reconciliation.md).
 
 Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
 
+The second 2026-07-21 whole-project audit hardening binds every new resumable
+Recording upload to a Worker-verified file manifest and per-part hashes; restores
+exact historical Scan or Recording media instead of risking a new object; keeps
+ambiguous committed Scan derivatives for reconciliation; and makes typed-lyric
+creation safely replayable. It also adds exact-origin and content-type mutation
+guards, a bounded rotating Access-key cache, active-parent checks for generic
+private media, bounded search work/results, safer editor/session lifecycle
+handling, stricter service-worker cache admission, and allowlisted atomic private
+CLI output. Existing pre-manifest upload sessions remain terminal and cannot be
+resumed under weaker identity rules. No catalog row or private media object was
+created, modified, or deleted by this rollout.
+
 The 2026-07-21 audit remediation keeps ambiguous Scan-maintenance commits from
 deleting a possibly referenced readability object, aligns D1 Recording-date
 validation with the shared India calendar, completes offline Scan/Recording
@@ -144,10 +156,14 @@ the skip-link and derivative-aware Scan-sharing UI paths. No catalog or media
 row was rewritten by this release.
 
 Current protected-staging deployment: Worker
-`7a397fed-1c47-4fb1-9a37-81d4643c4624`, client/service-worker build
-`1979c0380e2b`. Migration `0018_india_recording_calendar.sql` is fully applied
-with all three India-calendar validation triggers present; no migration is
-pending.
+`e6f1ddc7-4706-4b8b-8b01-0090850b8a23`, client/service-worker build
+`a450b87fa722`, and audio converter image
+`sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
+Migration `0019_recording_upload_file_identity.sql` is fully applied with its
+two identity columns and four required/immutable-value triggers present; no
+migration is pending. Converter-first and post-Worker executions both completed
+with exactly one aggregate `no_work` outcome, and the verified quarter-hour
+scheduler is enabled.
 Production resources and DNS/cutover remain separately approval-gated.
 
 Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker validates Access JWT signatures, issuer, and audience on every API request using a bounded rotating-key cache, rechecks the active application role, and requires exact same-origin evidence plus the route's expected media type for browser mutations. Generic private-media reads require both an active child and active parent Song. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.

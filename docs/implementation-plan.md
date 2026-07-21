@@ -8,6 +8,42 @@ deployed and awaits owner device/browser acceptance. Private legacy file work
 remains owner-paused; other optional UX refinement, audit/cleanup, and production
 readiness remain separately prioritized and approved.
 
+Application/deployment checkpoint (2026-07-21, second audit): protected staging
+runs Worker `e6f1ddc7-4706-4b8b-8b01-0090850b8a23`, client/service-worker build
+`a450b87fa722`, and audio converter image
+`sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
+Migration `0019_recording_upload_file_identity.sql` is applied with no pending
+migration. New resumable Recording sessions require one immutable file-manifest
+hash and an immutable hash for every part; the Worker independently verifies the
+manifest before assembly. Historical duplicate matching and exact retained-media
+restoration now cover safe create/replace recovery without deleting or creating
+media. Ambiguous committed Scan work is retained for maintenance reconciliation,
+and typed-lyric creates accept a stable mutation ID for idempotent replay.
+
+Authenticated mutation boundaries now require exact same-origin evidence and
+route-specific content types; Access keys use a bounded rotating cache; generic
+media reads require an active parent Song; processor capabilities are header-
+bound rather than URL-bound; search cost and results are bounded; editor/session
+lifecycle failures cannot leave stale writable state; runtime cache admission
+rejects redirects and private/API responses; and generated private CLI outputs
+are restricted to allowlisted roots with atomic mode-0600 writes. The gate passed
+61 Vitest files / 428 tests, all 91 Python audio tests, all three TypeScript
+projects, a fresh replay of all 19 migrations, production/service-worker builds,
+whitespace checks, and a locked Linux/amd64 runtime-image test including a
+constrained 512 MiB input inside the reviewed 2 GiB RAM and 1,152 MiB temporary-
+storage limits. Dependencies are unchanged from the audit-time zero-vulnerability
+result; the sandbox blocked a redundant registry advisory lookup.
+
+The converter-first and post-Worker staging canaries each emitted exactly one
+privacy-safe `no_work` record and exited zero. The enforced operations snapshot
+found the quarter-hour Scheduler enabled, the Job pinned to the reviewed digest,
+200/200 observed executions successful, all 97 retained application outcomes
+`no_work`, zero pending/running jobs, zero foreign-key errors, and zero Scan-
+maintenance failures. Catalog counts remain 581 Songs (579 active), 335 lyric
+rows, 499 Scans, 835 Recordings (833 active), and 1,979 media rows. No catalog or
+R2 media mutation, cleanup, legacy change, push, production change, or DNS change
+was performed; browser click-through remains unavailable in the VS Code runtime.
+
 Application/deployment checkpoint (2026-07-21): protected staging runs Worker
 `7a397fed-1c47-4fb1-9a37-81d4643c4624`, client/service-worker build
 `1979c0380e2b`. The whole-project audit remediation removes a Scan-maintenance
