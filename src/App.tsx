@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ScanViewer } from "./ScanViewer";
 import { ActionContent } from "./ActionContent";
@@ -97,6 +97,7 @@ import {
 import {
   preserveSessionResolutionDuringRevalidation,
   sessionFailureInvalidatesIdentity,
+  shouldRefreshProtectedCatalog,
   subscribeToBrowserConnectivity,
   subscribeToSessionRevalidation,
 } from "./app-lifecycle";
@@ -135,13 +136,19 @@ function useSessionRevalidationSignal(): number {
 
 function SongsPage({
   isOnline,
+  hasAuthenticatedSession,
   canEdit,
+  refreshSignal,
+  onAuthenticationRequired,
   view,
   onViewChange,
   scrollPosition,
 }: {
   isOnline: boolean;
+  hasAuthenticatedSession: boolean;
   canEdit: boolean | null;
+  refreshSignal: number;
+  onAuthenticationRequired: (error: unknown) => void;
   view: CatalogViewState;
   onViewChange: (view: CatalogViewState) => void;
   scrollPosition: { current: number };
@@ -150,37 +157,49 @@ function SongsPage({
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [refreshAttempt, setRefreshAttempt] = useState(0);
   const restoredScroll = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load(): Promise<void> {
+      setIsLoading(true);
       try {
         const cached = await readCachedCatalog();
         if (cancelled) return;
         setSongs(cached.songs);
         setSyncedAt(cached.syncedAt);
+        setError(null);
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "Catalog could not be loaded");
+        }
+      }
 
-        if (navigator.onLine) {
+      if (cancelled) return;
+      if (shouldRefreshProtectedCatalog(isOnline, hasAuthenticatedSession)) {
+        try {
           const fresh = await refreshOfflineLibrary();
           if (cancelled) return;
           setSongs(fresh.songs);
           setSyncedAt(fresh.syncedAt);
           setError(null);
+        } catch (loadError) {
+          if (!cancelled) {
+            setError(loadError instanceof Error ? loadError.message : "Catalog could not be loaded");
+            if (sessionFailureInvalidatesIdentity(loadError)) {
+              onAuthenticationRequired(loadError);
+            }
+          }
         }
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : "Catalog could not be loaded");
-        }
-      } finally {
-        if (!cancelled) setIsLoading(false);
       }
+      if (!cancelled) setIsLoading(false);
     }
 
     void load();
     return () => { cancelled = true; };
-  }, [isOnline]);
+  }, [hasAuthenticatedSession, isOnline, onAuthenticationRequired, refreshAttempt, refreshSignal]);
 
   useLayoutEffect(() => {
     if (restoredScroll.current || (isLoading && songs.length === 0)) return;
@@ -224,7 +243,16 @@ function SongsPage({
         onSortChange={(sort) => onViewChange({ ...view, sort })}
       />
 
-      {error && <p className="catalog-message error-message" role="alert">{error}</p>}
+      {error && (
+        <div className="catalog-recovery">
+          <p className="catalog-message error-message" role="alert">{error}</p>
+          {shouldRefreshProtectedCatalog(isOnline, hasAuthenticatedSession) && (
+            <button className="secondary-action" type="button" onClick={() => setRefreshAttempt((attempt) => attempt + 1)}>
+              Retry sync
+            </button>
+          )}
+        </div>
+      )}
       {syncedAt && <p className="sync-note">Available offline · updated {new Date(syncedAt).toLocaleString()}</p>}
 
       {isLoading && songs.length === 0 ? (
@@ -2502,10 +2530,24 @@ export function App() {
   const catalogScrollPosition = useRef(0);
   const [session, setSession] = useState<AppSession | null>(null);
   const [sessionResolved, setSessionResolved] = useState(false);
+  const [sessionIssue, setSessionIssue] = useState<{
+    kind: "authentication" | "unavailable";
+    message: string;
+  } | null>(null);
   const [privateDataBlocked, setPrivateDataBlocked] = useState(isPrivateDataBlocked);
   const [accessLogoutPending, setAccessLogoutPending] = useState(isAccessLogoutPending);
   const sessionGeneration = useRef(0);
   const logoutCompletionActive = useRef(false);
+
+  const requireAuthentication = useCallback((error: unknown) => {
+    sessionGeneration.current += 1;
+    setSession(null);
+    setSessionResolved(true);
+    setSessionIssue({
+      kind: "authentication",
+      message: error instanceof Error ? error.message : "Your protected session needs to be renewed.",
+    });
+  }, []);
 
   function notifyPrivateDataCleared(): void {
     if ("BroadcastChannel" in window) {
@@ -2534,6 +2576,7 @@ export function App() {
     sessionGeneration.current += 1;
     setSession(null);
     setSessionResolved(false);
+    setSessionIssue(null);
     setPrivateDataBlocked(true);
     setAccessLogoutPending(true);
     logoutCompletionActive.current = true;
@@ -2557,6 +2600,7 @@ export function App() {
       localStorage.removeItem(PRIVATE_CACHE_NAMESPACE_KEY);
       setSession(null);
       setSessionResolved(false);
+      setSessionIssue(null);
       setPrivateDataBlocked(true);
       setAccessLogoutPending(true);
       void clearPrivateLocalData().catch(() => undefined);
@@ -2611,10 +2655,20 @@ export function App() {
         if (cancelled || generation !== sessionGeneration.current) return;
         setSession(user);
         setSessionResolved(true);
+        setSessionIssue(null);
         setPrivateDataBlocked(false);
       } catch (loadError) {
         if (!cancelled && generation === sessionGeneration.current) {
-          if (sessionFailureInvalidatesIdentity(loadError)) setSession(null);
+          const authenticationFailure = sessionFailureInvalidatesIdentity(loadError);
+          if (authenticationFailure) setSession(null);
+          setSessionIssue({
+            kind: authenticationFailure ? "authentication" : "unavailable",
+            message: loadError instanceof Error
+              ? loadError.message
+              : authenticationFailure
+                ? "Your protected session needs to be renewed."
+                : "The protected session could not be checked.",
+          });
           setSessionResolved(true);
         }
       }
@@ -2664,11 +2718,26 @@ export function App() {
         )
         : isOnline && !sessionResolved
         ? <main className="page-shell" id="main-content"><p>Checking this device’s private session…</p></main>
+        : isOnline && session === null
+        ? (
+          <main className="page-shell" id="main-content">
+            <section className="empty-state session-boundary">
+              <h1>{sessionIssue?.kind === "unavailable" ? "Library unavailable" : "Sign in required"}</h1>
+              <p>{sessionIssue?.message ?? "Your protected session needs to be renewed."}</p>
+              <a className="primary-action action-link" href="/songs">
+                {sessionIssue?.kind === "unavailable" ? "Retry" : "Sign in"}
+              </a>
+            </section>
+          </main>
+        )
         : <Routes>
         <Route path="/songs" element={(
           <SongsPage
             isOnline={isOnline}
+            hasAuthenticatedSession={session !== null}
             canEdit={canEdit}
+            refreshSignal={sessionRevalidationSignal}
+            onAuthenticationRequired={requireAuthentication}
             view={catalogView}
             onViewChange={setCatalogView}
             scrollPosition={catalogScrollPosition}
@@ -2691,7 +2760,7 @@ export function App() {
         <Route path="*" element={<Navigate to="/songs" replace />} />
       </Routes>}
 
-      {!privateDataBlocked && <nav className="bottom-nav" aria-label="Primary navigation">
+      {!privateDataBlocked && (!isOnline || session !== null) && <nav className="bottom-nav" aria-label="Primary navigation">
         <Link to="/songs">Songs</Link>
         {canEdit === true && <Link to="/trash">Trash</Link>}
         {canEdit === true && <Link to="/manage">Lists</Link>}

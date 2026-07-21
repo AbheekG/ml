@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   preserveSessionResolutionDuringRevalidation,
   sessionFailureInvalidatesIdentity,
+  shouldRefreshProtectedCatalog,
   subscribeToBrowserConnectivity,
   subscribeToSessionRevalidation,
   type BrowserConnectivityTarget,
@@ -86,5 +87,12 @@ describe("session revalidation lifecycle", () => {
     expect(sessionFailureInvalidatesIdentity({ status: 403 })).toBe(true);
     expect(sessionFailureInvalidatesIdentity({ status: 503 })).toBe(false);
     expect(sessionFailureInvalidatesIdentity(new TypeError("network"))).toBe(false);
+  });
+
+  it("refreshes protected catalog data only with connectivity and a validated session", () => {
+    expect(shouldRefreshProtectedCatalog(true, true)).toBe(true);
+    expect(shouldRefreshProtectedCatalog(true, false)).toBe(false);
+    expect(shouldRefreshProtectedCatalog(false, true)).toBe(false);
+    expect(shouldRefreshProtectedCatalog(false, false)).toBe(false);
   });
 });

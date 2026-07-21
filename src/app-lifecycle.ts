@@ -48,3 +48,10 @@ export function sessionFailureInvalidatesIdentity(error: unknown): boolean {
   const status = (error as { status?: unknown }).status;
   return status === 401 || status === 403;
 }
+
+export function shouldRefreshProtectedCatalog(
+  isOnline: boolean,
+  hasAuthenticatedSession: boolean,
+): boolean {
+  return isOnline && hasAuthenticatedSession;
+}

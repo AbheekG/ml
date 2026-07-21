@@ -184,12 +184,7 @@ export async function refreshOfflineLibrary(): Promise<{
   songs: CatalogSong[];
   syncedAt: string;
 }> {
-  const response = await fetch("/api/offline-library", {
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) throw new Error(`Offline library request failed (${response.status})`);
-
-  const payload = await response.json() as { songs: SongDetail[] };
+  const payload = await apiJson<{ songs: SongDetail[] }>("/api/offline-library");
   const songs = payload.songs.map(createCatalogSongIndex);
   const syncedAt = new Date().toISOString();
   await database.transaction("rw", database.songs, database.songDetails, database.metadata, async () => {
@@ -345,6 +340,10 @@ export class ApiError extends Error {
 
 function apiErrorMessage(code: string): string {
   const messages: Record<string, string> = {
+    authentication_required: "Your protected session needs to be renewed.",
+    invalid_access_token: "Your protected session needs to be renewed.",
+    invalid_identity: "Your protected session needs to be renewed.",
+    access_not_authorized: "This account is not authorized to use the library.",
     duplicate_song_title: "Another active song already has this title.",
     duplicate_song_alias: "This song has duplicate aliases.",
     edit_conflict: "This song changed after you opened it. Reload it and try again.",

@@ -517,6 +517,14 @@ button:disabled {
   scroll-margin-block: 5.25rem 1rem;
 }
 
+.catalog-recovery {
+  margin-bottom: 1rem;
+}
+
+.catalog-recovery .catalog-message {
+  margin-bottom: 0.65rem;
+}
+
 .error-message {
   color: #7b241f;
   background: #f8deda;
