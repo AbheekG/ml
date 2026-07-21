@@ -590,3 +590,57 @@ describe("Recording upload finalization transaction", () => {
     }
   });
 });
+
+describe("typed-lyrics create idempotency", () => {
+  it("creates once and returns the same row for an exact client retry", async () => {
+    const { binding, native } = createD1();
+    try {
+      native.prepare(`
+        INSERT INTO songs (
+          id, title_latin, normalized_title_latin, status,
+          created_at, created_by, updated_at, updated_by
+        ) VALUES ('lyric-song', 'Lyric Song', 'lyric song', 'draft', ?, ?, ?, ?)
+      `).run(timestamp, actor, timestamp, actor);
+      const clientMutationId = "3f2a1dc0-49aa-4e52-a27a-74d1372aa219";
+      const request = () => app.request(
+        "http://local.test/api/songs/lyric-song/lyrics",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "Exact private text", clientMutationId }),
+        },
+        bindings(binding),
+      );
+
+      const created = await request();
+      expect(created.status).toBe(201);
+      await expect(created.json()).resolves.toEqual({
+        lyric: { id: clientMutationId, revision: 1 },
+      });
+      const replay = await request();
+      expect(replay.status).toBe(200);
+      await expect(replay.json()).resolves.toEqual({
+        lyric: { id: clientMutationId, revision: 1 },
+      });
+      expect(native.prepare(`
+        SELECT COUNT(*) AS count, MIN(content) AS content, MIN(revision) AS revision
+        FROM lyric_texts WHERE song_id = 'lyric-song'
+      `).get()).toEqual({ count: 1, content: "Exact private text", revision: 1 });
+
+      const conflict = await app.request(
+        "http://local.test/api/songs/lyric-song/lyrics",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "Different private text", clientMutationId }),
+        },
+        bindings(binding),
+      );
+      expect(conflict.status).toBe(409);
+      await expect(conflict.json()).resolves.toEqual({ error: "lyric_mutation_conflict" });
+      expect(native.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      native.close();
+    }
+  });
+});

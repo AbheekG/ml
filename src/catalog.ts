@@ -362,6 +362,7 @@ function apiErrorMessage(code: string): string {
     lyric_already_trashed: "These typed lyrics are already in Trash.",
     lyric_not_trashed: "These typed lyrics have already been restored.",
     lyric_parent_trashed: "Restore the parent Song before restoring these typed lyrics.",
+    lyric_mutation_conflict: "This save identity was already used for different typed lyrics. Reload the form.",
     invalid_scan_reference: "The selected Notebook is no longer available. Reload the form.",
     scan_file_required: "Choose a Scan image.",
     empty_scan_file: "The selected Scan file is empty.",
@@ -554,13 +555,14 @@ export async function restoreSong(songId: string, revision: number): Promise<{ i
 export async function createLyric(
   songId: string,
   content: string,
+  clientMutationId: string,
 ): Promise<{ id: string; revision: number }> {
   const response = await apiJson<{ lyric: { id: string; revision: number } }>(
     `/api/songs/${encodeURIComponent(songId)}/lyrics`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, clientMutationId }),
     },
   );
   return response.lyric;

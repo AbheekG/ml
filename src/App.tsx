@@ -894,6 +894,10 @@ function LyricEditorPage({
   const editorKey = `${mode}:${songId}:${lyricId}`;
   const loadedEditorKey = useRef<string | null>(null);
   const [failedEditorKey, setFailedEditorKey] = useState<string | null>(null);
+  const createMutation = useRef<{ editorKey: string; id: string } | null>(null);
+  if (mode === "create" && createMutation.current?.editorKey !== editorKey) {
+    createMutation.current = { editorKey, id: crypto.randomUUID() };
+  }
   const [initialContent, setInitialContent] = useState<{ key: string; value: string } | null>(null);
   const hasUnsavedChanges = initialContent?.key === editorKey
     && editorValuesChanged(initialContent.value, content);
@@ -953,7 +957,7 @@ function LyricEditorPage({
     setFieldErrors({});
     try {
       if (mode === "create") {
-        await createLyric(songId, content);
+        await createLyric(songId, content, createMutation.current!.id);
       } else {
         await updateLyric(songId, lyricId, content, revision ?? 0);
       }

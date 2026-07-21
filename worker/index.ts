@@ -211,6 +211,15 @@ type LyricStateRow = {
   songTrashedAt: string | null;
 };
 
+type LyricCreateReplayRow = {
+  songId: string;
+  content: string;
+  origin: "user" | "legacy_import";
+  revision: number;
+  createdBy: string;
+  trashedAt: string | null;
+};
+
 type ScanStateRow = {
   revision: number;
   rotationQuarterTurns: 0 | 1 | 2 | 3;
@@ -1343,6 +1352,37 @@ async function loadLyricState(
     JOIN songs ON songs.id = lyric_texts.song_id
     WHERE lyric_texts.id = ? AND lyric_texts.song_id = ?
   `).bind(lyricId, songId).first<LyricStateRow>();
+}
+
+async function loadLyricCreateReplay(
+  database: D1Database,
+  lyricId: string,
+): Promise<LyricCreateReplayRow | null> {
+  return database.prepare(`
+    SELECT
+      song_id AS songId,
+      content,
+      origin,
+      revision,
+      created_by AS createdBy,
+      trashed_at AS trashedAt
+    FROM lyric_texts
+    WHERE id = ?
+  `).bind(lyricId).first<LyricCreateReplayRow>();
+}
+
+function lyricCreateReplayMatches(
+  row: LyricCreateReplayRow | null,
+  songId: string,
+  content: string,
+  actor: string,
+): boolean {
+  return row?.songId === songId
+    && row.content === content
+    && row.origin === "user"
+    && row.revision === 1
+    && row.createdBy === actor
+    && row.trashedAt === null;
 }
 
 async function loadSongState(database: D1Database, songId: string): Promise<SongStateRow | null> {
@@ -4205,7 +4245,7 @@ app.post("/api/songs/:songId/lyrics", requireRole("editor"), async (context) => 
   }
 
   const songId = context.req.param("songId");
-  const lyricId = crypto.randomUUID();
+  const lyricId = parsed.data.clientMutationId ?? crypto.randomUUID();
   const timestamp = new Date().toISOString();
   const actor = context.get("appUser").identity;
   try {
@@ -4225,10 +4265,11 @@ app.post("/api/songs/:songId/lyrics", requireRole("editor"), async (context) => 
           1, ?, ?, ?, ?
         FROM songs
         WHERE songs.id = ? AND songs.trashed_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM lyric_texts WHERE id = ?)
       `).bind(
         lyricId, parsed.data.content,
         timestamp, actor, timestamp, actor,
-        songId,
+        songId, lyricId,
       ),
       context.env.DB.prepare(`
         UPDATE songs
@@ -4237,14 +4278,29 @@ app.post("/api/songs/:songId/lyrics", requireRole("editor"), async (context) => 
           AND EXISTS (
             SELECT 1 FROM lyric_texts
             WHERE id = ? AND song_id = songs.id
+              AND created_at = ? AND created_by = ? AND revision = 1
           )
-      `).bind(timestamp, actor, songId, lyricId),
+      `).bind(timestamp, actor, songId, lyricId, timestamp, actor),
     ]);
     if (results[0].meta.changes === 0) {
+      if (parsed.data.clientMutationId) {
+        const replay = await loadLyricCreateReplay(context.env.DB, lyricId);
+        if (lyricCreateReplayMatches(replay, songId, parsed.data.content, actor)) {
+          return context.json({ lyric: { id: lyricId, revision: 1 } });
+        }
+        if (replay) return context.json({ error: "lyric_mutation_conflict" }, 409);
+      }
       return context.json({ error: "song_not_found" }, 404);
     }
     return context.json({ lyric: { id: lyricId, revision: 1 } }, 201);
   } catch (error) {
+    if (parsed.data.clientMutationId) {
+      const replay = await loadLyricCreateReplay(context.env.DB, lyricId).catch(() => null);
+      if (lyricCreateReplayMatches(replay, songId, parsed.data.content, actor)) {
+        return context.json({ lyric: { id: lyricId, revision: 1 } });
+      }
+      if (replay) return context.json({ error: "lyric_mutation_conflict" }, 409);
+    }
     const response = lyricWriteError(error);
     return context.json({ error: response.error }, response.status);
   }

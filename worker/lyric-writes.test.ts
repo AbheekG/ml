@@ -7,7 +7,21 @@ describe("typed lyric validation", () => {
 
     expect(parseLyricCreate({ content })).toEqual({
       success: true,
-      data: { content },
+      data: { content, clientMutationId: null },
+    });
+  });
+
+  it("accepts a retry identity but rejects malformed or unknown create fields", () => {
+    const clientMutationId = "3f2a1dc0-49aa-4e52-a27a-74d1372aa219";
+    expect(parseLyricCreate({ content: "Text", clientMutationId })).toEqual({
+      success: true,
+      data: { content: "Text", clientMutationId },
+    });
+    expect(parseLyricCreate({ content: "Text", clientMutationId: "not-a-uuid" }))
+      .toMatchObject({ success: false, fields: { clientMutationId: expect.any(Array) } });
+    expect(parseLyricCreate({ content: "Text", unexpected: true })).toMatchObject({
+      success: false,
+      fields: { form: expect.any(Array) },
     });
   });
 

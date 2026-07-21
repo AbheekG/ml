@@ -728,6 +728,83 @@ describe("Worker API", () => {
     expect(batch[1].query).toContain("UPDATE songs");
   });
 
+  it("reconciles an ambiguous typed-lyrics create by its stable client identity", async () => {
+    const clientMutationId = "3f2a1dc0-49aa-4e52-a27a-74d1372aa219";
+    const content = "Retry-safe content";
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          bind: (..._values: unknown[]) => statement,
+          first: async () => query.includes("FROM lyric_texts") ? {
+            songId: "song-1",
+            content,
+            origin: "user",
+            revision: 1,
+            createdBy: "local@example.invalid",
+            trashedAt: null,
+          } : null,
+        };
+        return statement;
+      },
+      batch: async () => {
+        throw new Error("ambiguous_d1_response");
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/lyrics",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, clientMutationId }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      lyric: { id: clientMutationId, revision: 1 },
+    });
+  });
+
+  it("rejects reuse of a typed-lyrics save identity for different content", async () => {
+    const clientMutationId = "3f2a1dc0-49aa-4e52-a27a-74d1372aa219";
+    const database = {
+      prepare: (query: string) => {
+        const statement = {
+          bind: (..._values: unknown[]) => statement,
+          first: async () => query.includes("FROM lyric_texts") ? {
+            songId: "song-1",
+            content: "Earlier content",
+            origin: "user",
+            revision: 1,
+            createdBy: "local@example.invalid",
+            trashedAt: null,
+          } : null,
+        };
+        return statement;
+      },
+      batch: async (statements: unknown[]) => statements.map(() => ({
+        success: true,
+        results: [],
+        meta: { changes: 0 },
+      })),
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/lyrics",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "Different content", clientMutationId }),
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "lyric_mutation_conflict" });
+  });
+
   it("rejects blank typed lyrics before issuing database writes", async () => {
     const response = await app.request(
       "http://local.test/api/songs/song-1/lyrics",

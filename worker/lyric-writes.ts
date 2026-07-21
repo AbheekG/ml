@@ -6,6 +6,7 @@ const lyricContent = z.string()
 
 const createLyricSchema = z.object({
   content: lyricContent,
+  clientMutationId: z.uuid().optional(),
 }).strict();
 
 const updateLyricSchema = z.object({
@@ -19,6 +20,10 @@ const lyricRevisionSchema = z.object({
 
 export type LyricWriteInput = {
   content: string;
+};
+
+export type LyricCreateInput = LyricWriteInput & {
+  clientMutationId: string | null;
 };
 
 export type LyricUpdateInput = LyricWriteInput & {
@@ -38,10 +43,16 @@ function fieldsFromError(error: z.ZodError): Record<string, string[]> {
   return fields;
 }
 
-export function parseLyricCreate(value: unknown): LyricParseResult<LyricWriteInput> {
+export function parseLyricCreate(value: unknown): LyricParseResult<LyricCreateInput> {
   const result = createLyricSchema.safeParse(value);
   if (!result.success) return { success: false, fields: fieldsFromError(result.error) };
-  return { success: true, data: result.data };
+  return {
+    success: true,
+    data: {
+      content: result.data.content,
+      clientMutationId: result.data.clientMutationId ?? null,
+    },
+  };
 }
 
 export function parseLyricUpdate(value: unknown): LyricParseResult<LyricUpdateInput> {
