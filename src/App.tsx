@@ -12,6 +12,7 @@ import { FeedbackMessage, useRevealFeedback } from "./FeedbackMessage";
 import { LookupTabs, lookupPanelId, lookupTabId } from "./LookupTabs";
 import {
   UnsavedChangesProvider,
+  editorLoadStatus,
   editorValuesChanged,
   shouldRefreshEditor,
   useUnsavedChanges,
@@ -95,7 +96,9 @@ import {
 } from "./recording-sharing";
 import {
   preserveSessionResolutionDuringRevalidation,
+  sessionFailureInvalidatesIdentity,
   subscribeToBrowserConnectivity,
+  subscribeToSessionRevalidation,
 } from "./app-lifecycle";
 import {
   PRIVATE_CACHE_NAMESPACE_KEY,
@@ -116,6 +119,15 @@ function useOnlineStatus(): boolean {
   useEffect(() => subscribeToBrowserConnectivity(window, () => navigator.onLine, setIsOnline), []);
 
   return isOnline;
+}
+
+function useSessionRevalidationSignal(): number {
+  const [signal, setSignal] = useState(0);
+  useEffect(() => subscribeToSessionRevalidation(
+    window,
+    () => setSignal((current) => current + 1),
+  ), []);
+  return signal;
 }
 
 function SongsPage({
@@ -881,6 +893,7 @@ function LyricEditorPage({
   const [isTrashing, setIsTrashing] = useState(false);
   const editorKey = `${mode}:${songId}:${lyricId}`;
   const loadedEditorKey = useRef<string | null>(null);
+  const [failedEditorKey, setFailedEditorKey] = useState<string | null>(null);
   const [initialContent, setInitialContent] = useState<{ key: string; value: string } | null>(null);
   const hasUnsavedChanges = initialContent?.key === editorKey
     && editorValuesChanged(initialContent.value, content);
@@ -895,6 +908,8 @@ function LyricEditorPage({
       }
       if (!shouldRefreshEditor(loadedEditorKey.current, editorKey, hasUnsavedChanges)) return;
       setIsLoading(true);
+      setFailedEditorKey(null);
+      setError(null);
       try {
         const song = await refreshSong(songId);
         if (cancelled) return;
@@ -903,6 +918,7 @@ function LyricEditorPage({
           const lyric = song.lyricTexts.find((item) => item.id === lyricId);
           if (!lyric) {
             setError("These typed lyrics are no longer available.");
+            setFailedEditorKey(editorKey);
             return;
           }
           setContent(lyric.content);
@@ -917,7 +933,10 @@ function LyricEditorPage({
         }
         loadedEditorKey.current = editorKey;
       } catch (loadError) {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The typed-lyrics editor could not be loaded.");
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "The typed-lyrics editor could not be loaded.");
+          setFailedEditorKey(editorKey);
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -928,7 +947,7 @@ function LyricEditorPage({
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!isOnline || canEdit !== true || isSaving) return;
+    if (!isOnline || canEdit !== true || isSaving || loadedEditorKey.current !== editorKey) return;
     setIsSaving(true);
     setError(null);
     setFieldErrors({});
@@ -961,6 +980,7 @@ function LyricEditorPage({
       || canEdit !== true
       || isSaving
       || isTrashing
+      || loadedEditorKey.current !== editorKey
     ) return;
     const confirmed = window.confirm(
       "Move this typed-lyrics block to Trash? It will disappear from the Song but can be restored later.",
@@ -982,13 +1002,16 @@ function LyricEditorPage({
   }
 
   const songUrl = `/songs/${encodeURIComponent(songId)}`;
+  const loadStatus = editorLoadStatus(
+    loadedEditorKey.current, failedEditorKey, editorKey, isLoading,
+  );
   if (!isOnline) {
     return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Cancel</Link><section className="empty-state"><h1>Editing is offline</h1><p>Reconnect to create or change typed lyrics. Saved lyrics remain available to read.</p></section></main>;
   }
   if (canEdit === null) return <main className="page-shell" id="main-content"><p>Checking editor access…</p></main>;
   if (!canEdit) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Editor access required</h1></section></main>;
-  if (isLoading) return <main className="page-shell" id="main-content"><p>Loading typed lyrics…</p></main>;
-  if (mode === "edit" && revision === null) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Typed lyrics unavailable</h1><p>{error}</p></section></main>;
+  if (loadStatus === "loading") return <main className="page-shell" id="main-content"><p>Loading typed lyrics…</p></main>;
+  if (loadStatus === "failed" || (mode === "edit" && revision === null)) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Typed lyrics unavailable</h1><p>{error}</p></section></main>;
 
   return (
     <main className="page-shell editor-page" id="main-content">
@@ -1066,6 +1089,7 @@ function ScanEditorPage({
   const [isTrashing, setIsTrashing] = useState(false);
   const editorKey = `${mode}:${songId}:${scanId}`;
   const loadedEditorKey = useRef<string | null>(null);
+  const [failedEditorKey, setFailedEditorKey] = useState<string | null>(null);
   const [initialValues, setInitialValues] = useState<{
     key: string;
     value: { notebookId: string; pageLabel: string; fileSelected: boolean };
@@ -1094,6 +1118,8 @@ function ScanEditorPage({
       }
       if (!shouldRefreshEditor(loadedEditorKey.current, editorKey, hasUnsavedChanges)) return;
       setIsLoading(true);
+      setFailedEditorKey(null);
+      setError(null);
       try {
         const [editorOptions, song] = await Promise.all([
           loadScanEditorOptions(),
@@ -1106,6 +1132,7 @@ function ScanEditorPage({
           const scan = song.scans.find((item) => item.id === scanId);
           if (!scan) {
             setError("This Scan is no longer available.");
+            setFailedEditorKey(editorKey);
             return;
           }
           setFilename(scan.filename);
@@ -1134,7 +1161,10 @@ function ScanEditorPage({
         }
         loadedEditorKey.current = editorKey;
       } catch (loadError) {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The Scan editor could not be loaded.");
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "The Scan editor could not be loaded.");
+          setFailedEditorKey(editorKey);
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -1145,7 +1175,10 @@ function ScanEditorPage({
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!isOnline || canEdit !== true || isSaving || isTrashing) return;
+    if (
+      !isOnline || canEdit !== true || isSaving || isTrashing
+      || loadedEditorKey.current !== editorKey
+    ) return;
     if ((mode === "edit" || mode === "replace") && revision === null) return;
     if ((mode === "create" || mode === "replace") && !file) {
       setFieldErrors({ file: ["Choose an image file"] });
@@ -1191,7 +1224,10 @@ function ScanEditorPage({
   }
 
   async function recoverDuplicateScan(): Promise<void> {
-    if (!duplicateScan?.isTrashed || isSaving || !isOnline || canEdit !== true) return;
+    if (
+      !duplicateScan?.isTrashed || isSaving || !isOnline || canEdit !== true
+      || loadedEditorKey.current !== editorKey
+    ) return;
     const action = duplicateScan.songId === songId ? "restore" : "move";
     if (!window.confirm(
       `${action === "restore" ? "Restore" : "Move"} the existing Scan ${action === "restore" ? "to this Song" : `from “${duplicateScan.songTitle}” to “${songTitle}”`}? No file will be copied or deleted.`,
@@ -1214,7 +1250,10 @@ function ScanEditorPage({
   }
 
   async function moveToTrash(): Promise<void> {
-    if (!isOnline || canEdit !== true || revision === null || isSaving || isTrashing) return;
+    if (
+      !isOnline || canEdit !== true || revision === null || isSaving || isTrashing
+      || loadedEditorKey.current !== editorKey
+    ) return;
     const confirmed = window.confirm(
       "Move this Scan to Trash? Its private file will be retained and can be restored later.",
     );
@@ -1235,6 +1274,9 @@ function ScanEditorPage({
   }
 
   const songUrl = `/songs/${encodeURIComponent(songId)}`;
+  const loadStatus = editorLoadStatus(
+    loadedEditorKey.current, failedEditorKey, editorKey, isLoading,
+  );
   function chooseFile(selectedFile: File | null): void {
     setFile(selectedFile);
     setDuplicateScan(null);
@@ -1244,8 +1286,8 @@ function ScanEditorPage({
   if (!isOnline) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Cancel</Link><section className="empty-state"><h1>Editing is offline</h1><p>Reconnect to add, change, or remove a Scan. Saved Song information remains available to read.</p></section></main>;
   if (canEdit === null) return <main className="page-shell" id="main-content"><p>Checking editor access…</p></main>;
   if (!canEdit) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Editor access required</h1></section></main>;
-  if (isLoading) return <main className="page-shell" id="main-content"><p>Loading Scan…</p></main>;
-  if (mode === "edit" && revision === null) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Scan unavailable</h1><p>{error}</p></section></main>;
+  if (loadStatus === "loading") return <main className="page-shell" id="main-content"><p>Loading Scan…</p></main>;
+  if (loadStatus === "failed" || (mode !== "create" && revision === null)) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Scan unavailable</h1><p>{error}</p></section></main>;
 
   return (
     <main className="page-shell editor-page" id="main-content">
@@ -1401,6 +1443,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
   const [isTrashing, setIsTrashing] = useState(false);
   const editorKey = `${songId}:${recordingId}`;
   const loadedEditorKey = useRef<string | null>(null);
+  const [failedEditorKey, setFailedEditorKey] = useState<string | null>(null);
   const [initialValues, setInitialValues] = useState<{
     key: string;
     value: { description: string; recordedOn: string; vocalistIds: string[] };
@@ -1419,6 +1462,8 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
       }
       if (!shouldRefreshEditor(loadedEditorKey.current, editorKey, hasUnsavedChanges)) return;
       setIsLoading(true);
+      setFailedEditorKey(null);
+      setError(null);
       try {
         const [editorOptions, song] = await Promise.all([
           loadRecordingEditorOptions(),
@@ -1430,6 +1475,7 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
         setSongTitle(song.titleLatin);
         if (!recording) {
           setError("This Recording is no longer available.");
+          setFailedEditorKey(editorKey);
           return;
         }
         setFilename(recording.filename);
@@ -1446,7 +1492,10 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
         setRevision(recording.revision);
         loadedEditorKey.current = editorKey;
       } catch (loadError) {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The Recording editor could not be loaded.");
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "The Recording editor could not be loaded.");
+          setFailedEditorKey(editorKey);
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -1457,7 +1506,10 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!isOnline || canEdit !== true || revision === null || isSaving || isTrashing) return;
+    if (
+      !isOnline || canEdit !== true || revision === null || isSaving || isTrashing
+      || loadedEditorKey.current !== editorKey
+    ) return;
     setIsSaving(true);
     setError(null);
     setFieldErrors({});
@@ -1484,7 +1536,10 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
   }
 
   async function moveToTrash(): Promise<void> {
-    if (!isOnline || canEdit !== true || revision === null || isSaving || isTrashing) return;
+    if (
+      !isOnline || canEdit !== true || revision === null || isSaving || isTrashing
+      || loadedEditorKey.current !== editorKey
+    ) return;
     const confirmed = window.confirm(
       "Move this Recording to Trash? Its original audio and any playback copy will be retained for recovery.",
     );
@@ -1504,11 +1559,14 @@ function RecordingEditorPage({ isOnline, canEdit }: { isOnline: boolean; canEdit
   }
 
   const songUrl = `/songs/${encodeURIComponent(songId)}`;
+  const loadStatus = editorLoadStatus(
+    loadedEditorKey.current, failedEditorKey, editorKey, isLoading,
+  );
   if (!isOnline) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Cancel</Link><section className="empty-state"><h1>Editing is offline</h1><p>Reconnect to change or remove a Recording. Saved Song information remains available to read.</p></section></main>;
   if (canEdit === null) return <main className="page-shell" id="main-content"><p>Checking editor access…</p></main>;
   if (!canEdit) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Editor access required</h1></section></main>;
-  if (isLoading) return <main className="page-shell" id="main-content"><p>Loading Recording…</p></main>;
-  if (revision === null) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Recording unavailable</h1><p>{error}</p></section></main>;
+  if (loadStatus === "loading") return <main className="page-shell" id="main-content"><p>Loading Recording…</p></main>;
+  if (loadStatus === "failed" || revision === null) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Recording unavailable</h1><p>{error}</p></section></main>;
 
   return (
     <main className="page-shell editor-page" id="main-content">
@@ -1925,6 +1983,7 @@ function SongEditorPage({
   const [isTrashing, setIsTrashing] = useState(false);
   const editorKey = `${mode}:${songId}`;
   const loadedEditorKey = useRef<string | null>(null);
+  const [failedEditorKey, setFailedEditorKey] = useState<string | null>(null);
   const [initialForm, setInitialForm] = useState<{ key: string; value: SongFormState } | null>(null);
   const hasUnsavedChanges = initialForm?.key === editorKey
     && editorValuesChanged(initialForm.value, form);
@@ -1939,6 +1998,8 @@ function SongEditorPage({
       }
       if (!shouldRefreshEditor(loadedEditorKey.current, editorKey, hasUnsavedChanges)) return;
       setIsLoading(true);
+      setFailedEditorKey(null);
+      setError(null);
       try {
         const [editorOptions, song] = await Promise.all([
           loadSongEditorOptions(),
@@ -1973,7 +2034,10 @@ function SongEditorPage({
         }
         loadedEditorKey.current = editorKey;
       } catch (loadError) {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "The editor could not be loaded.");
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "The editor could not be loaded.");
+          setFailedEditorKey(editorKey);
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -1984,7 +2048,10 @@ function SongEditorPage({
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!isOnline || canEdit !== true || isSaving || isTrashing) return;
+    if (
+      !isOnline || canEdit !== true || isSaving || isTrashing
+      || loadedEditorKey.current !== editorKey
+    ) return;
     setIsSaving(true);
     setError(null);
     setFieldErrors({});
@@ -2021,7 +2088,10 @@ function SongEditorPage({
   }
 
   async function moveSongToTrash(): Promise<void> {
-    if (mode !== "edit" || !isOnline || canEdit !== true || form.revision === null || isSaving || isTrashing) return;
+    if (
+      mode !== "edit" || !isOnline || canEdit !== true || form.revision === null
+      || isSaving || isTrashing || loadedEditorKey.current !== editorKey
+    ) return;
     if (childCounts.lyricTexts + childCounts.scans + childCounts.recordings > 0) return;
     const confirmed = window.confirm(
       "Move this Song to Trash? Its metadata and relationships will be retained and can be restored later.",
@@ -2050,7 +2120,11 @@ function SongEditorPage({
   if (!canEdit) {
     return <main className="page-shell" id="main-content"><Link className="back-link" to="/songs">← All songs</Link><section className="empty-state"><h1>Editor access required</h1></section></main>;
   }
-  if (isLoading) return <main className="page-shell" id="main-content"><p>Loading editor…</p></main>;
+  const loadStatus = editorLoadStatus(
+    loadedEditorKey.current, failedEditorKey, editorKey, isLoading,
+  );
+  if (loadStatus === "loading") return <main className="page-shell" id="main-content"><p>Loading editor…</p></main>;
+  if (loadStatus === "failed") return <main className="page-shell" id="main-content"><Link className="back-link" to={mode === "edit" ? `/songs/${encodeURIComponent(songId)}` : "/songs"}>← Cancel</Link><section className="empty-state"><h1>Editor unavailable</h1><p>{error}</p></section></main>;
 
   return (
     <main className="page-shell editor-page" id="main-content">
@@ -2411,6 +2485,7 @@ function ManageLookupsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: 
 
 export function App() {
   const isOnline = useOnlineStatus();
+  const sessionRevalidationSignal = useSessionRevalidationSignal();
   const [catalogView, setCatalogView] = useState(initialCatalogViewState);
   const catalogScrollPosition = useRef(0);
   const [session, setSession] = useState<AppSession | null>(null);
@@ -2513,15 +2588,15 @@ export function App() {
         setSession(user);
         setSessionResolved(true);
         setPrivateDataBlocked(false);
-      } catch {
+      } catch (loadError) {
         if (!cancelled && generation === sessionGeneration.current) {
-          setSession(null);
+          if (sessionFailureInvalidatesIdentity(loadError)) setSession(null);
           setSessionResolved(true);
         }
       }
     })();
     return () => { cancelled = true; };
-  }, [isOnline, accessLogoutPending]);
+  }, [isOnline, accessLogoutPending, sessionRevalidationSignal]);
 
   const canEdit = !sessionResolved ? null : session?.role === "editor" || session?.role === "admin";
 

@@ -32,7 +32,12 @@ import {
   recordingUploadPercent,
   recordingUploadProgressLabel,
 } from "./recording-upload-view";
-import { editorValuesChanged, shouldRefreshEditor, useUnsavedChanges } from "./UnsavedChanges";
+import {
+  editorLoadStatus,
+  editorValuesChanged,
+  shouldRefreshEditor,
+  useUnsavedChanges,
+} from "./UnsavedChanges";
 
 export function RecordingUploadPage({
   mode = "create",
@@ -71,6 +76,7 @@ export function RecordingUploadPage({
   const activeRequest = useRef<AbortController | null>(null);
   const editorKey = `${mode}:${songId}:${recordingId ?? ""}`;
   const loadedEditorKey = useRef<string | null>(null);
+  const [failedEditorKey, setFailedEditorKey] = useState<string | null>(null);
   const [initialValues, setInitialValues] = useState<{
     key: string;
     value: { description: string; recordedOn: string; vocalistIds: string[]; fileSelected: boolean };
@@ -95,6 +101,8 @@ export function RecordingUploadPage({
       }
       if (!shouldRefreshEditor(loadedEditorKey.current, editorKey, hasUnsavedChanges)) return;
       setIsLoading(true);
+      setFailedEditorKey(null);
+      setError(null);
       try {
         const [editorOptions, song, serverUploads] = await Promise.all([
           loadRecordingEditorOptions(),
@@ -158,6 +166,7 @@ export function RecordingUploadPage({
           setError(loadError instanceof Error
             ? loadError.message
             : "The Recording upload form could not be loaded.");
+          setFailedEditorKey(editorKey);
         }
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -183,7 +192,10 @@ export function RecordingUploadPage({
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!isOnline || canEdit !== true || isSaving || duplicate) return;
+    if (
+      !isOnline || canEdit !== true || isSaving || duplicate
+      || loadedEditorKey.current !== editorKey
+    ) return;
     if (!attempt && !file) {
       setFieldErrors({ file: ["Choose an audio file"] });
       return;
@@ -470,12 +482,16 @@ export function RecordingUploadPage({
   }
 
   const songUrl = `/songs/${encodeURIComponent(songId)}`;
+  const loadStatus = editorLoadStatus(
+    loadedEditorKey.current, failedEditorKey, editorKey, isLoading,
+  );
   if (!isOnline) {
     return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Recording uploads are offline</h1><p>Reconnect to start or resume a private audio upload. Existing Song information remains available to read.</p></section></main>;
   }
   if (canEdit === null) return <main className="page-shell" id="main-content"><p>Checking editor access…</p></main>;
   if (!canEdit) return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Editor access required</h1></section></main>;
-  if (isLoading) return <main className="page-shell" id="main-content"><p>Loading Recording upload…</p></main>;
+  if (loadStatus === "loading") return <main className="page-shell" id="main-content"><p>Loading Recording upload…</p></main>;
+  if (loadStatus === "failed") return <main className="page-shell" id="main-content"><Link className="back-link" to={songUrl}>← Song</Link><section className="empty-state"><h1>Recording upload unavailable</h1><p>{error}</p></section></main>;
 
   const percent = progress ? recordingUploadPercent(progress) : 0;
   const formLocked = attempt !== null;

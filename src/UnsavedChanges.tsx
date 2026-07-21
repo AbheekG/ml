@@ -183,3 +183,15 @@ export function shouldRefreshEditor(
 ): boolean {
   return loadedEditorKey !== currentEditorKey || !hasUnsavedChanges;
 }
+
+export function editorLoadStatus(
+  loadedEditorKey: string | null,
+  failedEditorKey: string | null,
+  currentEditorKey: string,
+  isLoading: boolean,
+): "loading" | "ready" | "failed" {
+  if (isLoading) return "loading";
+  if (loadedEditorKey === currentEditorKey) return "ready";
+  if (failedEditorKey === currentEditorKey) return "failed";
+  return "loading";
+}

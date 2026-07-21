@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildCatalogSearchFields, scoreCatalogSearch } from "./catalog-search";
+import {
+  MAX_CATALOG_SEARCH_QUERY_LENGTH,
+  buildCatalogSearchFields,
+  scoreCatalogSearch,
+} from "./catalog-search";
 
 function titleScore(title: string, query: string): number | null {
   return scoreCatalogSearch(buildCatalogSearchFields({ titles: [title] }), query);
@@ -112,5 +116,18 @@ describe("Indic-roman catalog search", () => {
   it("returns no result when no literal or bounded title/alias match exists", () => {
     const fields = buildCatalogSearchFields({ titles: ["Unrelated Title"] });
     expect(scoreCatalogSearch(fields, "no plausible match")).toBeNull();
+  });
+
+  it("bounds pasted queries before normalization and fuzzy comparison", () => {
+    const bounded = "a".repeat(MAX_CATALOG_SEARCH_QUERY_LENGTH);
+    const oversized = `${bounded}${"x".repeat(100_000)}`;
+    expect(titleScore(bounded, oversized)).toBe(1200);
+  });
+
+  it("keeps long bounded typo comparisons accurate without a two-dimensional matrix", () => {
+    const title = `${"a".repeat(96)}bc${"d".repeat(96)}`;
+    const transposed = `${"a".repeat(96)}cb${"d".repeat(96)}`;
+    expect(titleScore(title, transposed)).not.toBeNull();
+    expect(titleScore(title, `${"x".repeat(4)}${transposed.slice(4)}`)).toBeNull();
   });
 });

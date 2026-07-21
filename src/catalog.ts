@@ -407,6 +407,9 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { Accept: "application/json", ...init?.headers },
   });
+  if (response.redirected) {
+    throw new ApiError("Your protected session needs to be renewed.", 401, "authentication_required");
+  }
   const payload = await response.json().catch(() => ({})) as {
     error?: string;
     fields?: Record<string, string[]>;
@@ -421,6 +424,14 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function loadSession(): Promise<AppSession> {
   const payload = await apiJson<{ user: AppSession }>("/api/session");
+  if (
+    !payload.user
+    || !["viewer", "editor", "admin"].includes(payload.user.role)
+    || typeof payload.user.cacheNamespace !== "string"
+    || payload.user.cacheNamespace.length === 0
+  ) {
+    throw new Error("Session response was invalid");
+  }
   return payload.user;
 }
 

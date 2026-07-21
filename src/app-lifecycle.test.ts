@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   preserveSessionResolutionDuringRevalidation,
+  sessionFailureInvalidatesIdentity,
   subscribeToBrowserConnectivity,
+  subscribeToSessionRevalidation,
   type BrowserConnectivityTarget,
+  type BrowserRevalidationTarget,
 } from "./app-lifecycle";
 
-function connectivityTarget(): BrowserConnectivityTarget & { dispatch: (type: "online" | "offline" | "pageshow") => void } {
+function connectivityTarget(): BrowserConnectivityTarget & BrowserRevalidationTarget & {
+  dispatch: (type: "online" | "offline" | "pageshow" | "focus") => void;
+} {
   const listeners = new Map<string, Set<EventListener>>();
   return {
     addEventListener(type, listener) {
@@ -61,5 +66,25 @@ describe("session revalidation lifecycle", () => {
 
   it("keeps the initial unresolved state unresolved until the first check finishes", () => {
     expect(preserveSessionResolutionDuringRevalidation(false)).toBe(false);
+  });
+
+  it("revalidates when a restored page or focused app may have a changed session", () => {
+    const target = connectivityTarget();
+    let calls = 0;
+    const unsubscribe = subscribeToSessionRevalidation(target, () => { calls += 1; });
+
+    target.dispatch("pageshow");
+    target.dispatch("focus");
+    expect(calls).toBe(2);
+    unsubscribe();
+    target.dispatch("focus");
+    expect(calls).toBe(2);
+  });
+
+  it("clears identity only for definitive authentication or authorization failures", () => {
+    expect(sessionFailureInvalidatesIdentity({ status: 401 })).toBe(true);
+    expect(sessionFailureInvalidatesIdentity({ status: 403 })).toBe(true);
+    expect(sessionFailureInvalidatesIdentity({ status: 503 })).toBe(false);
+    expect(sessionFailureInvalidatesIdentity(new TypeError("network"))).toBe(false);
   });
 });

@@ -13,6 +13,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import {
   UnsavedChangesProvider,
+  editorLoadStatus,
   editorValuesChanged,
   shouldRefreshEditor,
   useUnsavedChanges,
@@ -116,5 +117,12 @@ describe("editor value comparisons", () => {
     expect(shouldRefreshEditor("song:1", "song:1", false)).toBe(true);
     expect(shouldRefreshEditor("song:1", "song:2", true)).toBe(true);
     expect(shouldRefreshEditor(null, "song:1", false)).toBe(true);
+  });
+
+  it("never treats editor data loaded for a previous route as current", () => {
+    expect(editorLoadStatus("edit:song-1", null, "edit:song-2", false)).toBe("loading");
+    expect(editorLoadStatus("edit:song-1", "edit:song-2", "edit:song-2", false)).toBe("failed");
+    expect(editorLoadStatus("edit:song-2", null, "edit:song-2", false)).toBe("ready");
+    expect(editorLoadStatus("edit:song-2", null, "edit:song-2", true)).toBe("loading");
   });
 });

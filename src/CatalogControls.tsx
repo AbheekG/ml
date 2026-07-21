@@ -9,6 +9,7 @@ import {
   type CatalogSort,
 } from "./catalog-view";
 import type { CatalogSong } from "./catalog";
+import { MAX_CATALOG_SEARCH_QUERY_LENGTH } from "./catalog-search";
 
 const SORT_OPTIONS: Array<{ value: CatalogSort; label: string }> = [
   { value: "latin-asc", label: "Latin title A–Z" },
@@ -215,6 +216,7 @@ export function CatalogControls({
           <span aria-hidden="true">⌕</span>
           <input
             type="search"
+            maxLength={MAX_CATALOG_SEARCH_QUERY_LENGTH}
             placeholder="Search titles, lyrics, and metadata"
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}

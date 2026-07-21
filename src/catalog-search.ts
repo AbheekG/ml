@@ -12,6 +12,10 @@ export type CatalogSearchFieldInput = {
   lyrics?: Array<string | null | undefined>;
 };
 
+export const MAX_CATALOG_SEARCH_QUERY_LENGTH = 200;
+const MAX_FUZZY_VALUE_LENGTH = 500;
+const MAX_FUZZY_TOKENS = 64;
+
 export function normalizeCatalogSearchText(value: string): string {
   return value
     .normalize("NFKC")
@@ -68,20 +72,30 @@ function romanKeys(token: string): RomanKeys | null {
   return { base, loose, optionalFinalA };
 }
 
-function damerauLevenshtein(left: string, right: string): number {
-  const rows = left.length + 1;
+function boundedDamerauLevenshtein(left: string, right: string, maximum: number): number {
+  const sentinel = maximum + 1;
+  if (Math.abs(left.length - right.length) > maximum) return sentinel;
   const columns = right.length + 1;
-  const distance = Array.from({ length: rows }, () => new Array<number>(columns).fill(0));
-  for (let row = 0; row < rows; row += 1) distance[row][0] = row;
-  for (let column = 0; column < columns; column += 1) distance[0][column] = column;
+  let previousPrevious = new Uint16Array(columns);
+  let previous = new Uint16Array(columns);
+  let current = new Uint16Array(columns);
+  previousPrevious.fill(sentinel);
+  previous.fill(sentinel);
+  for (let column = 0; column <= Math.min(right.length, maximum); column += 1) {
+    previous[column] = column;
+  }
 
-  for (let row = 1; row < rows; row += 1) {
-    for (let column = 1; column < columns; column += 1) {
+  for (let row = 1; row <= left.length; row += 1) {
+    current.fill(sentinel);
+    if (row <= maximum) current[0] = row;
+    const firstColumn = Math.max(1, row - maximum);
+    const lastColumn = Math.min(right.length, row + maximum);
+    for (let column = firstColumn; column <= lastColumn; column += 1) {
       const substitutionCost = left[row - 1] === right[column - 1] ? 0 : 1;
-      distance[row][column] = Math.min(
-        distance[row - 1][column] + 1,
-        distance[row][column - 1] + 1,
-        distance[row - 1][column - 1] + substitutionCost,
+      current[column] = Math.min(
+        previous[column] + 1,
+        current[column - 1] + 1,
+        previous[column - 1] + substitutionCost,
       );
       if (
         row > 1
@@ -89,11 +103,12 @@ function damerauLevenshtein(left: string, right: string): number {
         && left[row - 1] === right[column - 2]
         && left[row - 2] === right[column - 1]
       ) {
-        distance[row][column] = Math.min(distance[row][column], distance[row - 2][column - 2] + 1);
+        current[column] = Math.min(current[column], previousPrevious[column - 2] + 1);
       }
     }
+    [previousPrevious, previous, current] = [previous, current, previousPrevious];
   }
-  return distance[left.length][right.length];
+  return Math.min(previous[right.length], sentinel);
 }
 
 function standardTypoDistance(length: number): number {
@@ -126,7 +141,9 @@ function tokenSimilarity(queryToken: string, candidateToken: string): number {
   const standardDistance = standardTypoDistance(longerLength);
   const allowedDistance = maximumTypoDistance(longerLength);
   if (allowedDistance === 0) return 0;
-  const distance = damerauLevenshtein(queryKeys.base, candidateKeys.base);
+  const distance = boundedDamerauLevenshtein(
+    queryKeys.base, candidateKeys.base, allowedDistance,
+  );
   if (distance > allowedDistance) return 0;
   const usesOuterTier = distance > standardDistance;
   if (
@@ -168,11 +185,16 @@ function tokenSpanSimilarity(
 }
 
 function tokenCoverageScore(query: string, candidate: string): number | null {
+  if (query.length > MAX_FUZZY_VALUE_LENGTH || candidate.length > MAX_FUZZY_VALUE_LENGTH) {
+    return null;
+  }
   const queryTokens = query.split(" ").filter(Boolean);
   const candidateTokens = candidate.split(" ").filter(Boolean);
   if (
     queryTokens.length === 0
     || candidateTokens.length === 0
+    || queryTokens.length > MAX_FUZZY_TOKENS
+    || candidateTokens.length > MAX_FUZZY_TOKENS
     || queryTokens.length > candidateTokens.length * 3
   ) return null;
 
@@ -250,6 +272,9 @@ function joinedTokenSimilarity(query: string, candidate: string): number {
 }
 
 function joinedBoundaryScore(query: string, candidate: string): number | null {
+  if (query.length > MAX_FUZZY_VALUE_LENGTH || candidate.length > MAX_FUZZY_VALUE_LENGTH) {
+    return null;
+  }
   const queryTokens = query.split(" ").filter(Boolean);
   const candidateTokens = candidate.split(" ").filter(Boolean);
   if (queryTokens.length === 0 || queryTokens.length > 3 || candidateTokens.length === 0) return null;
@@ -284,7 +309,7 @@ function bestScore(values: string[], score: (value: string) => number | null): n
 }
 
 export function scoreCatalogSearch(fields: CatalogSearchFields, rawQuery: string): number | null {
-  const query = normalizeCatalogSearchText(rawQuery);
+  const query = normalizeCatalogSearchText(rawQuery.slice(0, MAX_CATALOG_SEARCH_QUERY_LENGTH));
   if (!query) return 0;
 
   const scores: number[] = [];
