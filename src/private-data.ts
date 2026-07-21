@@ -2,7 +2,10 @@ export const PRIVATE_CACHE_NAMESPACE_KEY = "music-library-cache-namespace";
 export const PRIVATE_DATA_BARRIER_KEY = "music-library-private-data-clearing";
 export const PRIVATE_DATA_CHANNEL_NAME = "music-library-private-data";
 export const PENDING_ACCESS_LOGOUT_KEY = "music-library-access-logout-pending";
+export const ACCESS_LOGOUT_NAVIGATION_KEY = "music-library-access-logout-navigation";
 export const ACCESS_LOGOUT_PATH = "/cdn-cgi/access/logout";
+
+const PRIVATE_CACHE_CLEAR_TIMEOUT_MS = 5_000;
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
@@ -60,19 +63,56 @@ export function isPrivateDataClearedMessage(value: unknown): boolean {
 
 export async function requestPrivateBrowserCacheClear(
   fetcher: typeof fetch = fetch,
+  timeoutMs: number = PRIVATE_CACHE_CLEAR_TIMEOUT_MS,
 ): Promise<void> {
-  const response = await fetcher("/api/logout", {
-    method: "POST",
-    cache: "no-store",
-    credentials: "same-origin",
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) throw new Error("Private browser cache clear was rejected");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetcher("/api/logout", {
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error("Private browser cache clear was rejected");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export function acknowledgeAccessLogoutReturn(
+  search: string,
+  storage: StorageLike = localStorage,
+  navigationStorage: StorageLike = sessionStorage,
+): boolean {
+  if (new URLSearchParams(search).get("__cf_access_message") !== "logged_out") return false;
+  const pendingToken = storage.getItem(PENDING_ACCESS_LOGOUT_KEY);
+  if (
+    pendingToken === null
+    || navigationStorage.getItem(ACCESS_LOGOUT_NAVIGATION_KEY) !== pendingToken
+  ) {
+    return false;
+  }
+  storage.removeItem(PENDING_ACCESS_LOGOUT_KEY);
+  navigationStorage.removeItem(ACCESS_LOGOUT_NAVIGATION_KEY);
+  return true;
+}
+
+export function markAccessLogoutNavigation(
+  storage: StorageLike = localStorage,
+  navigationStorage: StorageLike = sessionStorage,
+): boolean {
+  const pendingToken = storage.getItem(PENDING_ACCESS_LOGOUT_KEY);
+  if (pendingToken === null) return false;
+  navigationStorage.setItem(ACCESS_LOGOUT_NAVIGATION_KEY, pendingToken);
+  return true;
 }
 
 export async function completePendingAccessLogout(options: {
   navigate: (path: string) => void;
   storage?: StorageLike;
+  navigationStorage?: StorageLike;
   fetcher?: typeof fetch;
 }): Promise<boolean> {
   const storage = options.storage ?? localStorage;
@@ -80,9 +120,12 @@ export async function completePendingAccessLogout(options: {
   try {
     await requestPrivateBrowserCacheClear(options.fetcher);
   } catch {
-    return false;
+    // The cache-clear response is defense in depth. Access logout is the
+    // authoritative session boundary and must remain reachable if this fetch
+    // is rejected, redirected, or unavailable despite an online browser state.
   }
-  storage.removeItem(PENDING_ACCESS_LOGOUT_KEY);
+  const navigationStorage = options.navigationStorage ?? sessionStorage;
+  if (!markAccessLogoutNavigation(storage, navigationStorage)) return false;
   options.navigate(ACCESS_LOGOUT_PATH);
   return true;
 }
@@ -92,6 +135,7 @@ export async function logoutAndClearPrivateData(options: {
   notifyOtherTabs: () => void;
   navigate: (path: string) => void;
   storage?: StorageLike;
+  navigationStorage?: StorageLike;
   fetcher?: typeof fetch;
   barrierToken?: string;
   online: boolean;

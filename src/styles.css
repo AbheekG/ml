@@ -491,6 +491,19 @@ button:disabled {
   line-height: 1.6;
 }
 
+.session-boundary {
+  gap: 0.9rem;
+}
+
+.session-boundary h1,
+.session-boundary p {
+  margin-bottom: 0;
+}
+
+.session-boundary h1 {
+  font-size: clamp(2rem, 6vw, 3.5rem);
+}
+
 .sync-note {
   margin: 0 0 0.8rem;
   color: var(--muted);

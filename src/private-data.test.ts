@@ -1,16 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  ACCESS_LOGOUT_NAVIGATION_KEY,
   ACCESS_LOGOUT_PATH,
   PENDING_ACCESS_LOGOUT_KEY,
   PRIVATE_CACHE_NAMESPACE_KEY,
   PRIVATE_DATA_BARRIER_KEY,
   PrivateDataBlockedError,
+  acknowledgeAccessLogoutReturn,
   beginPrivateDataClearing,
   completePendingAccessLogout,
   isAccessLogoutPending,
   isPrivateDataBlocked,
   isPrivateDataClearedMessage,
   logoutAndClearPrivateData,
+  markAccessLogoutNavigation,
   reconcilePrivateDataSession,
   requestPrivateBrowserCacheClear,
 } from "./private-data";
@@ -88,7 +91,15 @@ describe("private local data lifecycle", () => {
       cache: "no-store",
       credentials: "same-origin",
       headers: { Accept: "application/json" },
+      signal: expect.any(AbortSignal),
     });
+  });
+
+  it("bounds a cache-clear request that never completes", async () => {
+    const fetcher = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+    }));
+    await expect(requestPrivateBrowserCacheClear(fetcher, 1)).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("keeps Access logout pending without making a remote request while offline", async () => {
@@ -114,9 +125,11 @@ describe("private local data lifecycle", () => {
 
   it("finishes online Access logout after local clearing even if local verification fails", async () => {
     const storage = memoryStorage({ [PRIVATE_CACHE_NAMESPACE_KEY]: "user-a" });
+    const navigationStorage = memoryStorage();
     const navigate = vi.fn();
     await expect(logoutAndClearPrivateData({
       storage,
+      navigationStorage,
       barrierToken: "logout-1",
       notifyOtherTabs: vi.fn(),
       clearPrivateLocalData: async () => { throw new Error("IndexedDB unavailable"); },
@@ -125,7 +138,8 @@ describe("private local data lifecycle", () => {
       online: true,
     })).resolves.toBe("navigating");
     expect(storage.getItem(PRIVATE_DATA_BARRIER_KEY)).toBe("logout-1");
-    expect(storage.getItem(PENDING_ACCESS_LOGOUT_KEY)).toBeNull();
+    expect(storage.getItem(PENDING_ACCESS_LOGOUT_KEY)).toBe("logout-1");
+    expect(navigationStorage.getItem(ACCESS_LOGOUT_NAVIGATION_KEY)).toBe("logout-1");
     expect(navigate).toHaveBeenCalledWith(ACCESS_LOGOUT_PATH);
   });
 
@@ -134,30 +148,77 @@ describe("private local data lifecycle", () => {
       [PRIVATE_DATA_BARRIER_KEY]: "logout-1",
       [PENDING_ACCESS_LOGOUT_KEY]: "logout-1",
     });
+    const navigationStorage = memoryStorage();
     const navigate = vi.fn();
     await expect(completePendingAccessLogout({
       storage,
+      navigationStorage,
       fetcher: async () => new Response(null, { status: 204 }),
       navigate,
     })).resolves.toBe(true);
-    expect(storage.getItem(PENDING_ACCESS_LOGOUT_KEY)).toBeNull();
+    expect(storage.getItem(PENDING_ACCESS_LOGOUT_KEY)).toBe("logout-1");
+    expect(navigationStorage.getItem(ACCESS_LOGOUT_NAVIGATION_KEY)).toBe("logout-1");
     expect(storage.getItem(PRIVATE_DATA_BARRIER_KEY)).toBe("logout-1");
     expect(navigate).toHaveBeenCalledWith(ACCESS_LOGOUT_PATH);
   });
 
-  it("retains pending logout and private-data blocking when the remote request fails", async () => {
+  it("reaches Access logout when the best-effort remote cache clear fails", async () => {
     const storage = memoryStorage({
       [PRIVATE_DATA_BARRIER_KEY]: "logout-1",
       [PENDING_ACCESS_LOGOUT_KEY]: "logout-1",
     });
+    const navigationStorage = memoryStorage();
     const navigate = vi.fn();
     await expect(completePendingAccessLogout({
       storage,
+      navigationStorage,
       fetcher: async () => new Response(null, { status: 503 }),
       navigate,
-    })).resolves.toBe(false);
+    })).resolves.toBe(true);
     expect(storage.getItem(PENDING_ACCESS_LOGOUT_KEY)).toBe("logout-1");
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigationStorage.getItem(ACCESS_LOGOUT_NAVIGATION_KEY)).toBe("logout-1");
+    expect(navigate).toHaveBeenCalledWith(ACCESS_LOGOUT_PATH);
+  });
+
+  it("acknowledges only the matching Cloudflare logout return", () => {
+    const storage = memoryStorage({
+      [PRIVATE_DATA_BARRIER_KEY]: "logout-1",
+      [PENDING_ACCESS_LOGOUT_KEY]: "logout-1",
+    });
+    const navigationStorage = memoryStorage({ [ACCESS_LOGOUT_NAVIGATION_KEY]: "logout-1" });
+    expect(acknowledgeAccessLogoutReturn(
+      "?__cf_access_message=logged_out",
+      storage,
+      navigationStorage,
+    )).toBe(true);
+    expect(storage.getItem(PENDING_ACCESS_LOGOUT_KEY)).toBeNull();
+    expect(storage.getItem(PRIVATE_DATA_BARRIER_KEY)).toBe("logout-1");
+    expect(navigationStorage.getItem(ACCESS_LOGOUT_NAVIGATION_KEY)).toBeNull();
+  });
+
+  it("marks only a currently pending Access logout for top-level navigation", () => {
+    const storage = memoryStorage({ [PENDING_ACCESS_LOGOUT_KEY]: "logout-1" });
+    const navigationStorage = memoryStorage();
+    expect(markAccessLogoutNavigation(storage, navigationStorage)).toBe(true);
+    expect(navigationStorage.getItem(ACCESS_LOGOUT_NAVIGATION_KEY)).toBe("logout-1");
+    storage.removeItem(PENDING_ACCESS_LOGOUT_KEY);
+    expect(markAccessLogoutNavigation(storage, navigationStorage)).toBe(false);
+  });
+
+  it("does not trust a forged or stale logged-out query parameter", () => {
+    const storage = memoryStorage({
+      [PRIVATE_DATA_BARRIER_KEY]: "logout-2",
+      [PENDING_ACCESS_LOGOUT_KEY]: "logout-2",
+    });
+    const navigationStorage = memoryStorage({ [ACCESS_LOGOUT_NAVIGATION_KEY]: "logout-1" });
+    expect(acknowledgeAccessLogoutReturn(
+      "?__cf_access_message=logged_out",
+      storage,
+      navigationStorage,
+    )).toBe(false);
+    expect(acknowledgeAccessLogoutReturn("?unrelated=value", storage, navigationStorage)).toBe(false);
+    expect(storage.getItem(PENDING_ACCESS_LOGOUT_KEY)).toBe("logout-2");
+    expect(navigationStorage.getItem(ACCESS_LOGOUT_NAVIGATION_KEY)).toBe("logout-1");
   });
 
   it("accepts only the bounded cross-tab invalidation message", () => {

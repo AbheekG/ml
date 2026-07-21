@@ -101,15 +101,18 @@ import {
   subscribeToSessionRevalidation,
 } from "./app-lifecycle";
 import {
+  ACCESS_LOGOUT_PATH,
   PRIVATE_CACHE_NAMESPACE_KEY,
   PRIVATE_DATA_BARRIER_KEY,
   PRIVATE_DATA_CHANNEL_NAME,
   PENDING_ACCESS_LOGOUT_KEY,
+  acknowledgeAccessLogoutReturn,
   completePendingAccessLogout,
   isAccessLogoutPending,
   isPrivateDataBlocked,
   isPrivateDataClearedMessage,
   logoutAndClearPrivateData,
+  markAccessLogoutNavigation,
   reconcilePrivateDataSession,
 } from "./private-data";
 
@@ -2490,6 +2493,11 @@ function ManageLookupsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: 
 export function App() {
   const isOnline = useOnlineStatus();
   const sessionRevalidationSignal = useSessionRevalidationSignal();
+  const logoutReturnChecked = useRef(false);
+  if (!logoutReturnChecked.current) {
+    acknowledgeAccessLogoutReturn(window.location.search);
+    logoutReturnChecked.current = true;
+  }
   const [catalogView, setCatalogView] = useState(initialCatalogViewState);
   const catalogScrollPosition = useRef(0);
   const [session, setSession] = useState<AppSession | null>(null);
@@ -2504,6 +2512,19 @@ export function App() {
       const channel = new BroadcastChannel(PRIVATE_DATA_CHANNEL_NAME);
       channel.postMessage({ type: "private-data-cleared" });
       channel.close();
+    }
+  }
+
+  async function finishPendingLogout(): Promise<void> {
+    if (logoutCompletionActive.current) return;
+    logoutCompletionActive.current = true;
+    try {
+      const navigating = await completePendingAccessLogout({
+        navigate: (path) => window.location.replace(path),
+      });
+      if (!navigating) setAccessLogoutPending(isAccessLogoutPending());
+    } finally {
+      logoutCompletionActive.current = false;
     }
   }
 
@@ -2541,6 +2562,10 @@ export function App() {
       void clearPrivateLocalData().catch(() => undefined);
     };
     const storageListener = (event: StorageEvent) => {
+      if (event.key === PENDING_ACCESS_LOGOUT_KEY && event.newValue === null) {
+        setAccessLogoutPending(false);
+        return;
+      }
       if (
         (event.key === PRIVATE_DATA_BARRIER_KEY || event.key === PENDING_ACCESS_LOGOUT_KEY)
         && event.newValue !== null
@@ -2565,13 +2590,8 @@ export function App() {
   useEffect(() => {
     if (!isOnline || !accessLogoutPending || logoutCompletionActive.current) return undefined;
     let cancelled = false;
-    logoutCompletionActive.current = true;
-    void completePendingAccessLogout({
-      navigate: (path) => window.location.replace(path),
-    }).then((navigating) => {
-      if (!cancelled && !navigating) setAccessLogoutPending(true);
-    }).finally(() => {
-      logoutCompletionActive.current = false;
+    void finishPendingLogout().then(() => {
+      if (!cancelled) setAccessLogoutPending(isAccessLogoutPending());
     });
     return () => { cancelled = true; };
   }, [isOnline, accessLogoutPending]);
@@ -2620,7 +2640,28 @@ export function App() {
       </header>
 
       {privateDataBlocked
-        ? <main className="page-shell" id="main-content"><p>{accessLogoutPending ? "This device’s private library has been cleared. Cloudflare sign-out is pending and will finish automatically when this device reconnects." : "This device’s private library has been cleared. Reconnect and sign in to sync it again."}</p></main>
+        ? (
+          <main className="page-shell" id="main-content">
+            <section className="empty-state session-boundary">
+              <h1>{accessLogoutPending ? "Finishing sign-out" : "Signed out"}</h1>
+              <p>{accessLogoutPending
+                ? isOnline
+                  ? "This device’s private library has been cleared. Continue to Cloudflare to finish signing out."
+                  : "This device’s private library has been cleared. Cloudflare sign-out will continue automatically when this device reconnects."
+                : isOnline
+                  ? "This device’s private library has been cleared. Sign in to sync it again."
+                  : "This device’s private library has been cleared. Reconnect before signing in again."}</p>
+              {accessLogoutPending && isOnline && (
+                <a
+                  className="primary-action action-link"
+                  href={ACCESS_LOGOUT_PATH}
+                  onClick={() => { markAccessLogoutNavigation(); }}
+                >Continue sign-out</a>
+              )}
+              {!accessLogoutPending && isOnline && <a className="primary-action action-link" href="/songs">Sign in</a>}
+            </section>
+          </main>
+        )
         : isOnline && !sessionResolved
         ? <main className="page-shell" id="main-content"><p>Checking this device’s private session…</p></main>
         : <Routes>
