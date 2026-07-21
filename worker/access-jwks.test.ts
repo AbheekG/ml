@@ -8,6 +8,19 @@ function jwk(kid: string) {
 afterEach(() => clearAccessJwksCacheForTests());
 
 describe("Access JWKS cache", () => {
+  it("uses workerd-compatible manual redirect handling and rejects redirects", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, {
+      status: 302,
+      headers: { Location: "https://unexpected.invalid/certs" },
+    }));
+
+    await expect(loadAccessJwks("https://access.invalid/certs", "key-1", { fetcher }))
+      .rejects.toThrow("access_jwks_fetch_failed");
+    expect(fetcher).toHaveBeenCalledWith("https://access.invalid/certs", expect.objectContaining({
+      redirect: "manual",
+    }));
+  });
+
   it("reuses fresh keys and refreshes immediately for a newly observed key id", async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ keys: [jwk("key-1")] }, {

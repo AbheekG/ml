@@ -59,7 +59,10 @@ async function refreshJwks(
 ): Promise<CacheEntry> {
   const response = await fetcher(url, {
     headers: { Accept: "application/json", "Cache-Control": "no-cache" },
-    redirect: "error",
+    // workerd intentionally supports `follow` and `manual`, but rejects the
+    // browser-only `error` mode before issuing the request. Keep redirects
+    // visible so the non-2xx check below rejects them without following.
+    redirect: "manual",
     signal: AbortSignal.timeout(5_000),
   });
   if (!response.ok) throw new Error("access_jwks_fetch_failed");
