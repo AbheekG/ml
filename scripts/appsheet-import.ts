@@ -1,7 +1,8 @@
-import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { basename, extname, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import readXlsxFile, { type SheetData } from "read-excel-file/node";
+import { assertSafeOutputPath, writeSafeOutputFile } from "./safe-output";
 
 const LEGACY_ACTOR = "legacy-import";
 
@@ -696,10 +697,26 @@ export async function importAppSheet(options: ImportOptions): Promise<{
   };
 
   if (options.writeOutput) {
-    await mkdir(options.outputDirectory, { recursive: true });
+    const safeOptions = {
+      projectRoot: resolve("."),
+      allowedRoots: ["data/import-output", "notes/private"],
+      outsideCode: "import_output_must_be_private",
+    };
+    await assertSafeOutputPath(options.outputDirectory, {
+      ...safeOptions,
+      kind: "directory",
+    });
     await Promise.all([
-      writeFile(resolve(options.outputDirectory, "catalog.json"), `${JSON.stringify(catalog, null, 2)}\n`),
-      writeFile(resolve(options.outputDirectory, "report.json"), `${JSON.stringify(report, null, 2)}\n`),
+      writeSafeOutputFile(
+        resolve(options.outputDirectory, "catalog.json"),
+        `${JSON.stringify(catalog, null, 2)}\n`,
+        safeOptions,
+      ),
+      writeSafeOutputFile(
+        resolve(options.outputDirectory, "report.json"),
+        `${JSON.stringify(report, null, 2)}\n`,
+        safeOptions,
+      ),
     ]);
   }
 

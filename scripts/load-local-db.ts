@@ -1,7 +1,8 @@
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
+import { assertSafeOutputPath, writeSafeOutputFile } from "./safe-output";
 
 type JsonRow = Record<string, unknown>;
 type Catalog = Record<string, unknown> & {
@@ -221,7 +222,14 @@ function parseArguments(arguments_: string[]): {
 export async function loadLocalDatabase(
   catalogPath: string,
   databasePath: string,
+  projectRoot = resolve("."),
 ): Promise<Record<string, number>> {
+  await assertSafeOutputPath(databasePath, {
+    projectRoot,
+    allowedRoots: ["data/local"],
+    kind: "file",
+    outsideCode: "database_output_must_be_local",
+  });
   const migrationsDirectory = resolve("migrations");
   const migrationNames = (await readdir(migrationsDirectory))
     .filter((name) => /^\d+.*\.sql$/.test(name))
@@ -269,8 +277,11 @@ async function main(): Promise<void> {
   const { catalogPath, databasePath, seedSqlPath } = parseArguments(process.argv.slice(2));
   const counts = await loadLocalDatabase(catalogPath, databasePath);
   const catalog = JSON.parse(await readFile(catalogPath, "utf8")) as Catalog;
-  await mkdir(dirname(seedSqlPath), { recursive: true });
-  await writeFile(seedSqlPath, createSeedSql(catalog));
+  await writeSafeOutputFile(seedSqlPath, createSeedSql(catalog), {
+    projectRoot: resolve("."),
+    allowedRoots: ["data/import-output", "notes/private"],
+    outsideCode: "seed_output_must_be_private",
+  });
   process.stdout.write(`${JSON.stringify({ database: databasePath, seedSql: seedSqlPath, rows: counts }, null, 2)}\n`);
 }
 

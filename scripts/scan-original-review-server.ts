@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { assertSafeOutputPath } from "./safe-output";
 
 type ReviewDecision = "correct" | "issue" | "unsure";
 type ReviewScope = "all" | "remaining" | "deferred-unmatched";
@@ -30,6 +31,7 @@ export type ScanOriginalReviewServerOptions = {
   host?: "127.0.0.1";
   port?: number;
   token?: string;
+  projectRoot?: string;
 };
 
 export type RunningScanOriginalReviewServer = {
@@ -193,7 +195,12 @@ function hasAuth(request: IncomingMessage, token: string): boolean {
 export async function startScanOriginalReviewServer(
   options: ScanOriginalReviewServerOptions,
 ): Promise<RunningScanOriginalReviewServer> {
-  const outputDirectory = resolve(options.outputDirectory);
+  const outputDirectory = await assertSafeOutputPath(options.outputDirectory, {
+    projectRoot: options.projectRoot ?? resolve("."),
+    allowedRoots: ["notes/private"],
+    kind: "directory",
+    outsideCode: "output_must_be_private",
+  });
   const reviewDirectory = resolve(outputDirectory, "review");
   const scope = options.scope ?? "remaining";
   const galleryFilename = GALLERY_FILES[scope];
