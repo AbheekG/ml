@@ -345,7 +345,7 @@ describe("Worker API", () => {
     expect(boundIdentity).toBe("Owner@Example.Test");
   });
 
-  it("returns the signed-in application role without exposing the identity", async () => {
+  it("returns the signed-in email and application role", async () => {
     const response = await app.request(
       "http://local.test/api/session",
       undefined,
@@ -355,7 +355,7 @@ describe("Worker API", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       user: {
-        displayName: "Local developer",
+        email: "local@example.invalid",
         role: "viewer",
         cacheNamespace: expect.stringMatching(/^[a-f0-9]{32}$/u),
       },

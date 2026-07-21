@@ -2309,7 +2309,7 @@ app.get("/api/session", async (context) => {
   const identity = context.get("accessIdentity");
   return context.json({
     user: {
-      displayName: user.displayName,
+      email: identity.email,
       role: user.role,
       cacheNamespace: await opaqueCacheNamespace(
         context.env.AUTH_MODE === "access" ? context.env.ACCESS_ISSUER : "local",

@@ -2281,7 +2281,7 @@ function AccountPage({
       <dl className="settings-list">
         <div>
           <dt>Signed in as</dt>
-          <dd>{session?.displayName ?? "Authenticated user"}</dd>
+          <dd>{session?.email ?? "Unavailable"}</dd>
         </div>
         <div>
           <dt>Role</dt>

@@ -227,7 +227,7 @@ export async function refreshSong(songId: string): Promise<SongDetail> {
 }
 
 export type AppSession = {
-  displayName: string | null;
+  email: string;
   role: "viewer" | "editor" | "admin";
   cacheNamespace: string;
 };
@@ -426,6 +426,8 @@ export async function loadSession(): Promise<AppSession> {
   const payload = await apiJson<{ user: AppSession }>("/api/session");
   if (
     !payload.user
+    || typeof payload.user.email !== "string"
+    || payload.user.email.length === 0
     || !["viewer", "editor", "admin"].includes(payload.user.role)
     || typeof payload.user.cacheNamespace !== "string"
     || payload.user.cacheNamespace.length === 0

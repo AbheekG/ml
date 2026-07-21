@@ -78,7 +78,7 @@ media deletion is implied. See
   legacy Scan/Recording metadata retained privately; later reviewed catalog
   additions are recorded as separate reconciliation milestones;
 - authenticated identities must map to an active `app_users` record, with reusable viewer/editor/admin authorization guards;
-- the authenticated session exposes the current viewer/editor/admin role without exposing the identity;
+- the authenticated session exposes the signed-in email and current viewer/editor/admin role only to that protected client, so the Account page identifies the active account;
 - editors/admins can create and update Song titles, status, Languages, Tags, Aliases, and Notes only while online;
 - editors/admins can independently assign existing People to Song-level Lyrics and Music credits;
 - the API normalizes title case, validates controlled references, records actor/timestamps, and updates all Song relationships atomically;

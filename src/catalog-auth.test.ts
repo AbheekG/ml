@@ -1,11 +1,35 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, refreshOfflineLibrary } from "./catalog";
+import { ApiError, loadSession, refreshOfflineLibrary } from "./catalog";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("protected catalog authentication", () => {
+  it("loads the exact authenticated email and role for the Account page", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      user: {
+        email: "viewer@example.invalid",
+        role: "viewer",
+        cacheNamespace: "opaque-cache-namespace",
+      },
+    })));
+
+    await expect(loadSession()).resolves.toEqual({
+      email: "viewer@example.invalid",
+      role: "viewer",
+      cacheNamespace: "opaque-cache-namespace",
+    });
+  });
+
+  it("rejects a session response without an authenticated email", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      user: { role: "viewer", cacheNamespace: "opaque-cache-namespace" },
+    })));
+
+    await expect(loadSession()).rejects.toThrow("Session response was invalid");
+  });
+
   it("preserves a typed authentication failure before touching the offline cache", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(
       JSON.stringify({ error: "invalid_access_token" }),
