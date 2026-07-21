@@ -31,6 +31,7 @@ export function recordingUploadPercent(progress: RecordingUploadProgress): numbe
 
 export function recordingUploadProgressLabel(progress: RecordingUploadProgress): string {
   switch (progress.phase) {
+    case "fingerprinting": return `Verifying the selected file… ${recordingUploadPercent(progress)}%`;
     case "creating": return "Starting private upload…";
     case "uploading": return `Uploading audio… ${recordingUploadPercent(progress)}%`;
     case "completing": return "Verifying the stored original…";

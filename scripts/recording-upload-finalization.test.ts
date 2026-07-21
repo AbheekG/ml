@@ -23,6 +23,9 @@ const migration = [
   "0014_scan_display_rotation.sql",
   "0015_media_parent_moves.sql",
   "0016_playback_duplicate_detection.sql",
+  "0017_scan_readability_duplicate_detection.sql",
+  "0018_india_recording_calendar.sql",
+  "0019_recording_upload_file_identity.sql",
 ]
   .map((filename) => readFileSync(resolve("migrations", filename), "utf8"))
   .join("\n");
@@ -140,15 +143,16 @@ function seedStoredUpload(
   database.prepare(`
     INSERT INTO recording_upload_sessions (
       id, song_id, client_mutation_id, request_fingerprint,
+      file_manifest_sha256,
       description, recorded_on, original_filename, byte_size, part_size, part_count,
       object_key, status, revision, expires_at,
       created_at, created_by, updated_at, updated_by
     ) VALUES (
-      'upload-1', 'song-1', 'mutation-1', ?, ?, ?, 'recording.bin',
+      'upload-1', 'song-1', 'mutation-1', ?, ?, ?, ?, 'recording.bin',
       3, 8388608, 1, 'recordings/original/upload-1',
       'creating', 1, '2027-07-12T00:00:00.000Z', ?, ?, ?, ?
     )
-  `).run("f".repeat(64), description, recordedOn, timestamp, actor, timestamp, actor);
+  `).run("f".repeat(64), "e".repeat(64), description, recordedOn, timestamp, actor, timestamp, actor);
   database.prepare(`
     INSERT INTO recording_upload_intents (
       session_id, intent_kind, target_recording_id,

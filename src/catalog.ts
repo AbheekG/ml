@@ -328,6 +328,7 @@ export type DuplicateScanDetails = {
   pageLabel: string | null;
   revision: number;
   isTrashed: boolean;
+  isHistorical?: boolean;
 };
 
 export class ApiError extends Error {

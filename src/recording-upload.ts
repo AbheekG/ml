@@ -16,6 +16,7 @@ export type DuplicateRecording = {
   songId: string | null;
   trashed: boolean | null;
   revision: number | null;
+  isHistorical: boolean;
 };
 
 export type RecordingUploadIntent =
@@ -34,6 +35,7 @@ export type RecordingUploadSession = {
   revision: number;
   expiresAt: string;
   recordingId: string | null;
+  fileIdentityBound: boolean;
   intent: RecordingUploadIntent | null;
   duplicateRecording?: DuplicateRecording;
 };
@@ -57,7 +59,7 @@ export type RecordingUploadResult =
   };
 
 export type RecordingUploadProgress = {
-  phase: "creating" | "uploading" | "completing" | "finalizing";
+  phase: "fingerprinting" | "creating" | "uploading" | "completing" | "finalizing";
   completedParts: number;
   totalParts: number;
   completedBytes: number;
@@ -121,6 +123,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   recording_upload_mutation_reused: "This upload retry no longer matches its original details. Start again.",
   recording_upload_storage_unavailable: "Private audio storage is temporarily unavailable. Retry when the connection is stable.",
   recording_upload_part_storage_failed: "This audio part could not be stored. Retry when the connection is stable.",
+  recording_upload_part_hash_mismatch: "The uploaded part did not match the selected file. Reselect the original file and retry.",
+  recording_upload_file_mismatch: "This is not the same file that started the resumable upload. Reselect the exact original file.",
+  recording_upload_file_identity_unavailable: "This older incomplete upload cannot be resumed safely. Cancel it and start a new upload.",
   recording_upload_checkpoint_failed: "The uploaded part could not be safely checkpointed. Retry it.",
   recording_upload_storage_completion_failed: "The private upload could not be completed. Retry it.",
   recording_upload_fingerprint_failed: "The stored audio could not be verified. Retry completion.",
@@ -129,6 +134,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   recording_upload_not_found: "This upload is no longer available.",
   recording_upload_stored_object_mismatch: "The stored audio did not match the selected file size and needs administrator review.",
   recording_upload_intent_mismatch: "This older upload cannot be finalized automatically. Dismiss it or ask an administrator to review it.",
+  recording_upload_history_unavailable: "The retained historical audio is no longer available for safe reuse.",
   recording_upload_cannot_discard: "This upload is not in a completed state that can be dismissed.",
   recording_upload_discard_failed: "The upload could not be dismissed safely.",
   recording_processing_active: "Wait for the current audio processing to finish before replacing this Recording.",
@@ -206,13 +212,15 @@ function parseDuplicateRecording(value: unknown): DuplicateRecording | undefined
   const songId = value.songId;
   const trashed = value.trashed;
   const revision = value.revision ?? null;
+  const isHistorical = value.isHistorical;
   if (
     !(typeof id === "string" || id === null)
     || !(typeof songId === "string" || songId === null)
     || !(typeof trashed === "boolean" || trashed === null)
     || !(revision === null || (Number.isSafeInteger(revision) && Number(revision) > 0))
+    || typeof isHistorical !== "boolean"
   ) return undefined;
-  return { id, songId, trashed, revision: revision as number | null };
+  return { id, songId, trashed, revision: revision as number | null, isHistorical };
 }
 
 function parseRecordingUploadIntent(value: unknown): RecordingUploadIntent | null | undefined {
@@ -259,6 +267,7 @@ function parseUpload(value: unknown): RecordingUploadSession {
     || !Number.isSafeInteger(value.revision)
     || typeof value.expiresAt !== "string"
     || !(typeof recordingId === "string" || recordingId === null)
+    || typeof value.fileIdentityBound !== "boolean"
     || intent === undefined
   ) throw invalidResponse();
 
@@ -278,6 +287,7 @@ function parseUpload(value: unknown): RecordingUploadSession {
     revision: value.revision as number,
     expiresAt: value.expiresAt,
     recordingId,
+    fileIdentityBound: value.fileIdentityBound,
     intent,
     ...(duplicate ? { duplicateRecording: duplicate } : {}),
   };
@@ -359,6 +369,46 @@ function validateSessionForFile(
   ) throw invalidResponse();
 }
 
+type RecordingFileIdentity = {
+  manifestSha256: string;
+  partSha256: string[];
+};
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function sha256Bytes(bytes: ArrayBuffer): Promise<string> {
+  return bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+}
+
+export async function fingerprintRecordingFile(
+  file: File,
+  signal?: AbortSignal,
+  onPart?: (completedParts: number, totalParts: number) => void,
+): Promise<RecordingFileIdentity> {
+  const partCount = Math.ceil(file.size / RECORDING_UPLOAD_PART_BYTES);
+  const partSha256: string[] = [];
+  const manifestLines = [
+    "music-library-recording-upload-manifest-v1",
+    String(file.size),
+    String(RECORDING_UPLOAD_PART_BYTES),
+  ];
+  for (let index = 0; index < partCount; index += 1) {
+    if (signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
+    const start = index * RECORDING_UPLOAD_PART_BYTES;
+    const part = file.slice(start, Math.min(start + RECORDING_UPLOAD_PART_BYTES, file.size));
+    const sha256 = await sha256Bytes(await part.arrayBuffer());
+    partSha256.push(sha256);
+    manifestLines.push(`${index + 1}:${part.size}:${sha256}`);
+    onPart?.(index + 1, partCount);
+  }
+  return {
+    manifestSha256: await sha256Bytes(new TextEncoder().encode(manifestLines.join("\n")).buffer),
+    partSha256,
+  };
+}
+
 function completedBytes(session: RecordingUploadSession): number {
   return session.completedParts.reduce((total, partNumber) => {
     const start = (partNumber - 1) * session.partSize;
@@ -396,12 +446,14 @@ async function loadUpload(
 
 async function createUpload(
   input: RecordingUploadInput,
+  identity: RecordingFileIdentity,
   fetcher: typeof fetch,
   replaceTarget?: { recordingId: string; revision: number },
   signal?: AbortSignal,
 ): Promise<RecordingUploadSession> {
   const payload = {
     clientMutationId: input.clientMutationId,
+    fileManifestSha256: identity.manifestSha256,
     filename: input.file.name,
     mimeType: input.file.type || null,
     byteSize: input.file.size,
@@ -440,6 +492,7 @@ async function createUpload(
 
 async function reconcilePart(
   input: RecordingUploadInput,
+  identity: RecordingFileIdentity,
   session: RecordingUploadSession,
   partNumber: number,
   fetcher: typeof fetch,
@@ -451,7 +504,15 @@ async function reconcilePart(
     const payload = await requestJson(
       fetcher,
       `/api/recording-uploads/${encodeURIComponent(session.id)}/parts/${partNumber}`,
-      { method: "PUT", body, signal },
+      {
+        method: "PUT",
+        headers: {
+          "X-Upload-Part-Sha256": identity.partSha256[partNumber - 1] ?? "",
+          "X-Upload-File-Manifest": identity.manifestSha256,
+        },
+        body,
+        signal,
+      },
     );
     if (!isRecord(payload) || !isRecord(payload.upload) || !Number.isSafeInteger(payload.upload.revision)) {
       throw invalidResponse();
@@ -469,6 +530,31 @@ async function reconcilePart(
     if (error instanceof RecordingUploadError) error.upload = current;
     throw error;
   }
+}
+
+async function verifyUploadFile(
+  fetcher: typeof fetch,
+  session: RecordingUploadSession,
+  identity: RecordingFileIdentity,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!session.fileIdentityBound) {
+    throw new RecordingUploadError(
+      ERROR_MESSAGES.recording_upload_file_identity_unavailable,
+      409,
+      "recording_upload_file_identity_unavailable",
+    );
+  }
+  await requestJson(
+    fetcher,
+    `/api/recording-uploads/${encodeURIComponent(session.id)}/verify-file`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileManifestSha256: identity.manifestSha256 }),
+      signal,
+    },
+  );
 }
 
 async function completeUpload(
@@ -590,12 +676,38 @@ export async function uploadRecordingOriginal(
   validateInput(input);
   const fetcher = options.fetcher ?? fetch;
   let session: RecordingUploadSession | null = options.resumeUpload ?? null;
+  let fileIdentityVerified = false;
   try {
+    options.onProgress?.({
+      phase: "fingerprinting",
+      completedParts: 0,
+      totalParts: Math.ceil(input.file.size / RECORDING_UPLOAD_PART_BYTES),
+      completedBytes: 0,
+      totalBytes: input.file.size,
+      upload: session,
+    });
+    const identity = await fingerprintRecordingFile(
+      input.file,
+      options.signal,
+      (completedParts, totalParts) => options.onProgress?.({
+        phase: "fingerprinting",
+        completedParts,
+        totalParts,
+        completedBytes: Math.min(completedParts * RECORDING_UPLOAD_PART_BYTES, input.file.size),
+        totalBytes: input.file.size,
+        upload: session,
+      }),
+    );
     if (session) {
       session = await loadUpload(fetcher, session.id, options.signal);
+      if (session.status === "open") {
+        await verifyUploadFile(fetcher, session, identity, options.signal);
+        fileIdentityVerified = true;
+      }
     } else {
       reportProgress(options, "creating", null, input.file.size);
-      session = await createUpload(input, fetcher, options.replaceTarget, options.signal);
+      session = await createUpload(input, identity, fetcher, options.replaceTarget, options.signal);
+      fileIdentityVerified = true;
     }
     validateSessionForFile(session, input);
 
@@ -617,11 +729,15 @@ export async function uploadRecordingOriginal(
     if (session.status === "open") {
       session = await loadUpload(fetcher, session.id, options.signal);
       validateSessionForFile(session, input);
+      if (!fileIdentityVerified) {
+        await verifyUploadFile(fetcher, session, identity, options.signal);
+        fileIdentityVerified = true;
+      }
       const completed = new Set(session.completedParts);
       for (let partNumber = 1; partNumber <= session.partCount; partNumber += 1) {
         if (completed.has(partNumber)) continue;
         reportProgress(options, "uploading", session, input.file.size);
-        session = await reconcilePart(input, session, partNumber, fetcher, options.signal);
+        session = await reconcilePart(input, identity, session, partNumber, fetcher, options.signal);
         completed.add(partNumber);
         reportProgress(options, "uploading", session, input.file.size);
       }
@@ -666,6 +782,40 @@ export async function abortRecordingUpload(
       signal,
     },
   ));
+}
+
+export async function reuseHistoricalRecordingUpload(
+  upload: RecordingUploadSession,
+  replaceTarget: { recordingId: string; revision: number },
+  fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
+): Promise<FinalizedRecording> {
+  const payload = await requestJson(
+    fetcher,
+    `/api/songs/${encodeURIComponent(upload.songId)}/recording-uploads/${encodeURIComponent(upload.id)}/reuse-history`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        targetRecordingId: replaceTarget.recordingId,
+        targetRecordingRevision: replaceTarget.revision,
+        sessionRevision: upload.revision,
+      }),
+      signal,
+    },
+  );
+  if (!isRecord(payload) || !isRecord(payload.recording)) throw invalidResponse();
+  const recording = payload.recording;
+  if (
+    typeof recording.id !== "string"
+    || !Number.isSafeInteger(recording.revision)
+    || recording.processingState !== "ready"
+  ) throw invalidResponse();
+  return {
+    id: recording.id,
+    revision: recording.revision as number,
+    processingState: "ready",
+  };
 }
 
 export async function listRecoverableRecordingUploads(

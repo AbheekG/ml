@@ -18,6 +18,7 @@ import {
   discardRecordingUpload,
   finishStoredRecordingUpload,
   listRecoverableRecordingUploads,
+  reuseHistoricalRecordingUpload,
   uploadRecordingOriginal,
   type DuplicateRecording,
   type RecordingUploadInput,
@@ -415,6 +416,40 @@ export function RecordingUploadPage({
     }
   }
 
+  async function reuseHistoricalRecording(): Promise<void> {
+    if (
+      mode !== "replace"
+      || !duplicate?.isHistorical
+      || !duplicate.id
+      || duplicate.id !== recordingId
+      || !upload
+      || !replaceTarget
+      || isSaving
+      || !isOnline
+      || canEdit !== true
+    ) return;
+    if (!window.confirm(
+      "Restore this retained historical audio as the current Recording? The current audio will be preserved in history, and the duplicate upload object will remain private for administrator review.",
+    )) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await reuseHistoricalRecordingUpload(upload, replaceTarget);
+      await refreshOfflineLibrary().catch(() => undefined);
+      allowNextNavigation();
+      navigate(`/songs/${encodeURIComponent(songId)}`, {
+        replace: true,
+        state: { statusMessage: "The retained historical audio is current again." },
+      });
+    } catch (reuseError) {
+      setError(reuseError instanceof Error
+        ? reuseError.message
+        : "The retained historical audio could not be restored.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function abortRecoverableUpload(candidate: RecordingUploadSession): Promise<void> {
     if (!isOnline || canEdit !== true || isSaving) return;
     if (!window.confirm("Cancel this incomplete upload? It cannot be resumed afterward.")) return;
@@ -518,11 +553,17 @@ export function RecordingUploadPage({
             <strong id="duplicate-recording-title">This exact audio original is already stored</strong>
             <span>No new Recording or processing job was created.</span>
             {duplicate.trashed && <span>The matching Recording is currently in Trash.</span>}
+            {duplicate.isHistorical && <span>The matching bytes are retained in this Recording’s replacement history.</span>}
           </div>
           <div className="recording-upload-notice-actions">
             {duplicate.trashed && duplicate.id && duplicate.songId && duplicate.revision !== null && upload && (
               <button className="primary-action" type="button" disabled={isSaving} onClick={() => { void recoverDuplicateRecording(); }}>
                 {isSaving ? "Moving…" : duplicate.songId === songId ? "Restore existing Recording" : "Move existing Recording here"}
+              </button>
+            )}
+            {mode === "replace" && duplicate.isHistorical && duplicate.id === recordingId && upload && replaceTarget && (
+              <button className="primary-action" type="button" disabled={isSaving} onClick={() => { void reuseHistoricalRecording(); }}>
+                {isSaving ? "Restoring…" : "Restore retained audio"}
               </button>
             )}
             {duplicate.id && duplicate.songId && (

@@ -4,6 +4,7 @@ import {
   RECORDING_UPLOAD_PART_BYTES,
   RecordingUploadError,
   abortRecordingUpload,
+  fingerprintRecordingFile,
   uploadRecordingOriginal,
   type RecordingUploadSession,
 } from "./recording-upload";
@@ -25,6 +26,7 @@ function session(overrides: Partial<RecordingUploadSession> = {}): RecordingUplo
     revision: 2,
     expiresAt: "2099-01-01T00:00:00.000Z",
     recordingId: null,
+    fileIdentityBound: true,
     intent: null,
     ...overrides,
   };
@@ -113,15 +115,60 @@ describe("Recording browser upload orchestration", () => {
     expect(requests.filter((request) => request.url.includes("/parts/"))).toEqual([
       expect.objectContaining({ url: "/api/recording-uploads/upload-1/parts/2", method: "PUT", size: 3 }),
     ]);
-    expect(requests[0].body).toMatchObject({
+    const createBody = requests[0].body as Record<string, unknown>;
+    expect(createBody).toMatchObject({
       clientMutationId: mutationId,
+      fileManifestSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
       filename: "private take.wav",
       byteSize: RECORDING_UPLOAD_PART_BYTES + 3,
       description: "Old take",
       creditPersonIds: ["person-1"],
     });
     expect(progress).toContain("uploading:2/2");
+    expect(progress).toContain("fingerprinting:2/2");
     expect(progress.at(-1)).toBe("finalizing:2/2");
+    const partRequest = fetcher.mock.calls.find(([url]) => String(url).endsWith("/parts/2"));
+    expect(partRequest?.[1]?.headers).toMatchObject({
+      "X-Upload-Part-Sha256": expect.stringMatching(/^[a-f0-9]{64}$/u),
+      "X-Upload-File-Manifest": createBody.fileManifestSha256,
+    });
+  });
+
+  it("fingerprints all bounded parts and rejects a different same-size resume before upload", async () => {
+    const original = new File([new Uint8Array([0, 0, 0])], "same.wav", { type: "audio/wav" });
+    const different = new File([new Uint8Array([1, 1, 1])], "same.wav", { type: "audio/wav" });
+    const originalIdentity = await fingerprintRecordingFile(original);
+    const differentIdentity = await fingerprintRecordingFile(different);
+    expect(originalIdentity.partSha256).toHaveLength(1);
+    expect(differentIdentity.partSha256).toHaveLength(1);
+    expect(originalIdentity.manifestSha256).not.toBe(differentIdentity.manifestSha256);
+
+    const resumable = session({ filename: "same.wav", byteSize: 3 });
+    const fetcher = vi.fn<typeof fetch>(async (request, init) => {
+      const url = String(request);
+      if (url === "/api/recording-uploads/upload-1" && init?.method === "GET") {
+        return json({ upload: resumable });
+      }
+      if (url.endsWith("/verify-file") && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toEqual({
+          fileManifestSha256: differentIdentity.manifestSha256,
+        });
+        return json({ error: "recording_upload_file_mismatch" }, 409);
+      }
+      throw new Error(`Unexpected request ${url}`);
+    });
+
+    await expect(uploadRecordingOriginal({
+      songId: "song-1",
+      file: different,
+      clientMutationId: mutationId,
+      description: null,
+      recordedOn: null,
+      creditPersonIds: [],
+    }, { fetcher, resumeUpload: resumable })).rejects.toMatchObject({
+      code: "recording_upload_file_mismatch",
+    });
+    expect(fetcher.mock.calls.some(([url]) => String(url).includes("/parts/"))).toBe(false);
   });
 
   it("reconciles a lost part response from status without re-uploading it", async () => {
@@ -177,7 +224,7 @@ describe("Recording browser upload orchestration", () => {
           completedParts: [],
           status: "duplicate",
           revision: 5,
-          duplicateRecording: { id: "recording-existing", songId: "song-existing", trashed: false, revision: 3 },
+          duplicateRecording: { id: "recording-existing", songId: "song-existing", trashed: false, revision: 3, isHistorical: false },
         };
         return json({ upload: current });
       }

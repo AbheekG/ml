@@ -121,7 +121,62 @@ describe("historical Scan maintenance", () => {
     ]);
   });
 
-  it("retains the private derivative when the D1 commit response is ambiguous", async () => {
+  it("reconciles an ambiguous D1 response when the exact derivative committed", async () => {
+    const events: string[] = [];
+    const database = databaseForScanMaintenance(events) as D1Database & {
+      batch: D1Database["batch"];
+    };
+    const basePrepare = database.prepare.bind(database);
+    database.prepare = ((query: string) => {
+      if (query.includes("FROM scan_readability_derivatives")) {
+        const statement = {
+          bind() { return statement; },
+          async first() {
+            events.push("derivative_reconciled");
+            return { valid: 1 };
+          },
+        };
+        return statement as unknown as D1PreparedStatement;
+      }
+      return basePrepare(query);
+    }) as D1Database["prepare"];
+    database.batch = async () => {
+      events.push("derivative_commit_ambiguous");
+      throw new Error("D1 response unavailable");
+    };
+    const media = {
+      async get() {
+        events.push("source_read");
+        return { arrayBuffer: async () => sourceBytes.slice().buffer };
+      },
+      async put() {
+        events.push("derivative_stored");
+        return {};
+      },
+      async delete() {
+        events.push("unexpected_derivative_delete");
+      },
+    } as unknown as R2Bucket;
+
+    await expect(processOnePendingScan({
+      DB: database,
+      MEDIA: media,
+      IMAGES: fakeImages(),
+    })).resolves.toBe("processed");
+    expect(events).toEqual([
+      "selected",
+      "claimed",
+      "source_read",
+      "fingerprint_committed",
+      "fingerprint_verified",
+      "derivative_stored",
+      "derivative_commit_ambiguous",
+      "derivative_reconciled",
+      "released",
+    ]);
+  });
+
+  it("retains the private derivative and records failure when an ambiguous commit is absent", async () => {
     const events: string[] = [];
     const database = databaseForScanMaintenance(events) as D1Database & {
       batch: D1Database["batch"];
@@ -2068,6 +2123,7 @@ describe("Scan upload API", () => {
         pageLabel: "12A",
         revision: 5,
         isTrashed: false,
+        isHistorical: false,
       },
     });
   });
@@ -2114,6 +2170,116 @@ describe("Scan upload API", () => {
     await expect(response.json()).resolves.toEqual({
       error: "duplicate_scan_file",
       fields: { file: ["This file is already retained elsewhere in the library"] },
+      existing: {
+        scanId: "scan-existing",
+        songId: "song-existing",
+        songTitle: "Existing Song",
+        filename: "existing.jpg",
+        notebookName: null,
+        pageLabel: null,
+        revision: 2,
+        isTrashed: false,
+        isHistorical: false,
+      },
+    });
+  });
+
+  it("restores exact retained historical Scan media without writing another object", async () => {
+    const batchQueries: string[] = [];
+    const database = {
+      prepare: (query: string) => ({
+        query,
+        bind: (...values: unknown[]) => ({
+          query,
+          values,
+          first: async () => {
+            if (query.includes("SELECT scans.revision")) {
+              return { revision: 3, media_id: "media-current", sha256: "a".repeat(64) };
+            }
+            return {
+              mediaId: "media-historical",
+              historyId: "history-1",
+              isHistorical: 1,
+              representationPriority: 0,
+              scanId: "scan-1",
+              songId: "song-1",
+              songTitle: "Song",
+              filename: "old.jpg",
+              notebookName: null,
+              pageLabel: null,
+              scanRevision: 3,
+              scanIsTrashed: 0,
+              songIsTrashed: 0,
+            };
+          },
+        }),
+      }),
+      batch: async (statements: Array<D1PreparedStatement & { query: string }>) => {
+        batchQueries.push(...statements.map((statement) => statement.query));
+        return statements.map((_statement, index) => ({ meta: { changes: index === 1 ? 1 : 0 } }));
+      },
+    } as unknown as D1Database;
+    let wroteMedia = false;
+    const media = { put: async () => { wroteMedia = true; } } as unknown as R2Bucket;
+    const body = scanUploadBody();
+    body.set("revision", "3");
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/scans/scan-1/media",
+      { method: "POST", body },
+      { ...localBindings(database), MEDIA: media },
+    );
+
+    expect(response.status).toBe(200);
+    expect(wroteMedia).toBe(false);
+    expect(batchQueries.some((query) => query.includes("INSERT INTO scan_media_history"))).toBe(true);
+    expect(batchQueries.some((query) => query.includes("SET media_id = ?"))).toBe(true);
+    await expect(response.json()).resolves.toEqual({
+      scan: { id: "scan-1", revision: 4 },
+      reusedHistoricalMedia: true,
+    });
+  });
+
+  it("does not substitute a historical original when only its readability bytes match", async () => {
+    const database = {
+      prepare: (query: string) => ({
+        bind: () => ({
+          first: async () => {
+            if (query.includes("SELECT scans.revision")) {
+              return { revision: 3, media_id: "media-current", sha256: "a".repeat(64) };
+            }
+            return {
+              mediaId: "media-historical",
+              historyId: "history-1",
+              isHistorical: 1,
+              representationPriority: 1,
+              scanId: "scan-1",
+              songId: "song-1",
+              songTitle: "Song",
+              filename: "old.jpg",
+              notebookName: null,
+              pageLabel: null,
+              scanRevision: 3,
+              scanIsTrashed: 0,
+              songIsTrashed: 0,
+            };
+          },
+        }),
+      }),
+    } as unknown as D1Database;
+    const body = scanUploadBody();
+    body.set("revision", "3");
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/scans/scan-1/media",
+      { method: "POST", body },
+      { ...localBindings(database), MEDIA: {} as R2Bucket },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "duplicate_scan_file",
+      existing: { scanId: "scan-1", isHistorical: true },
     });
   });
 
@@ -2153,7 +2319,7 @@ describe("Scan upload API", () => {
     });
   });
 
-  it("removes an uploaded object when the database transaction fails", async () => {
+  it("retains uploaded objects when an ambiguous database commit cannot be disproved", async () => {
     const database = {
       prepare: (query: string) => ({
         query,
@@ -2179,6 +2345,50 @@ describe("Scan upload API", () => {
     );
 
     expect(response.status).toBe(500);
+    expect(deletedKeys).toEqual([]);
+    expect(uploadedKeys).toHaveLength(2);
+  });
+
+  it("removes uploaded objects only after cleanup is acknowledged and verified", async () => {
+    let batchCall = 0;
+    const database = {
+      prepare: (query: string) => ({
+        query,
+        bind: (...values: unknown[]) => ({
+          query,
+          values,
+          first: async () => {
+            if (query.includes("FROM songs")) return { id: "song-1" };
+            if (query.includes("AS mediaExists")) {
+              return { mediaExists: 0, derivativeExists: 0 };
+            }
+            return null;
+          },
+        }),
+      }),
+      batch: async (statements: Array<D1PreparedStatement & { query: string }>) => {
+        batchCall += 1;
+        if (batchCall === 1) throw new Error("database unavailable");
+        expect(statements.some((statement) => statement.query.includes("DELETE FROM media_objects")))
+          .toBe(true);
+        return statements.map(() => ({ meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+    const uploadedKeys: string[] = [];
+    let deletedKeys: string | string[] = [];
+    const media = {
+      put: async (key: string) => { uploadedKeys.push(key); return {}; },
+      delete: async (keys: string | string[]) => { deletedKeys = keys; },
+    } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/scans",
+      { method: "POST", body: scanUploadBody() },
+      { ...localBindings(database), MEDIA: media },
+    );
+
+    expect(response.status).toBe(500);
+    expect(batchCall).toBe(2);
     expect(deletedKeys).toEqual(uploadedKeys);
   });
 });

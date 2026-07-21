@@ -12,14 +12,19 @@ New Recording originals use an authenticated, resumable multipart upload through
 the existing application Worker and its private R2 binding. The browser never
 receives R2 credentials, a public bucket URL, or a permanent unauthenticated URL.
 
-The browser slices the selected file into sequential 8 MiB parts and sends each
+The browser hashes sequential 8 MiB slices before creating a session, binds the
+session to a canonical manifest of those part identities, and then sends each
 part as a raw request body. The Worker authorizes the editor, validates the
-upload session and exact expected part length, and streams that request body into
-an R2 multipart upload. Completed parts can be retried idempotently and the
-browser can resume from server-reported state.
+upload session and exact expected part length, measures the streamed part hash,
+and writes that request body into an R2 multipart upload. Resume re-hashes the
+newly selected file and verifies its manifest before accepting another part, so
+a different same-size file cannot be combined with prior checkpoints. Completed
+parts can be retried idempotently and the browser can resume from server-reported
+state.
 
-The Worker persists each returned R2 part ETag in D1. Completion accepts no
-client-supplied ETags and uses only that server-owned set. Session creation uses
+The Worker persists each returned R2 part ETag and its independently measured
+part hash in D1. Completion accepts no client-supplied ETags, uses only that
+server-owned set, and re-derives the manifest before R2 completion. Session creation uses
 a client mutation ID plus a canonical request fingerprint, so a lost response can
 be retried without starting two intentional uploads or reusing one mutation ID
 for different metadata.
@@ -106,7 +111,9 @@ The server-side transport exposes editor-only, online-only operations to:
    exact-content duplicate;
 5. atomically finalize a nonduplicate stored object into its original media,
    processing Recording, credits, and pending processing job;
-6. abort an incomplete session without deleting any finalized media.
+6. restore a matching retained historical pair when an exact replacement upload
+   targets that same Recording, preserving the current pair in history;
+7. abort an incomplete session without deleting any finalized media.
 
 The local online-only browser form validates the 512 MiB file boundary, locks the
 selected file and metadata after the first intentional attempt, uploads sequential
@@ -119,9 +126,10 @@ protected staging on macOS Safari and Android Chrome. Recoverable sessions are
 scoped to their creating account, so the same account may resume from another
 device while a different editor account cannot see or take over the upload.
 A client retry supplies only the current session revision and, when resolving a
-description conflict, an explicit replacement description. It never supplies an
-ETag, object key, multipart ID, claimed fingerprint, media ID, Recording ID, or
-job ID.
+description conflict, an explicit replacement description. File and part hashes
+are untrusted identity claims that the Worker compares with its own streamed
+measurements; the browser never receives or supplies an ETag, object key,
+multipart ID, media ID, generated Recording ID, or job ID.
 
 Filenames, titles, signed capabilities, hashes, and private object keys must not
 enter routine logs. The client cannot select the parent Song or object key after
@@ -136,6 +144,9 @@ the session is created.
   cleanup handles the unreachable incomplete upload.
 - A part stored in R2 but not checkpointed in D1 is retried at the same part
   number. The replacement ETag becomes the only completion input.
+- Upload sessions created before exact-file manifests existed cannot accept new
+  parts; they must be explicitly aborted and restarted. Already completed or
+  terminal sessions remain readable and retain their private objects.
 - A completion retry in `completing` first checks whether the opaque object now
   exists with the exact expected size before attempting another completion.
 - If R2 completion fails and no object exists, the D1 session returns to `open`
@@ -155,6 +166,10 @@ the session is created.
   atomically restore/move the existing Recording to the upload's active Song and
   dismiss the duplicate session without deleting its retained upload object.
   This preserves one existing Recording and all of its referenced media rows.
+  When a replacement upload instead matches the target Recording's own immutable
+  media history, the editor can make that exact retained pair current again. The
+  displaced current pair is first added to history, no processing job is created,
+  and the duplicate upload object remains private for review.
   Reusing identical media for two simultaneously active, genuinely distinct Recordings
   remains unsupported and would require a separate schema/product decision;
   finalization must not imply or bypass it.

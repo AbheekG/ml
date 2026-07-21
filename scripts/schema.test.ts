@@ -22,7 +22,8 @@ const mediaParentMovesMigration = readFileSync(resolve("migrations/0015_media_pa
 const playbackDuplicateDetectionMigration = readFileSync(resolve("migrations/0016_playback_duplicate_detection.sql"), "utf8");
 const scanReadabilityDuplicateDetectionMigration = readFileSync(resolve("migrations/0017_scan_readability_duplicate_detection.sql"), "utf8");
 const indiaRecordingCalendarMigration = readFileSync(resolve("migrations/0018_india_recording_calendar.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}\n${playbackDuplicateDetectionMigration}\n${scanReadabilityDuplicateDetectionMigration}\n${indiaRecordingCalendarMigration}`;
+const recordingUploadFileIdentityMigration = readFileSync(resolve("migrations/0019_recording_upload_file_identity.sql"), "utf8");
+const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}\n${playbackDuplicateDetectionMigration}\n${scanReadabilityDuplicateDetectionMigration}\n${indiaRecordingCalendarMigration}\n${recordingUploadFileIdentityMigration}`;
 const sqliteTestPreamble = "PRAGMA legacy_alter_table = OFF;";
 const timestamp = "2026-07-12T00:00:00.000Z";
 
@@ -257,11 +258,11 @@ describe("initial database schema", () => {
         id, full_name, normalized_name, created_at, updated_at
       ) VALUES ('person-1', 'Contributor', 'contributor', '${timestamp}', '${timestamp}');
       INSERT INTO recording_upload_sessions (
-        id, song_id, client_mutation_id, request_fingerprint,
+        id, song_id, client_mutation_id, request_fingerprint, file_manifest_sha256,
         original_filename, byte_size, part_size, part_count, object_key,
         status, revision, expires_at, created_at, created_by, updated_at, updated_by
       ) VALUES (
-        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}', '${"d".repeat(64)}',
         'recording.bin', 8388609, 8388608, 2, 'recordings/original/upload-1',
         'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
       );
@@ -271,17 +272,17 @@ describe("initial database schema", () => {
       SET r2_upload_id = 'multipart-1', status = 'open', revision = 2
       WHERE id = 'upload-1';
       INSERT INTO recording_upload_parts (
-        session_id, part_number, etag, byte_size, uploaded_at, uploaded_by
+        session_id, part_number, etag, byte_size, sha256, uploaded_at, uploaded_by
       ) VALUES
-        ('upload-1', 1, 'etag-1', 8388608, '${timestamp}', 'test'),
-        ('upload-1', 2, 'etag-2', 1, '${timestamp}', 'test');
+        ('upload-1', 1, 'etag-1', 8388608, '${"b".repeat(64)}', '${timestamp}', 'test'),
+        ('upload-1', 2, 'etag-2', 1, '${"c".repeat(64)}', '${timestamp}', 'test');
       UPDATE recording_upload_sessions
       SET revision = 3, updated_at = '2026-07-12T00:00:01.000Z', updated_by = 'test'
       WHERE id = 'upload-1' AND revision = 2;
       INSERT INTO recording_upload_parts (
-        session_id, part_number, etag, byte_size, uploaded_at, uploaded_by
+        session_id, part_number, etag, byte_size, sha256, uploaded_at, uploaded_by
       )
-      SELECT 'upload-1', 1, 'etag-1-retry', 8388608, '2026-07-12T00:00:01.000Z', 'test'
+      SELECT 'upload-1', 1, 'etag-1-retry', 8388608, '${"b".repeat(64)}', '2026-07-12T00:00:01.000Z', 'test'
       WHERE EXISTS (
         SELECT 1 FROM recording_upload_sessions
         WHERE id = 'upload-1' AND status = 'open' AND revision = 3
@@ -289,6 +290,7 @@ describe("initial database schema", () => {
       ON CONFLICT(session_id, part_number) DO UPDATE SET
         etag = excluded.etag,
         byte_size = excluded.byte_size,
+        sha256 = excluded.sha256,
         uploaded_at = excluded.uploaded_at,
         uploaded_by = excluded.uploaded_by;
       SELECT status || '|' || revision || '|' || (
@@ -306,11 +308,11 @@ describe("initial database schema", () => {
         created_at, created_by, updated_at, updated_by
       ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
       INSERT INTO recording_upload_sessions (
-        id, song_id, client_mutation_id, request_fingerprint,
+        id, song_id, client_mutation_id, request_fingerprint, file_manifest_sha256,
         original_filename, byte_size, part_size, part_count, object_key,
         status, revision, expires_at, created_at, created_by, updated_at, updated_by
       ) VALUES (
-        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}', '${"d".repeat(64)}',
         'recording.bin', 8388609, 8388608, 2, 'recordings/original/upload-1',
         'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
       );
@@ -322,8 +324,8 @@ describe("initial database schema", () => {
       SET r2_upload_id = 'multipart-1', status = 'open', revision = 2
       WHERE id = 'upload-1';
       INSERT INTO recording_upload_parts (
-        session_id, part_number, etag, byte_size, uploaded_at, uploaded_by
-      ) VALUES ('upload-1', 2, 'etag-2', 2, '${timestamp}', 'test');
+        session_id, part_number, etag, byte_size, sha256, uploaded_at, uploaded_by
+      ) VALUES ('upload-1', 2, 'etag-2', 2, '${"c".repeat(64)}', '${timestamp}', 'test');
     `)).toThrow(/invalid_recording_upload_part/);
   });
 
@@ -334,11 +336,11 @@ describe("initial database schema", () => {
         created_at, created_by, updated_at, updated_by
       ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
       INSERT INTO recording_upload_sessions (
-        id, song_id, client_mutation_id, request_fingerprint,
+        id, song_id, client_mutation_id, request_fingerprint, file_manifest_sha256,
         original_filename, byte_size, part_size, part_count, object_key,
         status, revision, expires_at, created_at, created_by, updated_at, updated_by
       ) VALUES (
-        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}', '${"d".repeat(64)}',
         'recording.bin', 1, 8388608, 1, 'recordings/original/upload-1',
         'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
       );
@@ -354,11 +356,11 @@ describe("initial database schema", () => {
         created_at, created_by, updated_at, updated_by
       ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
       INSERT INTO recording_upload_sessions (
-        id, song_id, client_mutation_id, request_fingerprint,
+        id, song_id, client_mutation_id, request_fingerprint, file_manifest_sha256,
         original_filename, byte_size, part_size, part_count, object_key,
         status, revision, expires_at, created_at, created_by, updated_at, updated_by
       ) VALUES (
-        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}', '${"d".repeat(64)}',
         'recording.bin', 1, 8388608, 1, 'recordings/original/upload-1',
         'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
       );
@@ -373,11 +375,11 @@ describe("initial database schema", () => {
         created_at, created_by, updated_at, updated_by
       ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
       INSERT INTO recording_upload_sessions (
-        id, song_id, client_mutation_id, request_fingerprint,
+        id, song_id, client_mutation_id, request_fingerprint, file_manifest_sha256,
         original_filename, byte_size, part_size, part_count, object_key,
         status, revision, expires_at, created_at, created_by, updated_at, updated_by
       ) VALUES (
-        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}', '${"d".repeat(64)}',
         'recording.bin', 1, 8388608, 1, 'recordings/original/upload-1',
         'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
       );
@@ -415,11 +417,11 @@ describe("initial database schema", () => {
         created_at, created_by, updated_at, updated_by
       ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
       INSERT INTO recording_upload_sessions (
-        id, song_id, client_mutation_id, request_fingerprint,
+        id, song_id, client_mutation_id, request_fingerprint, file_manifest_sha256,
         original_filename, byte_size, part_size, part_count, object_key,
         status, revision, expires_at, created_at, created_by, updated_at, updated_by
       ) VALUES (
-        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}', '${"d".repeat(64)}',
         'recording.bin', 1, 8388608, 1, 'recordings/original/upload-1',
         'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
       );
@@ -448,11 +450,11 @@ describe("initial database schema", () => {
         created_at, created_by, updated_at, updated_by
       ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
       INSERT INTO recording_upload_sessions (
-        id, song_id, client_mutation_id, request_fingerprint,
+        id, song_id, client_mutation_id, request_fingerprint, file_manifest_sha256,
         original_filename, byte_size, part_size, part_count, object_key,
         status, revision, expires_at, created_at, created_by, updated_at, updated_by
       ) VALUES (
-        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}', '${"d".repeat(64)}',
         'recording.bin', 1, 8388608, 1, 'recordings/original/upload-1',
         'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
       );
@@ -503,11 +505,11 @@ describe("initial database schema", () => {
         created_at, created_by, updated_at, updated_by
       ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
       INSERT INTO recording_upload_sessions (
-        id, song_id, client_mutation_id, request_fingerprint,
+        id, song_id, client_mutation_id, request_fingerprint, file_manifest_sha256,
         original_filename, byte_size, part_size, part_count, object_key,
         status, revision, expires_at, created_at, created_by, updated_at, updated_by
       ) VALUES (
-        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}',
+        'upload-1', 'song-1', 'mutation-1', '${"a".repeat(64)}', '${"d".repeat(64)}',
         'shared.mp3', 1, 8388608, 1, 'recordings/original/upload-1',
         'creating', 1, '2026-07-13T00:00:00.000Z', '${timestamp}', 'test', '${timestamp}', 'test'
       );

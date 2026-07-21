@@ -69,10 +69,12 @@ import {
   RECORDING_UPLOAD_PART_BYTES,
   expectedRecordingPartBytes,
   parseRecordingUploadCreate,
+  parseRecordingUploadFileIdentity,
   parseRecordingUploadFinalization,
   parseRecordingUploadReplacement,
   parseRecordingUploadRevision,
   recordingUploadRequestFingerprint,
+  recordingUploadFileManifestSha256,
   sha256RecordingStream,
   validateCompletedRecordingParts,
   type RecordingUploadCreateInput,
@@ -231,6 +233,7 @@ type RecordingUploadSessionRow = {
   id: string;
   songId: string;
   requestFingerprint: string;
+  fileManifestSha256: string | null;
   description: string | null;
   recordedOn: string | null;
   filename: string;
@@ -253,6 +256,7 @@ type RecordingUploadPartRow = {
   partNumber: number;
   etag: string;
   byteSize: number;
+  sha256: string | null;
 };
 
 type RecordingUploadDuplicateRow = {
@@ -261,6 +265,10 @@ type RecordingUploadDuplicateRow = {
   songId: string | null;
   recordingTrashedAt: string | null;
   recordingRevision: number | null;
+  historyId: string | null;
+  historyOriginalMediaId: string | null;
+  historyPlaybackMediaId: string | null;
+  isHistorical: number;
 };
 
 type FinalizedRecordingRow = {
@@ -378,6 +386,10 @@ function scanReadabilityError(error: unknown): { error: string; status: 400 | 41
 }
 
 type DuplicateScanRow = {
+  mediaId: string;
+  historyId: string | null;
+  isHistorical: number;
+  representationPriority: number;
   scanId: string | null;
   songId: string | null;
   songTitle: string | null;
@@ -410,8 +422,30 @@ async function loadDuplicateScan(
       FROM scan_readability_derivatives
       WHERE scan_readability_derivatives.sha256 = ?
         AND scan_readability_derivatives.byte_size = ?
+    ), candidate_owners AS (
+      SELECT
+        duplicate_media.media_id,
+        duplicate_media.representation_priority,
+        scans.id AS scan_id,
+        NULL AS history_id,
+        0 AS is_historical
+      FROM duplicate_media
+      JOIN scans ON scans.media_id = duplicate_media.media_id
+      UNION ALL
+      SELECT
+        duplicate_media.media_id,
+        duplicate_media.representation_priority,
+        scan_media_history.scan_id,
+        scan_media_history.id,
+        1
+      FROM duplicate_media
+      JOIN scan_media_history ON scan_media_history.media_id = duplicate_media.media_id
     )
     SELECT
+      duplicate_media.media_id AS mediaId,
+      candidate_owners.history_id AS historyId,
+      COALESCE(candidate_owners.is_historical, 0) AS isHistorical,
+      duplicate_media.representation_priority AS representationPriority,
       scans.id AS scanId,
       scans.song_id AS songId,
       songs.title_latin AS songTitle,
@@ -423,12 +457,16 @@ async function loadDuplicateScan(
       CASE WHEN songs.trashed_at IS NULL THEN 0 ELSE 1 END AS songIsTrashed
     FROM duplicate_media
     JOIN media_objects ON media_objects.id = duplicate_media.media_id
-    LEFT JOIN scans ON scans.media_id = media_objects.id
+    LEFT JOIN candidate_owners
+      ON candidate_owners.media_id = duplicate_media.media_id
+      AND candidate_owners.representation_priority = duplicate_media.representation_priority
+    LEFT JOIN scans ON scans.id = candidate_owners.scan_id
     LEFT JOIN songs ON songs.id = scans.song_id
     LEFT JOIN notebooks ON notebooks.id = scans.notebook_id
     ORDER BY
       scans.id IS NULL,
       scans.trashed_at IS NOT NULL,
+      candidate_owners.is_historical,
       duplicate_media.representation_priority,
       scans.id,
       media_objects.id
@@ -439,6 +477,73 @@ async function loadDuplicateScan(
     fingerprint,
     byteSize,
   ).first<DuplicateScanRow>();
+}
+
+async function reuseHistoricalScanMedia(
+  database: D1Database,
+  songId: string,
+  scanId: string,
+  revision: number,
+  historicalMediaId: string,
+  actor: string,
+): Promise<boolean> {
+  const timestamp = new Date().toISOString();
+  const historyId = crypto.randomUUID();
+  try {
+    const results = await database.batch([
+      database.prepare(`
+        INSERT INTO scan_media_history (
+          id, scan_id, media_id, replaced_at, replaced_by, revision_at_replacement
+        )
+        SELECT ?, scans.id, scans.media_id, ?, ?, scans.revision
+        FROM scans
+        JOIN songs ON songs.id = scans.song_id
+        WHERE scans.id = ? AND scans.song_id = ? AND scans.revision = ?
+          AND scans.trashed_at IS NULL AND songs.trashed_at IS NULL
+          AND scans.media_id <> ?
+          AND EXISTS (
+            SELECT 1 FROM scan_media_history
+            JOIN media_objects
+              ON media_objects.id = scan_media_history.media_id
+            WHERE scan_media_history.scan_id = scans.id
+              AND scan_media_history.media_id = ?
+              AND media_objects.kind = 'scan'
+              AND media_objects.state = 'active'
+          )
+      `).bind(
+        historyId, timestamp, actor, scanId, songId, revision,
+        historicalMediaId, historicalMediaId,
+      ),
+      database.prepare(`
+        UPDATE scans
+        SET media_id = ?, rotation_quarter_turns = 0,
+            revision = revision + 1, updated_at = ?, updated_by = ?
+        WHERE id = ? AND song_id = ? AND revision = ? AND trashed_at IS NULL
+          AND EXISTS (SELECT 1 FROM scan_media_history WHERE id = ? AND scan_id = scans.id)
+      `).bind(
+        historicalMediaId, timestamp, actor, scanId, songId, revision, historyId,
+      ),
+      database.prepare(`
+        UPDATE songs SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM scans
+            WHERE id = ? AND song_id = songs.id AND media_id = ?
+              AND revision = ? AND trashed_at IS NULL
+          )
+      `).bind(timestamp, actor, songId, scanId, historicalMediaId, revision + 1),
+    ]);
+    return results[1].meta.changes > 0;
+  } catch {
+    const reconciled = await database.prepare(`
+      SELECT 1 AS complete
+      FROM scans
+      WHERE id = ? AND song_id = ? AND media_id = ?
+        AND revision = ? AND trashed_at IS NULL
+    `).bind(scanId, songId, historicalMediaId, revision + 1).first<{ complete: number }>()
+      .catch(() => null);
+    return Boolean(reconciled);
+  }
 }
 
 async function removeUncommittedScanObjects(
@@ -453,7 +558,7 @@ async function removeUncommittedScanObjects(
   }
 }
 
-async function removeUncommittedScanRows(database: D1Database, mediaId: string): Promise<void> {
+async function removeUncommittedScanRows(database: D1Database, mediaId: string): Promise<boolean> {
   try {
     await database.batch([
       database.prepare(`
@@ -462,8 +567,34 @@ async function removeUncommittedScanRows(database: D1Database, mediaId: string):
       database.prepare(`DELETE FROM media_objects WHERE id = ?`).bind(mediaId),
     ]);
   } catch {
-    console.error("Failed to remove uncommitted Scan rows");
+    console.error("Retaining Scan objects because D1 cleanup was not acknowledged");
+    return false;
   }
+  try {
+    const retained = await database.prepare(`
+      SELECT
+        EXISTS (SELECT 1 FROM media_objects WHERE id = ?) AS mediaExists,
+        EXISTS (
+          SELECT 1 FROM scan_readability_derivatives
+          WHERE source_media_id = ?
+        ) AS derivativeExists
+    `).bind(mediaId, mediaId).first<{ mediaExists: number; derivativeExists: number }>();
+    return retained?.mediaExists === 0 && retained.derivativeExists === 0;
+  } catch {
+    console.error("Retaining Scan objects because D1 cleanup could not be verified");
+    return false;
+  }
+}
+
+async function removeUncommittedScanResources(
+  database: D1Database,
+  media: R2Bucket,
+  mediaId: string,
+  originalObjectKey: string,
+  readabilityObjectKey: string,
+): Promise<void> {
+  if (!await removeUncommittedScanRows(database, mediaId)) return;
+  await removeUncommittedScanObjects(media, originalObjectKey, readabilityObjectKey);
 }
 
 function scanReadabilityInsert(
@@ -527,6 +658,7 @@ async function loadRecordingUploadSession(
       id,
       song_id AS songId,
       request_fingerprint AS requestFingerprint,
+      file_manifest_sha256 AS fileManifestSha256,
       description,
       recorded_on AS recordedOn,
       original_filename AS filename,
@@ -561,6 +693,7 @@ async function loadRecordingUploadByMutation(
       id,
       song_id AS songId,
       request_fingerprint AS requestFingerprint,
+      file_manifest_sha256 AS fileManifestSha256,
       description,
       recorded_on AS recordedOn,
       original_filename AS filename,
@@ -595,6 +728,7 @@ async function loadRecoverableRecordingUploads(
       recording_upload_sessions.id,
       recording_upload_sessions.song_id AS songId,
       recording_upload_sessions.request_fingerprint AS requestFingerprint,
+      recording_upload_sessions.file_manifest_sha256 AS fileManifestSha256,
       recording_upload_sessions.description,
       recording_upload_sessions.recorded_on AS recordedOn,
       recording_upload_sessions.original_filename AS filename,
@@ -642,6 +776,7 @@ function publicRecordingUploadSession(
     revision: session.revision,
     expiresAt: session.expiresAt,
     recordingId: session.recordingId,
+    fileIdentityBound: session.fileManifestSha256 !== null,
     intent: session.intentKind == null
       ? null
       : {
@@ -656,6 +791,7 @@ function publicRecordingUploadSession(
       songId: duplicate?.songId ?? null,
       trashed: duplicate ? duplicate.recordingTrashedAt !== null : null,
       revision: duplicate?.recordingRevision ?? null,
+      isHistorical: duplicate?.isHistorical === 1,
     };
   }
   return result;
@@ -719,7 +855,7 @@ async function loadRecordingUploadParts(
   sessionId: string,
 ): Promise<RecordingUploadPartRow[]> {
   const parts = await database.prepare(`
-    SELECT part_number AS partNumber, etag, byte_size AS byteSize
+    SELECT part_number AS partNumber, etag, byte_size AS byteSize, sha256
     FROM recording_upload_parts
     WHERE session_id = ?
     ORDER BY part_number
@@ -733,22 +869,51 @@ async function findDuplicateRecordingMedia(
   byteSize: number,
 ): Promise<RecordingUploadDuplicateRow | null> {
   return database.prepare(`
+    WITH candidate_owners AS (
+      SELECT
+        media_objects.id AS media_id,
+        recordings.id AS recording_id,
+        NULL AS history_id,
+        NULL AS history_original_media_id,
+        NULL AS history_playback_media_id,
+        0 AS is_historical
+      FROM media_objects
+      JOIN recordings ON
+        recordings.original_media_id = media_objects.id
+        OR recordings.playback_media_id = media_objects.id
+      UNION ALL
+      SELECT
+        media_objects.id,
+        recording_media_history.recording_id,
+        recording_media_history.id,
+        recording_media_history.original_media_id,
+        recording_media_history.playback_media_id,
+        1
+      FROM media_objects
+      JOIN recording_media_history ON
+        recording_media_history.original_media_id = media_objects.id
+        OR recording_media_history.playback_media_id = media_objects.id
+    )
     SELECT
       media_objects.id AS mediaId,
       recordings.id AS recordingId,
       recordings.song_id AS songId,
       recordings.trashed_at AS recordingTrashedAt,
-      recordings.revision AS recordingRevision
+      recordings.revision AS recordingRevision,
+      candidate_owners.history_id AS historyId,
+      candidate_owners.history_original_media_id AS historyOriginalMediaId,
+      candidate_owners.history_playback_media_id AS historyPlaybackMediaId,
+      COALESCE(candidate_owners.is_historical, 0) AS isHistorical
     FROM media_objects
-    LEFT JOIN recordings ON
-      recordings.original_media_id = media_objects.id
-      OR recordings.playback_media_id = media_objects.id
+    LEFT JOIN candidate_owners ON candidate_owners.media_id = media_objects.id
+    LEFT JOIN recordings ON recordings.id = candidate_owners.recording_id
     WHERE media_objects.kind IN ('original_audio', 'playback_audio')
       AND media_objects.sha256 = ?
       AND media_objects.byte_size = ?
     ORDER BY
       recordings.id IS NULL,
       recordings.trashed_at IS NOT NULL,
+      candidate_owners.is_historical,
       media_objects.kind <> 'original_audio',
       recordings.id,
       media_objects.id
@@ -762,19 +927,51 @@ async function loadRecordingUploadDuplicate(
 ): Promise<RecordingUploadDuplicateRow | null> {
   if (!session.duplicateMediaId) return null;
   return database.prepare(`
+    WITH candidate_owners AS (
+      SELECT
+        recordings.id AS recording_id,
+        NULL AS history_id,
+        NULL AS history_original_media_id,
+        NULL AS history_playback_media_id,
+        0 AS is_historical
+      FROM recordings
+      WHERE recordings.original_media_id = ? OR recordings.playback_media_id = ?
+      UNION ALL
+      SELECT
+        recording_media_history.recording_id,
+        recording_media_history.id,
+        recording_media_history.original_media_id,
+        recording_media_history.playback_media_id,
+        1
+      FROM recording_media_history
+      WHERE recording_media_history.original_media_id = ?
+        OR recording_media_history.playback_media_id = ?
+    )
     SELECT
       media_objects.id AS mediaId,
       recordings.id AS recordingId,
       recordings.song_id AS songId,
       recordings.trashed_at AS recordingTrashedAt,
-      recordings.revision AS recordingRevision
+      recordings.revision AS recordingRevision,
+      candidate_owners.history_id AS historyId,
+      candidate_owners.history_original_media_id AS historyOriginalMediaId,
+      candidate_owners.history_playback_media_id AS historyPlaybackMediaId,
+      COALESCE(candidate_owners.is_historical, 0) AS isHistorical
     FROM media_objects
-    LEFT JOIN recordings ON
-      recordings.original_media_id = media_objects.id
-      OR recordings.playback_media_id = media_objects.id
+    LEFT JOIN candidate_owners ON 1 = 1
+    LEFT JOIN recordings ON recordings.id = candidate_owners.recording_id
     WHERE media_objects.id = ?
       AND media_objects.kind IN ('original_audio', 'playback_audio')
-  `).bind(session.duplicateMediaId).first<RecordingUploadDuplicateRow>();
+    ORDER BY recordings.id IS NULL, recordings.trashed_at IS NOT NULL,
+             candidate_owners.is_historical, recordings.id
+    LIMIT 1
+  `).bind(
+    session.duplicateMediaId,
+    session.duplicateMediaId,
+    session.duplicateMediaId,
+    session.duplicateMediaId,
+    session.duplicateMediaId,
+  ).first<RecordingUploadDuplicateRow>();
 }
 
 async function loadFinalizedRecording(
@@ -2252,15 +2449,16 @@ app.post("/api/songs/:songId/recording-uploads", requireRole("editor"), async (c
     const statements: D1PreparedStatement[] = [context.env.DB.prepare(`
       INSERT INTO recording_upload_sessions (
         id, song_id, client_mutation_id, request_fingerprint,
+        file_manifest_sha256,
         description, recorded_on, original_filename, mime_type_hint,
         byte_size, part_size, part_count, object_key, status, revision,
         expires_at, created_at, created_by, updated_at, updated_by
       )
-      SELECT ?, songs.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', 1, ?, ?, ?, ?, ?
+      SELECT ?, songs.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', 1, ?, ?, ?, ?, ?
       FROM songs
       WHERE songs.id = ? AND songs.trashed_at IS NULL
     `).bind(
-      sessionId, upload.clientMutationId, fingerprint,
+      sessionId, upload.clientMutationId, fingerprint, upload.fileManifestSha256,
       upload.description, upload.recordedOn, upload.filename, upload.mimeTypeHint,
       upload.byteSize, RECORDING_UPLOAD_PART_BYTES, upload.partCount, objectKey,
       expiresAt, timestamp, actor, timestamp, actor, songId,
@@ -2363,6 +2561,32 @@ app.get("/api/recording-uploads/:sessionId", requireRole("editor"), async (conte
   });
 });
 
+app.post("/api/recording-uploads/:sessionId/verify-file", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseRecordingUploadFileIdentity(body);
+  if (!parsed.success) return context.json({ error: "invalid_recording_upload" }, 400);
+  const actor = context.get("appUser").identity;
+  const session = await loadRecordingUploadSession(
+    context.env.DB, context.req.param("sessionId"), actor,
+  );
+  if (!session) return context.json({ error: "recording_upload_not_found" }, 404);
+  if (session.status !== "open") {
+    return context.json({ error: "recording_upload_not_open" }, 409);
+  }
+  if (!session.fileManifestSha256) {
+    return context.json({ error: "recording_upload_file_identity_unavailable" }, 409);
+  }
+  if (session.fileManifestSha256 !== parsed.data.fileManifestSha256) {
+    return context.json({ error: "recording_upload_file_mismatch" }, 409);
+  }
+  return context.json({ verified: true });
+});
+
 app.put("/api/recording-uploads/:sessionId/parts/:partNumber", requireRole("editor"), async (context) => {
   const actor = context.get("appUser").identity;
   const session = await loadRecordingUploadSession(
@@ -2388,14 +2612,37 @@ app.put("/api/recording-uploads/:sessionId/parts/:partNumber", requireRole("edit
   }
   const requestBody = context.req.raw.body;
   if (!requestBody) return context.json({ error: "recording_upload_part_required" }, 400);
+  const claimedPartSha256 = context.req.header("X-Upload-Part-Sha256") ?? "";
+  const claimedFileManifest = context.req.header("X-Upload-File-Manifest") ?? "";
+  if (!/^[a-f0-9]{64}$/u.test(claimedPartSha256)
+    || !/^[a-f0-9]{64}$/u.test(claimedFileManifest)) {
+    return context.json({ error: "recording_upload_file_identity_required" }, 400);
+  }
+  if (!session.fileManifestSha256) {
+    return context.json({ error: "recording_upload_file_identity_unavailable" }, 409);
+  }
+  if (session.fileManifestSha256 !== claimedFileManifest) {
+    return context.json({ error: "recording_upload_file_mismatch" }, 409);
+  }
 
   let uploaded: R2UploadedPart;
+  let measuredPart: { sha256: string; byteSize: number };
   try {
-    uploaded = await context.env.MEDIA
-      .resumeMultipartUpload(session.objectKey, session.uploadId)
-      .uploadPart(partNumber, requestBody);
+    const [storageBody, digestBody] = requestBody.tee();
+    [uploaded, measuredPart] = await Promise.all([
+      context.env.MEDIA
+        .resumeMultipartUpload(session.objectKey, session.uploadId)
+        .uploadPart(partNumber, storageBody),
+      sha256RecordingStream(digestBody),
+    ]);
   } catch {
     return context.json({ error: "recording_upload_part_storage_failed" }, 503);
+  }
+  if (
+    measuredPart.byteSize !== expectedBytes
+    || measuredPart.sha256 !== claimedPartSha256
+  ) {
+    return context.json({ error: "recording_upload_part_hash_mismatch" }, 422);
   }
   if (
     uploaded.partNumber !== partNumber
@@ -2417,9 +2664,9 @@ app.put("/api/recording-uploads/:sessionId/parts/:partNumber", requireRole("edit
       `).bind(timestamp, actor, session.id, actor, session.revision),
       context.env.DB.prepare(`
         INSERT INTO recording_upload_parts (
-          session_id, part_number, etag, byte_size, uploaded_at, uploaded_by
+          session_id, part_number, etag, byte_size, sha256, uploaded_at, uploaded_by
         )
-        SELECT ?, ?, ?, ?, ?, ?
+        SELECT ?, ?, ?, ?, ?, ?, ?
         WHERE EXISTS (
           SELECT 1 FROM recording_upload_sessions
           WHERE id = ? AND created_by = ? AND status = 'open'
@@ -2428,10 +2675,11 @@ app.put("/api/recording-uploads/:sessionId/parts/:partNumber", requireRole("edit
         ON CONFLICT(session_id, part_number) DO UPDATE SET
           etag = excluded.etag,
           byte_size = excluded.byte_size,
+          sha256 = excluded.sha256,
           uploaded_at = excluded.uploaded_at,
           uploaded_by = excluded.uploaded_by
       `).bind(
-        session.id, partNumber, uploaded.etag, expectedBytes, timestamp, actor,
+        session.id, partNumber, uploaded.etag, expectedBytes, measuredPart.sha256, timestamp, actor,
         session.id, actor, newRevision, timestamp, actor,
       ),
     ]);
@@ -2470,6 +2718,17 @@ app.post("/api/recording-uploads/:sessionId/complete", requireRole("editor"), as
   const parts = await loadRecordingUploadParts(context.env.DB, session.id);
   if (!validateCompletedRecordingParts(session.byteSize, parts)) {
     return context.json({ error: "recording_upload_parts_incomplete" }, 409);
+  }
+  const measuredManifest = await recordingUploadFileManifestSha256(
+    session.byteSize,
+    parts.map((part) => ({
+      partNumber: part.partNumber,
+      byteSize: part.byteSize,
+      sha256: part.sha256 ?? "",
+    })),
+  );
+  if (!session.fileManifestSha256 || measuredManifest !== session.fileManifestSha256) {
+    return context.json({ error: "recording_upload_file_mismatch" }, 409);
   }
 
   if (session.status === "open") {
@@ -3063,17 +3322,27 @@ app.post("/api/songs/:songId/recording-uploads/:sessionId/replace", requireRole(
         WITH duplicate AS (
           SELECT media_objects.id
           FROM media_objects
-          LEFT JOIN recordings ON
-            recordings.original_media_id = media_objects.id
-            OR recordings.playback_media_id = media_objects.id
           WHERE media_objects.kind IN ('original_audio', 'playback_audio')
             AND media_objects.sha256 = ?
             AND media_objects.byte_size = ?
           ORDER BY
-            recordings.id IS NULL,
-            recordings.trashed_at IS NOT NULL,
+            NOT EXISTS (
+              SELECT 1 FROM recordings
+              WHERE recordings.original_media_id = media_objects.id
+                 OR recordings.playback_media_id = media_objects.id
+            ),
+            NOT EXISTS (
+              SELECT 1 FROM recordings
+              WHERE (recordings.original_media_id = media_objects.id
+                  OR recordings.playback_media_id = media_objects.id)
+                AND recordings.trashed_at IS NULL
+            ),
+            NOT EXISTS (
+              SELECT 1 FROM recording_media_history
+              WHERE recording_media_history.original_media_id = media_objects.id
+                 OR recording_media_history.playback_media_id = media_objects.id
+            ),
             media_objects.kind <> 'original_audio',
-            recordings.id,
             media_objects.id
           LIMIT 1
         )
@@ -3256,6 +3525,217 @@ app.post("/api/songs/:songId/recording-uploads/:sessionId/replace", requireRole(
     { upload: publicRecordingUploadSession(session), recording },
     results[7].meta.changes === 1 ? 201 : 200,
   );
+});
+
+app.post("/api/songs/:songId/recording-uploads/:sessionId/reuse-history", requireRole("editor"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const parsed = parseRecordingUploadReplacement(body);
+  if (!parsed.success) {
+    return context.json({ error: "invalid_recording_upload", fields: parsed.fields }, 400);
+  }
+  const actor = context.get("appUser").identity;
+  const songId = context.req.param("songId");
+  const session = await loadRecordingUploadSession(
+    context.env.DB, context.req.param("sessionId"), actor,
+  );
+  if (!session) return context.json({ error: "recording_upload_not_found" }, 404);
+  if (
+    session.status !== "duplicate"
+    || session.revision !== parsed.data.sessionRevision
+    || session.songId !== songId
+    || session.intentKind !== "replace"
+    || session.targetRecordingId !== parsed.data.targetRecordingId
+    || session.targetRecordingRevision !== parsed.data.targetRecordingRevision
+  ) {
+    return context.json({ error: "recording_upload_intent_mismatch" }, 409);
+  }
+  const duplicate = await loadRecordingUploadDuplicate(context.env.DB, session);
+  if (
+    !duplicate
+    || duplicate.isHistorical !== 1
+    || duplicate.recordingId !== parsed.data.targetRecordingId
+    || !duplicate.historyId
+    || !duplicate.historyOriginalMediaId
+  ) {
+    return context.json({ error: "recording_upload_history_unavailable" }, 409);
+  }
+
+  const current = await context.env.DB.prepare(`
+    SELECT
+      recordings.original_media_id AS originalMediaId,
+      recordings.playback_media_id AS playbackMediaId,
+      recordings.description,
+      recordings.normalized_description AS normalizedDescription,
+      recordings.revision,
+      recordings.processing_state AS processingState,
+      EXISTS (
+        SELECT 1 FROM audio_processing_jobs
+        WHERE recording_id = recordings.id AND status IN ('pending', 'running')
+      ) AS hasActiveJob
+    FROM recordings
+    JOIN songs ON songs.id = recordings.song_id
+    WHERE recordings.id = ? AND recordings.song_id = ?
+      AND recordings.trashed_at IS NULL AND songs.trashed_at IS NULL
+  `).bind(parsed.data.targetRecordingId, songId).first<{
+    originalMediaId: string;
+    playbackMediaId: string | null;
+    description: string;
+    normalizedDescription: string;
+    revision: number;
+    processingState: "processing" | "ready" | "failed";
+    hasActiveJob: number;
+  }>();
+  if (!current) return context.json({ error: "recording_not_found" }, 404);
+  if (current.revision !== parsed.data.targetRecordingRevision) {
+    return context.json({ error: "recording_conflict" }, 409);
+  }
+  if (current.processingState === "processing" || current.hasActiveJob === 1) {
+    return context.json({ error: "recording_processing_active" }, 409);
+  }
+  const finalDescription = parsed.data.description ?? session.description ?? current.description;
+  const normalizedDescription = normalizedTextKey(finalDescription);
+  if (!normalizedDescription) return context.json({ error: "invalid_recording_upload" }, 400);
+
+  const timestamp = new Date().toISOString();
+  const currentHistoryId = crypto.randomUUID();
+  try {
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(`
+        INSERT INTO recording_media_history (
+          id, recording_id, original_media_id, playback_media_id,
+          replaced_at, replaced_by, revision_at_replacement
+        )
+        SELECT ?, recordings.id, recordings.original_media_id,
+               recordings.playback_media_id, ?, ?, recordings.revision
+        FROM recordings
+        WHERE recordings.id = ? AND recordings.song_id = ?
+          AND recordings.revision = ? AND recordings.trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM recording_media_history
+            JOIN media_objects AS historical_original
+              ON historical_original.id = recording_media_history.original_media_id
+            LEFT JOIN media_objects AS historical_playback
+              ON historical_playback.id = recording_media_history.playback_media_id
+            WHERE recording_media_history.id = ?
+              AND recording_media_history.recording_id = recordings.id
+              AND recording_media_history.original_media_id = ?
+              AND recording_media_history.playback_media_id IS ?
+              AND historical_original.kind = 'original_audio'
+              AND historical_original.state = 'active'
+              AND (
+                recording_media_history.playback_media_id IS NULL
+                OR historical_playback.state = 'active'
+              )
+          )
+      `).bind(
+        currentHistoryId, timestamp, actor,
+        parsed.data.targetRecordingId, songId, current.revision,
+        duplicate.historyId, duplicate.historyOriginalMediaId,
+        duplicate.historyPlaybackMediaId,
+      ),
+      context.env.DB.prepare(`
+        UPDATE recordings
+        SET original_media_id = ?, playback_media_id = ?,
+            description = ?, normalized_description = ?,
+            recorded_on = (SELECT recorded_on FROM recording_upload_sessions WHERE id = ?),
+            processing_state = 'ready', processing_error = NULL,
+            revision = revision + 1, updated_at = ?, updated_by = ?
+        WHERE id = ? AND song_id = ? AND revision = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM recording_media_history
+            WHERE id = ? AND recording_id = recordings.id
+          )
+      `).bind(
+        duplicate.historyOriginalMediaId, duplicate.historyPlaybackMediaId,
+        finalDescription, normalizedDescription, session.id,
+        timestamp, actor, parsed.data.targetRecordingId, songId, current.revision,
+        currentHistoryId,
+      ),
+      context.env.DB.prepare(`
+        DELETE FROM recording_credits
+        WHERE recording_id = ?
+          AND EXISTS (
+            SELECT 1 FROM recording_upload_sessions
+            WHERE id = ? AND created_by = ? AND status = 'duplicate' AND revision = ?
+          )
+      `).bind(parsed.data.targetRecordingId, session.id, actor, session.revision),
+      context.env.DB.prepare(`
+        INSERT INTO recording_credits (id, recording_id, person_id, role, sort_order)
+        SELECT ? || '-' || printf('%03d', recording_upload_credits.sort_order),
+               ?, recording_upload_credits.person_id,
+               recording_upload_credits.role, recording_upload_credits.sort_order
+        FROM recording_upload_credits
+        JOIN recording_upload_sessions
+          ON recording_upload_sessions.id = recording_upload_credits.session_id
+        WHERE recording_upload_credits.session_id = ?
+          AND recording_upload_sessions.created_by = ?
+          AND recording_upload_sessions.status = 'duplicate'
+          AND recording_upload_sessions.revision = ?
+      `).bind(
+        currentHistoryId, parsed.data.targetRecordingId, session.id, actor, session.revision,
+      ),
+      context.env.DB.prepare(`
+        UPDATE recording_upload_sessions
+        SET status = 'failed', duplicate_media_id = NULL,
+            error_code = 'user_discarded', revision = revision + 1,
+            updated_at = ?, updated_by = ?
+        WHERE id = ? AND created_by = ? AND status = 'duplicate' AND revision = ?
+          AND EXISTS (
+            SELECT 1 FROM recordings
+            WHERE id = ? AND original_media_id = ?
+              AND playback_media_id IS ? AND revision = ?
+          )
+      `).bind(
+        timestamp, actor, session.id, actor, session.revision,
+        parsed.data.targetRecordingId, duplicate.historyOriginalMediaId,
+        duplicate.historyPlaybackMediaId, current.revision + 1,
+      ),
+      context.env.DB.prepare(`
+        UPDATE songs SET updated_at = ?, updated_by = ?
+        WHERE id = ? AND trashed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM recording_upload_sessions
+            WHERE id = ? AND status = 'failed' AND error_code = 'user_discarded'
+          )
+      `).bind(timestamp, actor, songId, session.id),
+    ]);
+    if (results[1].meta.changes === 0 || results[4].meta.changes === 0) {
+      return context.json({ error: "recording_conflict" }, 409);
+    }
+  } catch (error) {
+    const reconciled = await context.env.DB.prepare(`
+      SELECT recordings.revision
+      FROM recordings
+      JOIN recording_upload_sessions ON recording_upload_sessions.id = ?
+      WHERE recordings.id = ? AND recordings.song_id = ?
+        AND recordings.original_media_id = ?
+        AND recordings.playback_media_id IS ?
+        AND recordings.revision = ?
+        AND recording_upload_sessions.status = 'failed'
+        AND recording_upload_sessions.error_code = 'user_discarded'
+    `).bind(
+      session.id, parsed.data.targetRecordingId, songId,
+      duplicate.historyOriginalMediaId, duplicate.historyPlaybackMediaId,
+      current.revision + 1,
+    ).first<{ revision: number }>().catch(() => null);
+    if (!reconciled) {
+      const mapped = recordingWriteError(error);
+      return context.json({ error: mapped.error }, mapped.status);
+    }
+  }
+  return context.json({
+    recording: {
+      id: parsed.data.targetRecordingId,
+      revision: current.revision + 1,
+      processingState: "ready",
+    },
+    reusedHistoricalMedia: true,
+  });
 });
 
 app.post("/api/recording-uploads/:sessionId/abort", requireRole("editor"), async (context) => {
@@ -3788,10 +4268,11 @@ app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
         songTitle: duplicate.songTitle,
         filename: duplicate.filename,
         notebookName: duplicate.notebookName,
-        pageLabel: duplicate.pageLabel,
-        revision: duplicate.scanRevision,
-        isTrashed: Boolean(duplicate.scanIsTrashed || duplicate.songIsTrashed),
-      },
+            pageLabel: duplicate.pageLabel,
+            revision: duplicate.scanRevision,
+            isTrashed: Boolean(duplicate.scanIsTrashed || duplicate.songIsTrashed),
+            isHistorical: duplicate.isHistorical === 1,
+          },
     }, 409);
   }
 
@@ -3872,13 +4353,15 @@ app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
       `).bind(timestamp, actor, songId, scanId),
     ]);
     if (results[2].meta.changes === 0) {
-      await removeUncommittedScanRows(context.env.DB, mediaId);
-      await removeUncommittedScanObjects(context.env.MEDIA, objectKey, readabilityObjectKey);
+      await removeUncommittedScanResources(
+        context.env.DB, context.env.MEDIA, mediaId, objectKey, readabilityObjectKey,
+      );
       return context.json({ error: "song_not_found" }, 404);
     }
   } catch (error) {
-    await removeUncommittedScanRows(context.env.DB, mediaId);
-    await removeUncommittedScanObjects(context.env.MEDIA, objectKey, readabilityObjectKey);
+    await removeUncommittedScanResources(
+      context.env.DB, context.env.MEDIA, mediaId, objectKey, readabilityObjectKey,
+    );
     const response = scanWriteError(error);
     return context.json({ error: response.error }, response.status);
   }
@@ -4358,10 +4841,50 @@ app.post("/api/songs/:songId/scans/:scanId/media", requireRole("editor"), async 
   if (fingerprint === currentScan.sha256) {
     return context.json({ error: "duplicate_scan_file", fields: { file: ["This file is identical to the current scan media"] } }, 409);
   }
-  if (await loadDuplicateScan(context.env.DB, fingerprint, bytes.byteLength)) {
+  const duplicateScan = await loadDuplicateScan(context.env.DB, fingerprint, bytes.byteLength);
+  if (
+    duplicateScan?.scanId === scanId
+    && duplicateScan.historyId !== null
+    && duplicateScan.isHistorical === 1
+    && duplicateScan.representationPriority === 0
+  ) {
+    if (await reuseHistoricalScanMedia(
+      context.env.DB,
+      songId,
+      scanId,
+      parsed.data.revision,
+      duplicateScan.mediaId,
+      actor,
+    )) {
+      return context.json({
+        scan: { id: scanId, revision: parsed.data.revision + 1 },
+        reusedHistoricalMedia: true,
+      });
+    }
+    return context.json({ error: "scan_conflict" }, 409);
+  }
+  if (duplicateScan) {
     return context.json({
       error: "duplicate_scan_file",
       fields: { file: ["This file is already retained elsewhere in the library"] },
+      ...(duplicateScan.scanId !== null
+        && duplicateScan.songId !== null
+        && duplicateScan.songTitle !== null
+        && duplicateScan.scanRevision !== null
+        ? {
+            existing: {
+              scanId: duplicateScan.scanId,
+              songId: duplicateScan.songId,
+              songTitle: duplicateScan.songTitle,
+              filename: duplicateScan.filename,
+              notebookName: duplicateScan.notebookName,
+              pageLabel: duplicateScan.pageLabel,
+              revision: duplicateScan.scanRevision,
+              isTrashed: Boolean(duplicateScan.scanIsTrashed || duplicateScan.songIsTrashed),
+              isHistorical: duplicateScan.isHistorical === 1,
+            },
+          }
+        : {}),
     }, 409);
   }
 
@@ -4444,13 +4967,15 @@ app.post("/api/songs/:songId/scans/:scanId/media", requireRole("editor"), async 
       `).bind(timestamp, actor, songId, scanId),
     ]);
     if (results[3].meta.changes === 0) {
-      await removeUncommittedScanRows(context.env.DB, mediaId);
-      await removeUncommittedScanObjects(context.env.MEDIA, objectKey, readabilityObjectKey);
+      await removeUncommittedScanResources(
+        context.env.DB, context.env.MEDIA, mediaId, objectKey, readabilityObjectKey,
+      );
       return context.json({ error: "scan_conflict" }, 409);
     }
   } catch (error) {
-    await removeUncommittedScanRows(context.env.DB, mediaId);
-    await removeUncommittedScanObjects(context.env.MEDIA, objectKey, readabilityObjectKey);
+    await removeUncommittedScanResources(
+      context.env.DB, context.env.MEDIA, mediaId, objectKey, readabilityObjectKey,
+    );
     const mapped = scanWriteError(error);
     return context.json({ error: mapped.error }, mapped.status);
   }
@@ -5950,6 +6475,32 @@ async function processClaimedScan(
     // the deterministic private object: deleting it here could remove a
     // derivative that the committed row now references. If the batch truly did
     // not commit, the next maintenance attempt safely overwrites the same key.
+    const committed = await env.DB.prepare(`
+      SELECT 1 AS valid
+      FROM scan_readability_derivatives
+      WHERE source_media_id = ?
+        AND source_sha256 = ?
+        AND source_byte_size = ?
+        AND object_key = ?
+        AND mime_type = ?
+        AND byte_size = ?
+        AND sha256 = ?
+        AND width = ?
+        AND height = ?
+        AND policy_id = ?
+    `).bind(
+      pending.mediaId,
+      sourceSha256,
+      pending.byteSize,
+      readabilityObjectKey,
+      readability.mimeType,
+      readability.bytes.byteLength,
+      readability.sha256,
+      readability.width,
+      readability.height,
+      readability.policyId,
+    ).first<{ valid: number }>().catch(() => null);
+    if (committed) return "processed";
     await recordScanMaintenanceFailure(env.DB, pending.mediaId, "commit", "scan_maintenance_commit_failed");
     return "failed";
   }

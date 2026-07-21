@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { app, type AppRole } from "./index";
 import {
   parseRecordingUploadCreate,
@@ -6,6 +6,9 @@ import {
 } from "./recording-upload";
 
 type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+
+const ABC_SHA256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+const ABC_MANIFEST_SHA256 = "f36315554ddc5c72d9dc86d42c7b9c6ff64bad9ba13dd761069c204540a4a51a";
 
 function bindings(database: D1Database, media: R2Bucket, role: AppRole = "admin") {
   return {
@@ -83,9 +86,14 @@ function installTestDigestStream(): () => void {
 }
 
 describe("Recording upload API", () => {
+  let restoreSuiteDigestStream: () => void;
+  beforeAll(() => { restoreSuiteDigestStream = installTestDigestStream(); });
+  afterAll(() => { restoreSuiteDigestStream(); });
+
   it("creates one idempotent private multipart session without exposing storage identity", async () => {
     type Session = {
-      id: string; songId: string; requestFingerprint: string; filename: string;
+      id: string; songId: string; requestFingerprint: string; fileManifestSha256: string;
+      filename: string;
       byteSize: number; partCount: number; objectKey: string; uploadId: string | null;
       status: "creating" | "open"; revision: number; expiresAt: string; recordingId: null;
     };
@@ -114,14 +122,15 @@ describe("Recording upload API", () => {
           id: String(values[0]),
           songId: "song-1",
           requestFingerprint: String(values[2]),
-          filename: String(values[5]),
-          byteSize: Number(values[7]),
-          partCount: Number(values[9]),
-          objectKey: String(values[10]),
+          fileManifestSha256: String(values[3]),
+          filename: String(values[6]),
+          byteSize: Number(values[8]),
+          partCount: Number(values[10]),
+          objectKey: String(values[11]),
           uploadId: null,
           status: "creating",
           revision: 1,
-          expiresAt: String(values[11]),
+          expiresAt: String(values[12]),
           recordingId: null,
         };
         return statements.map(() => ({ meta: { changes: 1 } }));
@@ -136,6 +145,7 @@ describe("Recording upload API", () => {
     } as unknown as R2Bucket;
     const body = {
       clientMutationId: "3f2a1dc0-49aa-4e52-a27a-74d1372aa219",
+      fileManifestSha256: "e".repeat(64),
       filename: "private-take.m4a",
       mimeType: "audio/mp4",
       byteSize: 123,
@@ -180,6 +190,7 @@ describe("Recording upload API", () => {
   it("auto-aborts an expired unprovisioned session so it cannot strand its Song", async () => {
     const body = {
       clientMutationId: "3f2a1dc0-49aa-4e52-a27a-74d1372aa219",
+      fileManifestSha256: "e".repeat(64),
       filename: "private-take.m4a",
       mimeType: "audio/mp4",
       byteSize: 123,
@@ -192,6 +203,7 @@ describe("Recording upload API", () => {
     const fingerprint = await recordingUploadRequestFingerprint("song-1", parsed.data);
     let session = {
       id: "upload-expired", songId: "song-1", requestFingerprint: fingerprint,
+      fileManifestSha256: "e".repeat(64),
       filename: "private-take.m4a", byteSize: 123, partCount: 1,
       objectKey: "recordings/original/upload-expired", uploadId: null,
       status: "creating", revision: 1, expiresAt: "2000-01-01T00:00:00.000Z",
@@ -236,6 +248,7 @@ describe("Recording upload API", () => {
   it("streams an exact raw part to R2 and checkpoints only its number", async () => {
     const session = {
       id: "upload-1", songId: "song-1", requestFingerprint: "a".repeat(64),
+      fileManifestSha256: ABC_MANIFEST_SHA256,
       filename: "take.mp3", byteSize: 3, partCount: 1,
       objectKey: "recordings/original/upload-1", uploadId: "multipart-1",
       status: "open", revision: 2, expiresAt: "2999-01-01T00:00:00.000Z", recordingId: null,
@@ -260,7 +273,15 @@ describe("Recording upload API", () => {
 
     const response = await app.request(
       "http://local.test/api/recording-uploads/upload-1/parts/1",
-      { method: "PUT", headers: { "Content-Length": "3" }, body: "abc" },
+      {
+        method: "PUT",
+        headers: {
+          "Content-Length": "3",
+          "X-Upload-Part-Sha256": ABC_SHA256,
+          "X-Upload-File-Manifest": ABC_MANIFEST_SHA256,
+        },
+        body: "abc",
+      },
       bindings(database, media),
     );
     expect(response.status).toBe(200);
@@ -270,9 +291,92 @@ describe("Recording upload API", () => {
     expect(JSON.parse(text)).toEqual({ part: { partNumber: 1 }, upload: { revision: 3 } });
   });
 
+  it("rejects a different same-size resumable file before touching private storage", async () => {
+    const session = {
+      id: "upload-1", songId: "song-1", requestFingerprint: "a".repeat(64),
+      fileManifestSha256: ABC_MANIFEST_SHA256,
+      filename: "take.mp3", byteSize: 3, partCount: 1,
+      objectKey: "recordings/original/upload-1", uploadId: "multipart-1",
+      status: "open", revision: 2, expiresAt: "2999-01-01T00:00:00.000Z", recordingId: null,
+    };
+    const database = {
+      prepare: (query: string) => {
+        const prepared = statement(query);
+        prepared.first = async () => session;
+        return prepared;
+      },
+    } as unknown as D1Database;
+    let touchedR2 = false;
+    const media = {
+      resumeMultipartUpload: () => { touchedR2 = true; return {}; },
+    } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/recording-uploads/upload-1/verify-file",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileManifestSha256: "e".repeat(64) }),
+      },
+      bindings(database, media),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "recording_upload_file_mismatch" });
+    expect(touchedR2).toBe(false);
+  });
+
+  it("does not checkpoint a part whose measured hash differs from its claim", async () => {
+    const session = {
+      id: "upload-1", songId: "song-1", requestFingerprint: "a".repeat(64),
+      fileManifestSha256: ABC_MANIFEST_SHA256,
+      filename: "take.mp3", byteSize: 3, partCount: 1,
+      objectKey: "recordings/original/upload-1", uploadId: "multipart-1",
+      status: "open", revision: 2, expiresAt: "2999-01-01T00:00:00.000Z", recordingId: null,
+    };
+    let checkpointed = false;
+    const database = {
+      prepare: (query: string) => {
+        const prepared = statement(query);
+        prepared.first = async () => session;
+        return prepared;
+      },
+      batch: async () => { checkpointed = true; return []; },
+    } as unknown as D1Database;
+    let stored = "";
+    const media = {
+      resumeMultipartUpload: () => ({
+        uploadPart: async (_partNumber: number, body: ReadableStream) => {
+          stored = await new Response(body).text();
+          return { partNumber: 1, etag: "untrusted-etag" };
+        },
+      }),
+    } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/recording-uploads/upload-1/parts/1",
+      {
+        method: "PUT",
+        headers: {
+          "Content-Length": "3",
+          "X-Upload-Part-Sha256": "0".repeat(64),
+          "X-Upload-File-Manifest": ABC_MANIFEST_SHA256,
+        },
+        body: "abc",
+      },
+      bindings(database, media),
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: "recording_upload_part_hash_mismatch" });
+    expect(stored).toBe("abc");
+    expect(checkpointed).toBe(false);
+  });
+
   it("rejects a wrong part length before touching R2", async () => {
     const session = {
       id: "upload-1", songId: "song-1", requestFingerprint: "a".repeat(64),
+      fileManifestSha256: ABC_MANIFEST_SHA256,
       filename: "take.mp3", byteSize: 3, partCount: 1,
       objectKey: "recordings/original/upload-1", uploadId: "multipart-1",
       status: "open", revision: 2, expiresAt: "2999-01-01T00:00:00.000Z", recordingId: null,
@@ -300,6 +404,7 @@ describe("Recording upload API", () => {
   it("leaves an R2-success/D1-failure part safely uncheckpointed for retry", async () => {
     const session = {
       id: "upload-1", songId: "song-1", requestFingerprint: "a".repeat(64),
+      fileManifestSha256: ABC_MANIFEST_SHA256,
       filename: "take.mp3", byteSize: 3, partCount: 1,
       objectKey: "recordings/original/upload-1", uploadId: "multipart-1",
       status: "open", revision: 2, expiresAt: "2999-01-01T00:00:00.000Z", recordingId: null,
@@ -323,7 +428,15 @@ describe("Recording upload API", () => {
     } as unknown as R2Bucket;
     const response = await app.request(
       "http://local.test/api/recording-uploads/upload-1/parts/1",
-      { method: "PUT", headers: { "Content-Length": "3" }, body: "abc" },
+      {
+        method: "PUT",
+        headers: {
+          "Content-Length": "3",
+          "X-Upload-Part-Sha256": ABC_SHA256,
+          "X-Upload-File-Manifest": ABC_MANIFEST_SHA256,
+        },
+        body: "abc",
+      },
       bindings(database, media),
     );
     expect(response.status).toBe(503);
@@ -336,12 +449,13 @@ describe("Recording upload API", () => {
   it("completes with only server-held ETags and stream-hashes the private object", async () => {
     let session = {
       id: "upload-1", songId: "song-1", requestFingerprint: "a".repeat(64),
+      fileManifestSha256: ABC_MANIFEST_SHA256,
       filename: "take.mp3", byteSize: 3, partCount: 1,
       objectKey: "recordings/original/upload-1", uploadId: "multipart-1",
       status: "open", revision: 3, expiresAt: "2000-01-01T00:00:00.000Z",
       sha256: null as string | null, duplicateMediaId: null, recordingId: null,
     };
-    const parts = [{ partNumber: 1, etag: "server-etag", byteSize: 3 }];
+    const parts = [{ partNumber: 1, etag: "server-etag", byteSize: 3, sha256: ABC_SHA256 }];
     const queries: string[] = [];
     const database = {
       prepare: (query: string) => {
@@ -414,13 +528,14 @@ describe("Recording upload API", () => {
   it("recovers a completed R2 object and stops a duplicate before Recording creation", async () => {
     let session = {
       id: "upload-1", songId: "song-1", requestFingerprint: "a".repeat(64),
+      fileManifestSha256: ABC_MANIFEST_SHA256,
       filename: "take.mp3", byteSize: 3, partCount: 1,
       objectKey: "recordings/original/upload-1", uploadId: "multipart-1",
       status: "completing", revision: 4, expiresAt: "2000-01-01T00:00:00.000Z",
       sha256: null as string | null, duplicateMediaId: null as string | null,
       recordingId: null,
     };
-    const parts = [{ partNumber: 1, etag: "server-etag", byteSize: 3 }];
+    const parts = [{ partNumber: 1, etag: "server-etag", byteSize: 3, sha256: ABC_SHA256 }];
     const duplicate = {
       mediaId: "existing-media", recordingId: "existing-recording",
       songId: "existing-song", recordingTrashedAt: null, recordingRevision: 2,
@@ -513,6 +628,7 @@ describe("Recording upload API", () => {
   it("reopens a checkpointed session when R2 completion fails without an object", async () => {
     let session = {
       id: "upload-1", songId: "song-1", requestFingerprint: "a".repeat(64),
+      fileManifestSha256: ABC_MANIFEST_SHA256,
       filename: "take.mp3", byteSize: 3, partCount: 1,
       objectKey: "recordings/original/upload-1", uploadId: "multipart-1",
       status: "open", revision: 3, expiresAt: "2999-01-01T00:00:00.000Z",
@@ -523,7 +639,7 @@ describe("Recording upload API", () => {
         const prepared = statement(query);
         prepared.first = async () => session;
         prepared.all = (async () => ({
-          results: [{ partNumber: 1, etag: "server-etag", byteSize: 3 }],
+          results: [{ partNumber: 1, etag: "server-etag", byteSize: 3, sha256: ABC_SHA256 }],
         })) as FakeStatement["all"];
         prepared.run = (async () => {
           if (query.includes("SET status = 'completing'")) {
@@ -567,6 +683,7 @@ describe("Recording upload API", () => {
   it("fails closed when the completed private object has the wrong size", async () => {
     let session = {
       id: "upload-1", songId: "song-1", requestFingerprint: "a".repeat(64),
+      fileManifestSha256: ABC_MANIFEST_SHA256,
       filename: "take.mp3", byteSize: 3, partCount: 1,
       objectKey: "recordings/original/upload-1", uploadId: "multipart-1",
       status: "completing", revision: 4, expiresAt: "2999-01-01T00:00:00.000Z",
@@ -577,7 +694,7 @@ describe("Recording upload API", () => {
         const prepared = statement(query);
         prepared.first = async () => session;
         prepared.all = (async () => ({
-          results: [{ partNumber: 1, etag: "server-etag", byteSize: 3 }],
+          results: [{ partNumber: 1, etag: "server-etag", byteSize: 3, sha256: ABC_SHA256 }],
         })) as FakeStatement["all"];
         prepared.run = (async () => {
           if (query.includes("SET status = 'failed'")) {
@@ -614,6 +731,7 @@ describe("Recording upload API", () => {
   it("rejects an expired upload before touching R2", async () => {
     const session = {
       id: "upload-1", songId: "song-1", requestFingerprint: "a".repeat(64),
+      fileManifestSha256: ABC_MANIFEST_SHA256,
       filename: "take.mp3", byteSize: 3, partCount: 1,
       objectKey: "recordings/original/upload-1", uploadId: "multipart-1",
       status: "open", revision: 2, expiresAt: "2000-01-01T00:00:00.000Z", recordingId: null,
@@ -641,6 +759,7 @@ describe("Recording upload API", () => {
   it("returns only resumable part numbers and aborts D1 before best-effort R2 cleanup", async () => {
     let session = {
       id: "upload-1", songId: "song-1", requestFingerprint: "a".repeat(64),
+      fileManifestSha256: "e".repeat(64),
       filename: "take.mp3", byteSize: 9_000_000, partCount: 2,
       objectKey: "recordings/original/upload-1", uploadId: "multipart-1",
       status: "open", revision: 4, expiresAt: "2999-01-01T00:00:00.000Z", recordingId: null,

@@ -8,6 +8,7 @@ export const RECORDING_UPLOAD_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
 const createUploadEnvelopeSchema = z.object({
   clientMutationId: z.uuid(),
+  fileManifestSha256: z.string().regex(/^[a-f0-9]{64}$/u),
   filename: z.string().max(1_000),
   mimeType: z.string().max(100).nullable().optional(),
   byteSize: z.number().int().positive().max(MAX_RECORDING_UPLOAD_BYTES),
@@ -30,6 +31,10 @@ const recordingUploadRevisionSchema = z.object({
   revision: z.number().int().positive(),
 }).strict();
 
+const recordingUploadFileIdentitySchema = z.object({
+  fileManifestSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict();
+
 const recordingUploadFinalizationSchema = z.object({
   revision: z.number().int().positive(),
   description: z.string()
@@ -50,6 +55,7 @@ const recordingUploadReplacementSchema = z.object({
 
 export type RecordingUploadCreateInput = {
   clientMutationId: string;
+  fileManifestSha256: string;
   filename: string;
   mimeTypeHint: string | null;
   byteSize: number;
@@ -110,6 +116,7 @@ export function parseRecordingUploadCreate(value: unknown): RecordingUploadParse
     success: true,
     data: {
       clientMutationId: envelope.data.clientMutationId,
+      fileManifestSha256: envelope.data.fileManifestSha256,
       filename: safeOriginalFilename(envelope.data.filename),
       mimeTypeHint: mimeTypeHint(envelope.data.mimeType),
       byteSize: shape.byteSize,
@@ -127,6 +134,13 @@ export function parseRecordingUploadCreate(value: unknown): RecordingUploadParse
 
 export function parseRecordingUploadRevision(value: unknown): RecordingUploadRevisionParseResult {
   const result = recordingUploadRevisionSchema.safeParse(value);
+  return result.success ? { success: true, data: result.data } : { success: false };
+}
+
+export function parseRecordingUploadFileIdentity(
+  value: unknown,
+): { success: true; data: { fileManifestSha256: string } } | { success: false } {
+  const result = recordingUploadFileIdentitySchema.safeParse(value);
   return result.success ? { success: true, data: result.data } : { success: false };
 }
 
@@ -216,7 +230,7 @@ export function expectedRecordingPartBytes(
 
 export function validateCompletedRecordingParts(
   byteSize: number,
-  parts: Array<{ partNumber: number; etag: string; byteSize: number }>,
+  parts: Array<{ partNumber: number; etag: string; byteSize: number; sha256?: string | null }>,
 ): boolean {
   const shape = recordingUploadShape(byteSize);
   if (!shape || parts.length !== shape.partCount) return false;
@@ -232,10 +246,40 @@ export function validateCompletedRecordingParts(
       || part.etag.length > 200
       || /[\r\n]/u.test(part.etag)
       || part.byteSize !== expectedRecordingPartBytes(byteSize, part.partNumber)
+      || typeof part.sha256 !== "string"
+      || !/^[a-f0-9]{64}$/u.test(part.sha256)
     ) return false;
     seen.add(part.partNumber);
   }
   return seen.size === shape.partCount;
+}
+
+export async function recordingUploadFileManifestSha256(
+  byteSize: number,
+  parts: Array<{ partNumber: number; byteSize: number; sha256: string }>,
+): Promise<string | null> {
+  const shape = recordingUploadShape(byteSize);
+  if (!shape || parts.length !== shape.partCount) return null;
+  const ordered = [...parts].sort((left, right) => left.partNumber - right.partNumber);
+  for (let index = 0; index < ordered.length; index += 1) {
+    const part = ordered[index];
+    if (
+      part.partNumber !== index + 1
+      || part.byteSize !== expectedRecordingPartBytes(byteSize, part.partNumber)
+      || !/^[a-f0-9]{64}$/u.test(part.sha256)
+    ) return null;
+  }
+  const canonical = [
+    "music-library-recording-upload-manifest-v1",
+    String(byteSize),
+    String(RECORDING_UPLOAD_PART_BYTES),
+    ...ordered.map((part) => `${part.partNumber}:${part.byteSize}:${part.sha256}`),
+  ].join("\n");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
+  return Array.from(
+    new Uint8Array(digest),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 export async function sha256RecordingStream(

@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { app } from "../worker/index";
 
-const migration = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+const migration = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
   .map((number) => readFileSync(
     resolve(`migrations/${String(number).padStart(4, "0")}_${[
       "initial",
@@ -25,6 +25,9 @@ const migration = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
       "scan_display_rotation",
       "media_parent_moves",
       "playback_duplicate_detection",
+      "scan_readability_duplicate_detection",
+      "india_recording_calendar",
+      "recording_upload_file_identity",
     ][number - 1]}.sql`),
     "utf8",
   ))
@@ -259,11 +262,12 @@ function seedStoredUploadSession(
   native.prepare(`
     INSERT INTO recording_upload_sessions (
       id, song_id, client_mutation_id, request_fingerprint,
+      file_manifest_sha256,
       description, recorded_on, original_filename, byte_size, part_size, part_count,
       object_key, status, revision, expires_at,
       created_at, created_by, updated_at, updated_by
     ) VALUES (
-      ?, 'song-1', 'replace-mutation-1', ?,
+      ?, 'song-1', 'replace-mutation-1', ?, ?,
       'First Recording', NULL, 'new.wav',
       ?, 8388608, 1,
       ?,
@@ -273,6 +277,7 @@ function seedStoredUploadSession(
   `).run(
     sessionId,
     "f".repeat(64),
+    "e".repeat(64),
     byteSize,
     `recordings/original/${sessionId}`,
     timestamp, actor, timestamp, actor,
@@ -309,6 +314,23 @@ async function replace(
 ) {
   return app.request(
     `http://local.test/api/songs/${songId}/recording-uploads/${sessionId}/replace`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    bindings(database),
+  );
+}
+
+async function reuseHistory(
+  database: D1Database,
+  songId: string,
+  sessionId: string,
+  body: Record<string, unknown>,
+) {
+  return app.request(
+    `http://local.test/api/songs/${songId}/recording-uploads/${sessionId}/reuse-history`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -443,6 +465,120 @@ describe("Recording upload /replace endpoint", () => {
       `).get()).toEqual({ processingState: "ready", revision: 1 });
       expect(native.prepare("SELECT COUNT(*) AS count FROM media_objects").get())
         .toEqual({ count: 2 });
+      expect(native.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      native.close();
+    }
+  });
+
+  it("restores a retained historical media pair instead of leaving an exact reupload inaccessible", async () => {
+    const { binding, native } = createD1();
+    try {
+      seedReadyRecordingWithSucceededJob(native);
+      native.exec(`
+        INSERT INTO recording_media_history (
+          id, recording_id, original_media_id, playback_media_id,
+          replaced_at, replaced_by, revision_at_replacement
+        ) VALUES (
+          'history-old', 'recording-1', 'original-media-1', 'derivative-media-1',
+          '${timestamp}', '${actor}', 1
+        );
+        INSERT INTO media_objects (
+          id, object_key, original_filename, byte_size, sha256, kind,
+          state, created_at, created_by
+        ) VALUES
+          ('original-media-current', 'recordings/original/current', 'current.wav', 7,
+           '${"8".repeat(64)}', 'original_audio', 'active', '${timestamp}', '${actor}'),
+          ('playback-media-current', 'recordings/playback/current', 'current.mp3', 4,
+           '${"9".repeat(64)}', 'playback_audio', 'active', '${timestamp}', '${actor}');
+        INSERT INTO audio_derivatives (
+          playback_media_id, source_media_id, policy_id,
+          source_sha256, source_byte_size, derivative_sha256, derivative_byte_size
+        ) VALUES (
+          'playback-media-current', 'original-media-current', 'mp3-v1-libmp3lame-q2',
+          '${"8".repeat(64)}', 7, '${"9".repeat(64)}', 4
+        );
+        UPDATE recordings
+        SET original_media_id = 'original-media-current',
+            playback_media_id = 'playback-media-current', revision = 2
+        WHERE id = 'recording-1';
+      `);
+      seedStoredUploadSession(native, {
+        sha256: "b".repeat(64),
+        byteSize: 3,
+        targetRevision: 2,
+      });
+
+      const duplicateResponse = await replace(
+        binding,
+        "song-1",
+        "upload-replace-1",
+        "recording-1",
+        {
+          targetRecordingId: "recording-1",
+          targetRecordingRevision: 2,
+          sessionRevision: 4,
+        },
+      );
+      expect(duplicateResponse.status).toBe(200);
+      await expect(duplicateResponse.json()).resolves.toMatchObject({
+        upload: {
+          status: "duplicate",
+          revision: 5,
+          duplicateRecording: {
+            id: "recording-1",
+            songId: "song-1",
+            isHistorical: true,
+          },
+        },
+      });
+
+      const restoreResponse = await reuseHistory(
+        binding,
+        "song-1",
+        "upload-replace-1",
+        {
+          targetRecordingId: "recording-1",
+          targetRecordingRevision: 2,
+          sessionRevision: 5,
+        },
+      );
+      expect(restoreResponse.status).toBe(200);
+      await expect(restoreResponse.json()).resolves.toEqual({
+        recording: { id: "recording-1", revision: 3, processingState: "ready" },
+        reusedHistoricalMedia: true,
+      });
+      expect(native.prepare(`
+        SELECT original_media_id AS originalMediaId,
+               playback_media_id AS playbackMediaId,
+               processing_state AS processingState, revision
+        FROM recordings WHERE id = 'recording-1'
+      `).get()).toEqual({
+        originalMediaId: "original-media-1",
+        playbackMediaId: "derivative-media-1",
+        processingState: "ready",
+        revision: 3,
+      });
+      expect(native.prepare(`
+        SELECT status, error_code AS errorCode, revision, duplicate_media_id AS duplicateMediaId
+        FROM recording_upload_sessions WHERE id = 'upload-replace-1'
+      `).get()).toEqual({
+        status: "failed",
+        errorCode: "user_discarded",
+        revision: 6,
+        duplicateMediaId: null,
+      });
+      expect(native.prepare(`
+        SELECT original_media_id AS originalMediaId, playback_media_id AS playbackMediaId
+        FROM recording_media_history
+        WHERE recording_id = 'recording-1' AND revision_at_replacement = 2
+      `).get()).toEqual({
+        originalMediaId: "original-media-current",
+        playbackMediaId: "playback-media-current",
+      });
+      expect(native.prepare(
+        "SELECT COUNT(*) AS count FROM audio_processing_jobs WHERE recording_id = 'recording-1'",
+      ).get()).toEqual({ count: 1 });
       expect(native.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     } finally {
       native.close();
