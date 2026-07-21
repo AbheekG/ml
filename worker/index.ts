@@ -1,9 +1,11 @@
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
-import { verifyWithJwks } from "hono/jwt";
+import { decode, verifyWithJwks } from "hono/jwt";
+import { loadAccessJwks } from "./access-jwks";
 import { loadOfflineLibrary } from "./offline-library";
 import {
   AUDIO_PROCESSING_LEASE_MS,
+  AUDIO_PROCESSING_CAPABILITY_HEADER,
   MAX_EXPIRED_AUDIO_PROCESSING_ATTEMPTS,
   MAX_AUDIO_DERIVATIVE_BYTES,
   MAX_AUDIO_PROCESSING_RESULT_BYTES,
@@ -1524,6 +1526,45 @@ export function parseByteRange(value: string, size: number): { offset: number; l
   return { offset, length: end - offset + 1 };
 }
 
+const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+export function browserMutationRequestError(
+  request: Request,
+  authMode: Bindings["AUTH_MODE"],
+): "cross_site_request_rejected" | "unsupported_media_type" | null {
+  if (!MUTATION_METHODS.has(request.method.toUpperCase())) return null;
+  const url = new URL(request.url);
+  if (url.pathname.startsWith("/api/processing/")) return null;
+
+  if (authMode === "access") {
+    if (request.headers.get("Origin") !== url.origin) return "cross_site_request_rejected";
+    const fetchSite = request.headers.get("Sec-Fetch-Site");
+    if (fetchSite && fetchSite !== "same-origin") return "cross_site_request_rejected";
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/logout") return null;
+  const mediaType = (request.headers.get("Content-Type") ?? "")
+    .split(";", 1)[0]!
+    .trim()
+    .toLowerCase();
+  if (
+    request.method === "PUT"
+    && /^\/api\/recording-uploads\/[^/]+\/parts\/[^/]+$/u.test(url.pathname)
+  ) {
+    return mediaType === "application/octet-stream" ? null : "unsupported_media_type";
+  }
+  if (
+    request.method === "POST"
+    && (
+      /^\/api\/songs\/[^/]+\/scans$/u.test(url.pathname)
+      || /^\/api\/songs\/[^/]+\/scans\/[^/]+\/media$/u.test(url.pathname)
+    )
+  ) {
+    return mediaType === "multipart/form-data" ? null : "unsupported_media_type";
+  }
+  return mediaType === "application/json" ? null : "unsupported_media_type";
+}
+
 export const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 app.use("/api/*", async (context, next) => {
@@ -1571,8 +1612,13 @@ app.use("/api/*", async (context, next) => {
 
   let verifiedIdentity: { email: string; subject: string };
   try {
+    const decoded = decode(token);
+    if (typeof decoded.header.kid !== "string" || decoded.header.kid.length === 0) {
+      return context.json({ error: "invalid_access_token" }, 401);
+    }
+    const keys = await loadAccessJwks(context.env.ACCESS_JWKS_URL, decoded.header.kid);
     const payload = await verifyWithJwks(token, {
-      jwks_uri: context.env.ACCESS_JWKS_URL,
+      keys,
       allowedAlgorithms: ["RS256"],
       verification: {
         aud: context.env.ACCESS_AUD,
@@ -1601,6 +1647,12 @@ app.use("/api/*", async (context, next) => {
     return context.json({ error: "authorization_unavailable" }, 503);
   }
 
+  await next();
+});
+
+app.use("/api/*", async (context, next) => {
+  const error = browserMutationRequestError(context.req.raw, context.env.AUTH_MODE);
+  if (error) return context.json({ error }, error === "unsupported_media_type" ? 415 : 403);
   await next();
 });
 
@@ -1776,27 +1828,31 @@ app.post("/api/processing/jobs/claim", async (context) => {
   context.header("Cache-Control", "private, no-store");
   context.header("Referrer-Policy", "no-referrer");
   return context.json({
-    schemaVersion: 1,
+    schemaVersion: 2,
     leaseExpiresAt,
     processingRequest: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       jobId: job.id,
       policyId: job.policyId,
       sourceSha256: job.sourceSha256,
       sourceByteSize: job.sourceByteSize,
       sourceDownloadUrl: buildAudioProcessingCapabilityUrl(
-        transferOrigin, job.id, "source", sourceCapability,
+        transferOrigin, job.id, "source",
       ),
+      sourceCapability,
       derivativeUploadUrl: buildAudioProcessingCapabilityUrl(
-        transferOrigin, job.id, "derivative", derivativeCapability,
+        transferOrigin, job.id, "derivative",
       ),
+      derivativeCapability,
     },
     resultUrl: buildAudioProcessingCapabilityUrl(
-      transferOrigin, job.id, "result", resultCapability,
+      transferOrigin, job.id, "result",
     ),
+    resultCapability,
     failureUrl: buildAudioProcessingCapabilityUrl(
-      transferOrigin, job.id, "failure", failureCapability,
+      transferOrigin, job.id, "failure",
     ),
+    failureCapability,
   });
 });
 
@@ -1804,7 +1860,7 @@ app.get("/api/processing/jobs/:jobId/source", async (context) => {
   const job = await loadAudioProcessingJob(context.env.DB, context.req.param("jobId"));
   const now = new Date().toISOString();
   if (!job || !await audioProcessingLeaseMatches(
-    job, context.req.query("token") ?? null, "source",
+    job, context.req.header(AUDIO_PROCESSING_CAPABILITY_HEADER) ?? null, "source",
     context.env.AUDIO_PROCESSOR_TOKEN, now,
   )) {
     return context.json({ error: "audio_processing_capability_invalid" }, 401);
@@ -1832,7 +1888,7 @@ app.put("/api/processing/jobs/:jobId/derivative", async (context) => {
   const job = await loadAudioProcessingJob(context.env.DB, context.req.param("jobId"));
   const now = new Date().toISOString();
   if (!job || !await audioProcessingLeaseMatches(
-    job, context.req.query("token") ?? null, "derivative",
+    job, context.req.header(AUDIO_PROCESSING_CAPABILITY_HEADER) ?? null, "derivative",
     context.env.AUDIO_PROCESSOR_TOKEN, now,
   )) {
     return context.json({ error: "audio_processing_capability_invalid" }, 401);
@@ -1934,10 +1990,10 @@ app.post("/api/processing/jobs/:jobId/result", async (context) => {
       ? context.json({ job: { id: job.id, status: job.status, playbackKind: job.playbackKind } })
       : context.json({ error: "audio_processing_result_conflict" }, 409);
   }
-  const leaseToken = context.req.query("token") ?? null;
+  const leaseToken = context.req.header(AUDIO_PROCESSING_CAPABILITY_HEADER) ?? null;
   const now = new Date().toISOString();
   if (!await audioProcessingLeaseMatches(
-    job, leaseToken, "result", context.env.AUDIO_PROCESSOR_TOKEN, now,
+      job, leaseToken, "result", context.env.AUDIO_PROCESSOR_TOKEN, now,
   ) || !job.leaseTokenHash) {
     return context.json({ error: "audio_processing_lease_stale" }, 409);
   }
@@ -2178,7 +2234,7 @@ app.post("/api/processing/jobs/:jobId/failure", async (context) => {
   const now = new Date().toISOString();
   if (
     !await audioProcessingLeaseMatches(
-      job, context.req.query("token") ?? null, "failure",
+      job, context.req.header(AUDIO_PROCESSING_CAPABILITY_HEADER) ?? null, "failure",
       context.env.AUDIO_PROCESSOR_TOKEN, now,
     )
     || !job.leaseTokenHash
@@ -6197,11 +6253,16 @@ app.get("/api/media/:mediaId", async (context) => {
       AND (
         EXISTS (
           SELECT 1 FROM scans
-          WHERE scans.media_id = media_objects.id AND scans.trashed_at IS NULL
+          JOIN songs ON songs.id = scans.song_id
+          WHERE scans.media_id = media_objects.id
+            AND scans.trashed_at IS NULL
+            AND songs.trashed_at IS NULL
         )
         OR EXISTS (
           SELECT 1 FROM recordings
+          JOIN songs ON songs.id = recordings.song_id
           WHERE recordings.trashed_at IS NULL
+            AND songs.trashed_at IS NULL
             AND recordings.processing_state = 'ready'
             AND (
               recordings.playback_media_id = media_objects.id

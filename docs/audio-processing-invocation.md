@@ -80,7 +80,9 @@ The responsibilities remain deliberately separate:
   redacted under the same strict configuration rules.
 - The Worker origin and identical transfer-origin allowlist are non-secret
   configuration. All actual media access still uses the existing short-lived,
-  operation-bound Worker capabilities.
+  operation-bound Worker capabilities. The clean same-origin operation URL and
+  capability are separate claim fields; the runtime sends the capability only
+  in `X-Music-Library-Capability`, never in a query string.
 - Deployment credentials remain owner/operator credentials and are not attached
   to the runtime or Scheduler identities.
 

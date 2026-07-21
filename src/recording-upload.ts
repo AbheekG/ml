@@ -507,6 +507,7 @@ async function reconcilePart(
       {
         method: "PUT",
         headers: {
+          "Content-Type": "application/octet-stream",
           "X-Upload-Part-Sha256": identity.partSha256[partNumber - 1] ?? "",
           "X-Upload-File-Manifest": identity.manifestSha256,
         },

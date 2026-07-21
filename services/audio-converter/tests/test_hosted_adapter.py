@@ -40,12 +40,14 @@ PROCESSOR_TOKEN = "processor-secret-with-at-least-32-characters"
 ACCESS_CLIENT_ID = "service-token-client-id.access"
 ACCESS_CLIENT_SECRET = "service-token-client-secret-with-at-least-32-characters"
 JOB_ID = "job_opaque-123"
-SOURCE_URL = f"{WORKER_ORIGIN}/api/processing/jobs/{JOB_ID}/source?token=source-capability"
-DERIVATIVE_URL = (
-    f"{WORKER_ORIGIN}/api/processing/jobs/{JOB_ID}/derivative?token=derivative-capability"
-)
-RESULT_URL = f"{WORKER_ORIGIN}/api/processing/jobs/{JOB_ID}/result?token=result-capability"
-FAILURE_URL = f"{WORKER_ORIGIN}/api/processing/jobs/{JOB_ID}/failure?token=failure-capability"
+SOURCE_URL = f"{WORKER_ORIGIN}/api/processing/jobs/{JOB_ID}/source"
+DERIVATIVE_URL = f"{WORKER_ORIGIN}/api/processing/jobs/{JOB_ID}/derivative"
+RESULT_URL = f"{WORKER_ORIGIN}/api/processing/jobs/{JOB_ID}/result"
+FAILURE_URL = f"{WORKER_ORIGIN}/api/processing/jobs/{JOB_ID}/failure"
+SOURCE_CAPABILITY = f"{'A' * 43}.{'a' * 64}"
+DERIVATIVE_CAPABILITY = f"{'A' * 43}.{'b' * 64}"
+RESULT_CAPABILITY = f"{'A' * 43}.{'c' * 64}"
+FAILURE_CAPABILITY = f"{'A' * 43}.{'d' * 64}"
 SOURCE = b"original"
 
 
@@ -187,13 +189,15 @@ def processing_request(
     **overrides: object,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "jobId": JOB_ID,
         "policyId": "mp3-v1-libmp3lame-q2",
         "sourceSha256": hashlib.sha256(source).hexdigest(),
         "sourceByteSize": len(source),
         "sourceDownloadUrl": SOURCE_URL,
+        "sourceCapability": SOURCE_CAPABILITY,
         "derivativeUploadUrl": DERIVATIVE_URL,
+        "derivativeCapability": DERIVATIVE_CAPABILITY,
     }
     payload.update(overrides)
     return payload
@@ -204,11 +208,13 @@ def claim_payload(
     **processing_overrides: object,
 ) -> dict[str, object]:
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "leaseExpiresAt": "2099-01-01T00:00:00.000Z",
         "processingRequest": processing_request(source, **processing_overrides),
         "resultUrl": RESULT_URL,
+        "resultCapability": RESULT_CAPABILITY,
         "failureUrl": FAILURE_URL,
+        "failureCapability": FAILURE_CAPABILITY,
     }
 
 
@@ -305,6 +311,10 @@ class HostedAdapterTests(unittest.TestCase):
             self.assertEqual(client.requests[0].headers["Authorization"], f"Bearer {PROCESSOR_TOKEN}")
             self.assertNotIn("Authorization", client.requests[1].headers)
             self.assertEqual(client.requests[2].headers["Authorization"], f"Bearer {PROCESSOR_TOKEN}")
+            self.assertEqual(client.requests[1].headers["X-Music-Library-Capability"], SOURCE_CAPABILITY)
+            self.assertEqual(client.requests[2].headers["X-Music-Library-Capability"], RESULT_CAPABILITY)
+            self.assertNotIn("token=", client.requests[1].url)
+            self.assertNotIn("token=", client.requests[2].url)
             for request in client.requests:
                 assert_access_headers(self, request)
             result = json.loads(client.requests[2].body or b"")
@@ -338,6 +348,7 @@ class HostedAdapterTests(unittest.TestCase):
             self.assertEqual(upload.headers["Content-Length"], str(len(b"verified-mp3")))
             self.assertEqual(upload.headers["Content-Type"], "audio/mpeg")
             self.assertNotIn("Authorization", upload.headers)
+            self.assertEqual(upload.headers["X-Music-Library-Capability"], DERIVATIVE_CAPABILITY)
             for request in client.requests:
                 assert_access_headers(self, request)
             result = json.loads(client.requests[3].body or b"")
@@ -442,7 +453,7 @@ class HostedAdapterTests(unittest.TestCase):
 
             untrusted_claim = claim_response(
                 sourceDownloadUrl=(
-                    f"{OTHER_ORIGIN}/api/processing/jobs/{JOB_ID}/source?token=capability"
+                    f"{OTHER_ORIGIN}/api/processing/jobs/{JOB_ID}/source"
                 )
             )
             client = FakeHttpClient([untrusted_claim])

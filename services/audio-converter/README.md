@@ -54,8 +54,9 @@ Do not put private filenames, titles, or personal information in tracked fixture
 
 `audio_converter.hosted_contract` defines the versioned boundary for the local
 provider-neutral HTTP adapter. The Worker supplies only an opaque job ID, the exact
-policy ID, the expected original hash/size, and short-lived job-scoped HTTPS
-transfer URLs. The converter result repeats the job/policy identity and contains
+policy ID, the expected original hash/size, short-lived job-scoped HTTPS
+transfer endpoints, and operation-bound capabilities carried separately from
+those URLs. The converter result repeats the job/policy identity and contains
 only verified media facts; it never echoes transfer URLs.
 
 `audio_converter.hosted_adapter.run_hosted_job_once()` implements one bounded
@@ -92,7 +93,10 @@ payload parsed here), `resultUrl`, `failureUrl`, and the lease expiry. The local
 adapter authenticates every request to the protected hostname with Cloudflare
 Access Service Auth headers, authenticates claim/result/failure separately with
 the Worker processor bearer token, and uses only the strict operation-scoped
-same-origin URLs. No command-line secret interface, HTTP server, cloud
+same-origin URLs. Version-2 operations carry their capability only in the
+`X-Music-Library-Capability` header, preventing bearer values from entering URL
+logs. The parser retains version-1 query-capability input solely for a safe
+converter-first rollout; the updated Worker emits version 2. No command-line secret interface, HTTP server, cloud
 credentials, scheduling, or deployment is included.
 The separately reviewable proposed run-once Job boundary and its required local
 safeguards are documented in

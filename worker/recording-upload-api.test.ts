@@ -277,6 +277,7 @@ describe("Recording upload API", () => {
         method: "PUT",
         headers: {
           "Content-Length": "3",
+          "Content-Type": "application/octet-stream",
           "X-Upload-Part-Sha256": ABC_SHA256,
           "X-Upload-File-Manifest": ABC_MANIFEST_SHA256,
         },
@@ -359,6 +360,7 @@ describe("Recording upload API", () => {
         method: "PUT",
         headers: {
           "Content-Length": "3",
+          "Content-Type": "application/octet-stream",
           "X-Upload-Part-Sha256": "0".repeat(64),
           "X-Upload-File-Manifest": ABC_MANIFEST_SHA256,
         },
@@ -394,7 +396,11 @@ describe("Recording upload API", () => {
     } as unknown as R2Bucket;
     const response = await app.request(
       "http://local.test/api/recording-uploads/upload-1/parts/1",
-      { method: "PUT", headers: { "Content-Length": "2" }, body: "ab" },
+      {
+        method: "PUT",
+        headers: { "Content-Length": "2", "Content-Type": "application/octet-stream" },
+        body: "ab",
+      },
       bindings(database, media),
     );
     expect(response.status).toBe(400);
@@ -432,6 +438,7 @@ describe("Recording upload API", () => {
         method: "PUT",
         headers: {
           "Content-Length": "3",
+          "Content-Type": "application/octet-stream",
           "X-Upload-Part-Sha256": ABC_SHA256,
           "X-Upload-File-Manifest": ABC_MANIFEST_SHA256,
         },
@@ -749,7 +756,11 @@ describe("Recording upload API", () => {
     } as unknown as R2Bucket;
     const response = await app.request(
       "http://local.test/api/recording-uploads/upload-1/parts/1",
-      { method: "PUT", headers: { "Content-Length": "3" }, body: "abc" },
+      {
+        method: "PUT",
+        headers: { "Content-Length": "3", "Content-Type": "application/octet-stream" },
+        body: "abc",
+      },
       bindings(database, media),
     );
     expect(response.status).toBe(410);
@@ -816,7 +827,7 @@ describe("Recording upload API", () => {
     const media = { createMultipartUpload: () => { touched = true; } } as unknown as R2Bucket;
     const response = await app.request(
       "http://local.test/api/songs/song-1/recording-uploads",
-      { method: "POST", body: "{}" },
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
       bindings(database, media, "viewer"),
     );
     expect(response.status).toBe(403);

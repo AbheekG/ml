@@ -39,12 +39,12 @@ describe("audio processing control-plane helpers", () => {
     expect(normalizeProcessorTransferOrigin("https://app.example.invalid/path")).toBeNull();
     expect(normalizeProcessorTransferOrigin("https://user@app.example.invalid")).toBeNull();
 
-    const source = buildAudioProcessingCapabilityUrl(origin!, "job-1", "source", "lease");
+    const source = buildAudioProcessingCapabilityUrl(origin!, "job-1", "source");
     const derivative = buildAudioProcessingCapabilityUrl(
-      origin!, "job-1", "derivative", "lease",
+      origin!, "job-1", "derivative",
     );
     expect(source).toBe(
-      "https://app.example.invalid/api/processing/jobs/job-1/source?token=lease",
+      "https://app.example.invalid/api/processing/jobs/job-1/source",
     );
     expect(derivative).not.toBe(source);
     expect(source).not.toContain("recordings/");

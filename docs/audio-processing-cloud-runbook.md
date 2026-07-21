@@ -48,7 +48,8 @@ Stop before cloud creation unless all of these are true:
    The hostname's Access application additionally requires a dedicated Service
    Auth token and policy. The processor must send the standard two Access
    headers on claim and every capability request while retaining its separate
-   Worker bearer header. Never substitute a persistent Bypass policy.
+   Worker bearer header. Version-2 claim capabilities must remain out of every
+   URL and travel only in `X-Music-Library-Capability`. Never substitute a persistent Bypass policy.
 5. The remote migration list and zero-job inventory match the expected state.
    Never use a staging catalog record as a disposable processing fixture.
 6. The Access application and every human Allow policy that can reach Recording

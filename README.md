@@ -150,7 +150,7 @@ with all three India-calendar validation triggers present; no migration is
 pending.
 Production resources and DNS/cutover remain separately approval-gated.
 
-Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker also validates Access JWT signatures, issuer, and audience on every API request. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.
+Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker validates Access JWT signatures, issuer, and audience on every API request using a bounded rotating-key cache, rechecks the active application role, and requires exact same-origin evidence plus the route's expected media type for browser mutations. Generic private-media reads require both an active child and active parent Song. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.
 
 ## Local development
 

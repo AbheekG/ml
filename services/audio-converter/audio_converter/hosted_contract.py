@@ -9,7 +9,9 @@ from .models import ProcessingPolicy
 from .service import PreparationResult
 
 
-HOSTED_CONTRACT_SCHEMA_VERSION = 1
+HOSTED_CONTRACT_SCHEMA_VERSION = 2
+SUPPORTED_HOSTED_CONTRACT_SCHEMA_VERSIONS = frozenset({1, 2})
+HOSTED_RESULT_SCHEMA_VERSION = 1
 FINAL_STATUSES = {
     "original_is_playback",
     "created_derivative",
@@ -26,20 +28,26 @@ class HostedContractError(ValueError):
 
 @dataclass(frozen=True)
 class HostedProcessingRequest:
+    schema_version: int
     job_id: str
     policy_id: str
     source_sha256: str
     source_byte_size: int
     source_download_url: str = dataclass_field(repr=False)
     derivative_upload_url: str = dataclass_field(repr=False)
+    source_capability: str | None = dataclass_field(default=None, repr=False)
+    derivative_capability: str | None = dataclass_field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
 class HostedJobClaim:
+    schema_version: int
     lease_expires_at: datetime
     processing_request: HostedProcessingRequest
     result_url: str = dataclass_field(repr=False)
     failure_url: str = dataclass_field(repr=False)
+    result_capability: str | None = dataclass_field(default=None, repr=False)
+    failure_capability: str | None = dataclass_field(default=None, repr=False)
 
 
 def _required_string(payload: Mapping[str, object], key: str) -> str:
@@ -57,6 +65,21 @@ def _sha256(value: object) -> str:
         or any(character not in "0123456789abcdef" for character in value)
     ):
         raise HostedContractError("invalid_source_sha256")
+    return value
+
+
+def _capability(value: object, field: str) -> str:
+    if not isinstance(value, str) or len(value) != 108:
+        raise HostedContractError(f"invalid_{field}")
+    lease, separator, signature = value.partition(".")
+    if (
+        separator != "."
+        or len(lease) != 43
+        or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for character in lease)
+        or len(signature) != 64
+        or any(character not in "0123456789abcdef" for character in signature)
+    ):
+        raise HostedContractError(f"invalid_{field}")
     return value
 
 
@@ -119,6 +142,9 @@ def parse_hosted_processing_request(
         raise HostedContractError("transfer_origin_allowlist_required")
     if not isinstance(payload, dict):
         raise HostedContractError("invalid_processing_request")
+    schema_version = payload.get("schemaVersion")
+    if schema_version not in SUPPORTED_HOSTED_CONTRACT_SCHEMA_VERSIONS:
+        raise HostedContractError("unsupported_processing_schema")
     allowed_keys = {
         "schemaVersion",
         "jobId",
@@ -128,10 +154,10 @@ def parse_hosted_processing_request(
         "sourceDownloadUrl",
         "derivativeUploadUrl",
     }
+    if schema_version == 2:
+        allowed_keys.update({"sourceCapability", "derivativeCapability"})
     if set(payload) != allowed_keys:
         raise HostedContractError("invalid_processing_request_fields")
-    if payload.get("schemaVersion") != HOSTED_CONTRACT_SCHEMA_VERSION:
-        raise HostedContractError("unsupported_processing_schema")
     job_id = _required_string(payload, "jobId")
     if len(job_id) > 100 or any(
         character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
@@ -158,13 +184,27 @@ def parse_hosted_processing_request(
         derivative_upload_url
     ):
         raise HostedContractError("processing_transfer_urls_must_differ")
+    source_capability = None
+    derivative_capability = None
+    if schema_version == 2:
+        if urlparse(source_download_url).query or urlparse(derivative_upload_url).query:
+            raise HostedContractError("processing_transfer_url_query_rejected")
+        source_capability = _capability(payload.get("sourceCapability"), "source_capability")
+        derivative_capability = _capability(
+            payload.get("derivativeCapability"), "derivative_capability"
+        )
+        if source_capability == derivative_capability:
+            raise HostedContractError("processing_capabilities_must_differ")
     return HostedProcessingRequest(
+        schema_version=schema_version,
         job_id=job_id,
         policy_id=policy_id,
         source_sha256=_sha256(payload.get("sourceSha256")),
         source_byte_size=source_byte_size,
         source_download_url=source_download_url,
         derivative_upload_url=derivative_upload_url,
+        source_capability=source_capability,
+        derivative_capability=derivative_capability,
     )
 
 
@@ -179,6 +219,9 @@ def parse_hosted_job_claim(
         raise HostedContractError("transfer_origin_allowlist_required")
     if not isinstance(payload, dict):
         raise HostedContractError("invalid_job_claim")
+    schema_version = payload.get("schemaVersion")
+    if schema_version not in SUPPORTED_HOSTED_CONTRACT_SCHEMA_VERSIONS:
+        raise HostedContractError("unsupported_job_claim_schema")
     allowed_keys = {
         "schemaVersion",
         "leaseExpiresAt",
@@ -186,16 +229,18 @@ def parse_hosted_job_claim(
         "resultUrl",
         "failureUrl",
     }
+    if schema_version == 2:
+        allowed_keys.update({"resultCapability", "failureCapability"})
     if set(payload) != allowed_keys:
         raise HostedContractError("invalid_job_claim_fields")
-    if payload.get("schemaVersion") != HOSTED_CONTRACT_SCHEMA_VERSION:
-        raise HostedContractError("unsupported_job_claim_schema")
 
     processing_request = parse_hosted_processing_request(
         payload.get("processingRequest"),
         allowed_transfer_origins=allowed_transfer_origins,
         policy=policy,
     )
+    if processing_request.schema_version != schema_version:
+        raise HostedContractError("job_claim_schema_mismatch")
     result_url = _job_scoped_https_url(
         payload.get("resultUrl"),
         "result_url",
@@ -212,6 +257,22 @@ def parse_hosted_job_claim(
     ):
         raise HostedContractError("unexpected_callback_origin")
 
+    result_capability = None
+    failure_capability = None
+    if schema_version == 2:
+        if urlparse(result_url).query or urlparse(failure_url).query:
+            raise HostedContractError("callback_url_query_rejected")
+        result_capability = _capability(payload.get("resultCapability"), "result_capability")
+        failure_capability = _capability(payload.get("failureCapability"), "failure_capability")
+        capabilities = {
+            processing_request.source_capability,
+            processing_request.derivative_capability,
+            result_capability,
+            failure_capability,
+        }
+        if len(capabilities) != 4:
+            raise HostedContractError("job_claim_capabilities_must_differ")
+
     resource_identities = {
         _transfer_resource_identity(processing_request.source_download_url),
         _transfer_resource_identity(processing_request.derivative_upload_url),
@@ -222,10 +283,13 @@ def parse_hosted_job_claim(
         raise HostedContractError("job_claim_urls_must_differ")
 
     return HostedJobClaim(
+        schema_version=schema_version,
         lease_expires_at=_lease_expiration(payload.get("leaseExpiresAt")),
         processing_request=processing_request,
         result_url=result_url,
         failure_url=failure_url,
+        result_capability=result_capability,
+        failure_capability=failure_capability,
     )
 
 
@@ -263,7 +327,7 @@ def build_hosted_processing_result(
         raise HostedContractError("unexpected_processing_validation")
 
     return {
-        "schemaVersion": HOSTED_CONTRACT_SCHEMA_VERSION,
+        "schemaVersion": HOSTED_RESULT_SCHEMA_VERSION,
         "jobId": request.job_id,
         "policyId": request.policy_id,
         "status": preparation.status,

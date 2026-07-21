@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   app,
+  browserMutationRequestError,
   parseByteRange,
   processOnePendingScan,
   resolveActiveAppUser,
@@ -46,6 +47,57 @@ describe("parseByteRange", () => {
     expect(parseByteRange("bytes=100-101", 100)).toBeNull();
     expect(parseByteRange("bytes=20-10", 100)).toBeNull();
     expect(parseByteRange("bytes=0-1,5-6", 100)).toBeNull();
+  });
+});
+
+describe("browser mutation boundary", () => {
+  it("requires exact same-origin browser evidence in Access mode", () => {
+    const request = (origin?: string, fetchSite?: string) => new Request(
+      "https://app.example.test/api/songs",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(origin ? { Origin: origin } : {}),
+          ...(fetchSite ? { "Sec-Fetch-Site": fetchSite } : {}),
+        },
+        body: "{}",
+      },
+    );
+    expect(browserMutationRequestError(request(), "access"))
+      .toBe("cross_site_request_rejected");
+    expect(browserMutationRequestError(
+      request("https://attacker.example", "cross-site"), "access",
+    )).toBe("cross_site_request_rejected");
+    expect(browserMutationRequestError(
+      request("https://app.example.test", "cross-site"), "access",
+    )).toBe("cross_site_request_rejected");
+    expect(browserMutationRequestError(
+      request("https://app.example.test", "same-origin"), "access",
+    )).toBeNull();
+  });
+
+  it("accepts only the body media type assigned to each mutation route", () => {
+    expect(browserMutationRequestError(new Request(
+      "http://local.test/api/songs",
+      { method: "POST", headers: { "Content-Type": "text/plain" }, body: "{}" },
+    ), "local")).toBe("unsupported_media_type");
+    expect(browserMutationRequestError(new Request(
+      "http://local.test/api/songs/song-1/scans",
+      { method: "POST", body: new FormData() },
+    ), "local")).toBeNull();
+    expect(browserMutationRequestError(new Request(
+      "http://local.test/api/recording-uploads/upload-1/parts/1",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: new Uint8Array([1]),
+      },
+    ), "local")).toBeNull();
+    expect(browserMutationRequestError(new Request(
+      "https://app.example.test/api/processing/jobs/claim",
+      { method: "POST" },
+    ), "access")).toBeNull();
   });
 });
 
@@ -1821,13 +1873,17 @@ describe("Worker API", () => {
   });
 
   it("returns valid partial-content headers for audio seeking", async () => {
+    let mediaQuery = "";
     const database = {
-      prepare: () => ({ bind: () => ({ first: async () => ({
-        id: "media-1",
-        objectKey: "recordings/example.mp3",
-        filename: "example.mp3",
-        mimeType: "audio/mpeg",
-      }) }) }),
+      prepare: (query: string) => {
+        mediaQuery = query;
+        return { bind: () => ({ first: async () => ({
+          id: "media-1",
+          objectKey: "recordings/example.mp3",
+          filename: "example.mp3",
+          mimeType: "audio/mpeg",
+        }) }) };
+      },
     } as unknown as D1Database;
     const media = {
       get: async () => ({
@@ -1849,6 +1905,9 @@ describe("Worker API", () => {
     expect(response.headers.get("content-range")).toBe("bytes 0-1023/5000");
     expect(response.headers.get("content-length")).toBe("1024");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(mediaQuery.match(/JOIN songs ON songs\.id = (?:scans|recordings)\.song_id/gu))
+      .toHaveLength(2);
+    expect(mediaQuery.match(/songs\.trashed_at IS NULL/gu)).toHaveLength(2);
   });
 
   it("rejects API requests that bypass Access without a signed assertion", async () => {

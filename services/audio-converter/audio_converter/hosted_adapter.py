@@ -46,6 +46,7 @@ MINIMUM_LEASE_REMAINING_SECONDS = 55 * 60
 SAFE_FAILURE_CODE = re.compile(r"^[a-z][a-z0-9_]{0,99}$")
 _RETRYABLE_HTTP_STATUSES = {408, 425, 429}
 _TRANSFER_CHUNK_BYTES = 1024 * 1024
+_CAPABILITY_HEADER = "X-Music-Library-Capability"
 
 
 class HostedAdapterError(RuntimeError):
@@ -418,6 +419,10 @@ def _access_headers(config: HostedAdapterConfig) -> dict[str, str]:
     }
 
 
+def _capability_headers(capability: str | None) -> dict[str, str]:
+    return {_CAPABILITY_HEADER: capability} if capability is not None else {}
+
+
 def _header(headers: Mapping[str, str], name: str) -> str | None:
     expected = name.casefold()
     for key, value in headers.items():
@@ -554,12 +559,12 @@ def _validate_worker_capability_routes(claim: HostedJobClaim) -> None:
             )
         except ValueError:
             raise HostedAdapterError("invalid_job_capability_route") from None
-        if (
-            parsed.path != expected_path
-            or len(query) != 1
-            or query[0][0] != "token"
-            or not query[0][1]
-        ):
+        if parsed.path != expected_path:
+            raise HostedAdapterError("invalid_job_capability_route")
+        if claim.schema_version == 1:
+            if len(query) != 1 or query[0][0] != "token" or not query[0][1]:
+                raise HostedAdapterError("invalid_job_capability_route")
+        elif query:
             raise HostedAdapterError("invalid_job_capability_route")
 
 
@@ -591,6 +596,7 @@ def _download_source(
             claim.processing_request.source_download_url,
             headers={
                 **_access_headers(config),
+                **_capability_headers(claim.processing_request.source_capability),
                 "Accept": "application/octet-stream",
                 "Accept-Encoding": "identity",
                 "Cache-Control": "no-store",
@@ -698,6 +704,7 @@ def _upload_derivative(
 
     headers = {
         **_access_headers(config),
+        **_capability_headers(claim.processing_request.derivative_capability),
         "Accept": "application/json",
         "Accept-Encoding": "identity",
         "Cache-Control": "no-store",
@@ -826,6 +833,7 @@ def _deliver_callback(
     client: HttpClient,
     *,
     url: str,
+    capability: str | None,
     body: bytes,
     operation: str,
     include_conflict: bool,
@@ -834,6 +842,7 @@ def _deliver_callback(
 ) -> None:
     headers = {
         **_access_headers(config),
+        **_capability_headers(capability),
         "Accept": "application/json",
         "Accept-Encoding": "identity",
         "Authorization": f"Bearer {config.processor_token}",
@@ -924,6 +933,7 @@ def _report_failure(
         config,
         client,
         url=claim.failure_url,
+        capability=claim.failure_capability,
         body=body,
         operation="failure",
         include_conflict=False,
@@ -1007,6 +1017,7 @@ def run_hosted_job_once(
         config,
         http_client,
         url=claim.result_url,
+        capability=claim.result_capability,
         body=callback.body,
         operation="result",
         include_conflict=True,

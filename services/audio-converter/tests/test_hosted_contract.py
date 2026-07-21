@@ -15,27 +15,35 @@ from audio_converter.service import FileSummary, PreparationResult
 SOURCE_HASH = "a" * 64
 DERIVATIVE_HASH = "b" * 64
 TRANSFER_ORIGINS = frozenset({"https://transfer.invalid"})
+SOURCE_CAPABILITY = f"{'A' * 43}.{'a' * 64}"
+DERIVATIVE_CAPABILITY = f"{'A' * 43}.{'b' * 64}"
+RESULT_CAPABILITY = f"{'A' * 43}.{'c' * 64}"
+FAILURE_CAPABILITY = f"{'A' * 43}.{'d' * 64}"
 
 
 def request_payload() -> dict[str, object]:
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "jobId": "job_opaque-123",
         "policyId": "mp3-v1-libmp3lame-q2",
         "sourceSha256": SOURCE_HASH,
         "sourceByteSize": 100,
-        "sourceDownloadUrl": "https://transfer.invalid/source?token=short-lived",
-        "derivativeUploadUrl": "https://transfer.invalid/derivative?token=short-lived",
+        "sourceDownloadUrl": "https://transfer.invalid/source",
+        "sourceCapability": SOURCE_CAPABILITY,
+        "derivativeUploadUrl": "https://transfer.invalid/derivative",
+        "derivativeCapability": DERIVATIVE_CAPABILITY,
     }
 
 
 def claim_payload() -> dict[str, object]:
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "leaseExpiresAt": "2099-01-01T00:00:00.000Z",
         "processingRequest": request_payload(),
-        "resultUrl": "https://transfer.invalid/result?token=short-lived",
-        "failureUrl": "https://transfer.invalid/failure?token=short-lived",
+        "resultUrl": "https://transfer.invalid/result",
+        "resultCapability": RESULT_CAPABILITY,
+        "failureUrl": "https://transfer.invalid/failure",
+        "failureCapability": FAILURE_CAPABILITY,
     }
 
 
@@ -62,7 +70,7 @@ class HostedContractTests(unittest.TestCase):
         self.assertEqual(parsed.job_id, "job_opaque-123")
         self.assertEqual(parsed.source_sha256, SOURCE_HASH)
         self.assertEqual(parsed.source_byte_size, 100)
-        self.assertNotIn("short-lived", repr(parsed))
+        self.assertNotIn(SOURCE_CAPABILITY, repr(parsed))
 
     def test_parses_strict_claim_without_exposing_capabilities(self) -> None:
         claim = parse_hosted_job_claim(
@@ -73,11 +81,34 @@ class HostedContractTests(unittest.TestCase):
 
         self.assertEqual(claim.processing_request.job_id, "job_opaque-123")
         self.assertEqual(claim.lease_expires_at.year, 2099)
-        self.assertNotIn("short-lived", repr(claim))
+        self.assertNotIn(RESULT_CAPABILITY, repr(claim))
+
+    def test_parses_legacy_query_capabilities_for_safe_converter_first_rollout(self) -> None:
+        request = request_payload()
+        request["schemaVersion"] = 1
+        request["sourceDownloadUrl"] = "https://transfer.invalid/source?token=legacy"
+        request["derivativeUploadUrl"] = "https://transfer.invalid/derivative?token=legacy"
+        request.pop("sourceCapability")
+        request.pop("derivativeCapability")
+        payload = claim_payload()
+        payload["schemaVersion"] = 1
+        payload["processingRequest"] = request
+        payload["resultUrl"] = "https://transfer.invalid/result?token=legacy"
+        payload["failureUrl"] = "https://transfer.invalid/failure?token=legacy"
+        payload.pop("resultCapability")
+        payload.pop("failureCapability")
+
+        parsed = parse_hosted_job_claim(
+            payload,
+            allowed_transfer_origins=TRANSFER_ORIGINS,
+            expected_callback_origin="https://transfer.invalid",
+        )
+        self.assertEqual(parsed.schema_version, 1)
+        self.assertIsNone(parsed.processing_request.source_capability)
 
     def test_rejects_invalid_claim_callback_and_overlapping_resource(self) -> None:
         unexpected_origin = claim_payload()
-        unexpected_origin["resultUrl"] = "https://other.invalid/result?token=x"
+        unexpected_origin["resultUrl"] = "https://other.invalid/result"
         with self.assertRaisesRegex(HostedContractError, "unexpected_callback_origin"):
             parse_hosted_job_claim(
                 unexpected_origin,
@@ -88,7 +119,7 @@ class HostedContractTests(unittest.TestCase):
             )
 
         overlapping = claim_payload()
-        overlapping["failureUrl"] = "https://transfer.invalid/result?token=other"
+        overlapping["failureUrl"] = "https://transfer.invalid/result"
         with self.assertRaisesRegex(HostedContractError, "job_claim_urls_must_differ"):
             parse_hosted_job_claim(
                 overlapping,
@@ -121,10 +152,19 @@ class HostedContractTests(unittest.TestCase):
         with self.assertRaisesRegex(HostedContractError, "untrusted_source_download_url"):
             parse_hosted_processing_request(untrusted, allowed_transfer_origins=TRANSFER_ORIGINS)
 
-        same_resource = request_payload()
-        same_resource["derivativeUploadUrl"] = (
-            "https://transfer.invalid/source?token=different-capability"
+        query_capability = request_payload()
+        query_capability["sourceDownloadUrl"] = (
+            "https://transfer.invalid/source?token=must-not-be-logged"
         )
+        with self.assertRaisesRegex(
+            HostedContractError, "processing_transfer_url_query_rejected"
+        ):
+            parse_hosted_processing_request(
+                query_capability, allowed_transfer_origins=TRANSFER_ORIGINS
+            )
+
+        same_resource = request_payload()
+        same_resource["derivativeUploadUrl"] = "https://transfer.invalid/source"
         with self.assertRaisesRegex(
             HostedContractError, "processing_transfer_urls_must_differ"
         ):

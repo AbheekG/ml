@@ -67,8 +67,8 @@ The conversion core is a small Python module that invokes FFmpeg without contain
 
 The hosted boundary is schema-versioned and binds each request to an opaque job,
 the exact conversion-policy ID, and the expected original SHA-256/byte size. Only
-short-lived job-scoped HTTPS download/upload capabilities cross the boundary; they
-must not be logged or returned in the result. The service returns verified media
+short-lived job-scoped HTTPS download/upload endpoints and separate capability
+headers cross the boundary; neither must be logged or returned in the result. The service returns verified media
 facts from the same `prepare()` core, while the Worker independently verifies
 stored bytes before it changes Recording or playback state. A stale policy,
 changed source, unverified derivative, or non-final processing result is rejected.
@@ -93,11 +93,13 @@ opaque job/attempt/operation-scoped capability. The public application origin is
 an explicit HTTPS-only `AUDIO_PROCESSOR_TRANSFER_ORIGIN`. Neither value belongs
 in `wrangler.jsonc`, tracked logs, browser state, or result bodies.
 
-A successful claim returns the already-approved hosted request nested with a
-result URL and failure URL. The four URL tokens contain the random lease plus an
-HMAC over job, attempt, and operation. D1 stores only the lease hash. The source
-and derivative resources therefore differ both by path and cryptographic scope;
-editing one path cannot grant another operation. A claim response contains no
+A successful version-2 claim returns the already-approved hosted request nested
+with clean result/failure URLs and four separate capability values. Each
+capability contains the random lease plus an HMAC over job, attempt, and
+operation; the converter sends it only in `X-Music-Library-Capability`. D1 stores
+only the lease hash. The source and derivative resources therefore differ both
+by path and cryptographic scope; editing one path cannot grant another operation,
+and routine URL/access logs never receive bearer material. A claim response contains no
 filename, object key, Song/Recording/media ID, or long-lived processor secret.
 
 Derivative upload is streaming, bounded to the original upload ceiling, and
@@ -111,7 +113,10 @@ one D1 batch whose final job guard rolls every catalog change back unless the
 Recording, playback media, and provenance graph is complete. A response lost
 after commit is reconciled from the succeeded job and returns idempotently.
 
-The processor adapter remains independent of the scale-to-zero Job invocation
+The processor adapter accepts the former version-1 query-capability claim only
+to permit a converter-first rollout, while version 2 rejects query parameters
+and keeps every operation token in the dedicated header. The Worker emits and
+accepts only version 2 after cutover. The processor adapter remains independent of the scale-to-zero Job invocation
 transport. It never retries claim, so one invocation cannot strand one
 lease and then claim a second job after an ambiguous response. Source and
 derivative transfers plus result/failure callbacks reject redirects; exact

@@ -301,16 +301,22 @@ function seedPendingJob(
 }
 
 type Claim = {
+  schemaVersion: 2;
   leaseExpiresAt: string;
   processingRequest: {
+    schemaVersion: 2;
     jobId: string;
     sourceSha256: string;
     sourceByteSize: number;
     sourceDownloadUrl: string;
+    sourceCapability: string;
     derivativeUploadUrl: string;
+    derivativeCapability: string;
   };
   resultUrl: string;
+  resultCapability: string;
   failureUrl: string;
+  failureCapability: string;
 };
 
 async function claim(bindings: ReturnType<typeof processorBindings>): Promise<Claim> {
@@ -372,6 +378,7 @@ function hostedResult(
 
 async function submitResult(
   url: string,
+  capability: string,
   result: Record<string, unknown>,
   bindings: ReturnType<typeof processorBindings>,
 ): Promise<Response> {
@@ -380,6 +387,7 @@ async function submitResult(
     method: "POST",
     headers: {
       Authorization: `Bearer ${processorToken}`,
+      "X-Music-Library-Capability": capability,
       "Content-Type": "application/json",
       "Content-Length": String(new TextEncoder().encode(body).byteLength),
     },
@@ -422,6 +430,10 @@ describe("audio processing Worker control plane", () => {
       });
       expect(claimed.processingRequest.sourceDownloadUrl)
         .not.toBe(claimed.processingRequest.derivativeUploadUrl);
+      expect(new URL(claimed.processingRequest.sourceDownloadUrl).search).toBe("");
+      expect(new URL(claimed.processingRequest.derivativeUploadUrl).search).toBe("");
+      expect(new URL(claimed.resultUrl).search).toBe("");
+      expect(new URL(claimed.failureUrl).search).toBe("");
       const serialized = JSON.stringify(claimed);
       expect(serialized).not.toContain("source.bin");
       expect(serialized).not.toContain("source-media");
@@ -430,18 +442,30 @@ describe("audio processing Worker control plane", () => {
       expect(serialized).not.toContain(processorToken);
 
       const sourceResponse = await app.request(
-        claimed.processingRequest.sourceDownloadUrl, undefined, bindings,
+        claimed.processingRequest.sourceDownloadUrl, {
+          headers: {
+            "X-Music-Library-Capability": claimed.processingRequest.sourceCapability,
+          },
+        }, bindings,
       );
       expect(sourceResponse.status).toBe(200);
       expect(sourceResponse.headers.get("Content-Disposition")).toBeNull();
       expect(sourceResponse.headers.get("Location")).toBeNull();
       expect(sourceResponse.headers.get("Cache-Control")).toBe("private, no-store");
       expect(new Uint8Array(await sourceResponse.arrayBuffer())).toEqual(source);
+      const queryOnlyCapability = new URL(claimed.processingRequest.sourceDownloadUrl);
+      queryOnlyCapability.searchParams.set(
+        "token", claimed.processingRequest.sourceCapability,
+      );
+      expect((await app.request(queryOnlyCapability, undefined, bindings)).status).toBe(401);
       const pathSwappedCapability = new URL(claimed.processingRequest.sourceDownloadUrl);
       pathSwappedCapability.pathname = pathSwappedCapability.pathname.replace("/source", "/derivative");
       const swapped = await app.request(pathSwappedCapability, {
         method: "PUT",
-        headers: { "Content-Length": "1" },
+        headers: {
+          "Content-Length": "1",
+          "X-Music-Library-Capability": claimed.processingRequest.sourceCapability,
+        },
         body: new Uint8Array([1]),
       }, bindings);
       expect(swapped.status).toBe(401);
@@ -451,8 +475,7 @@ describe("audio processing Worker control plane", () => {
                lease_token_hash AS leaseTokenHash, lease_expires_at AS leaseExpiresAt
         FROM audio_processing_jobs WHERE id = 'job-1'
       `).get() as Record<string, unknown>;
-      const capabilityToken = new URL(claimed.processingRequest.sourceDownloadUrl)
-        .searchParams.get("token")!;
+      const capabilityToken = claimed.processingRequest.sourceCapability;
       const leaseToken = capabilityToken.split(".")[0];
       expect(storedLease).toMatchObject({ status: "running", attemptCount: 1 });
       expect(storedLease.leaseTokenHash).toBe(sha256(new TextEncoder().encode(leaseToken)));
@@ -481,25 +504,35 @@ describe("audio processing Worker control plane", () => {
       const claimed = await claim(bindings);
 
       const result = hostedResult(source, derivative);
-      const beforeUpload = await submitResult(claimed.resultUrl, result, bindings);
+      const beforeUpload = await submitResult(
+        claimed.resultUrl, claimed.resultCapability, result, bindings,
+      );
       expect(beforeUpload.status).toBe(409);
       expect(native.prepare("SELECT status FROM audio_processing_jobs").get())
         .toEqual({ status: "running" });
 
       const upload = await app.request(claimed.processingRequest.derivativeUploadUrl, {
         method: "PUT",
-        headers: { "Content-Length": String(derivative.byteLength) },
+        headers: {
+          "Content-Length": String(derivative.byteLength),
+          "X-Music-Library-Capability": claimed.processingRequest.derivativeCapability,
+        },
         body: derivative,
       }, bindings);
       expect(upload.status).toBe(201);
       const overwrite = await app.request(claimed.processingRequest.derivativeUploadUrl, {
         method: "PUT",
-        headers: { "Content-Length": "4" },
+        headers: {
+          "Content-Length": "4",
+          "X-Music-Library-Capability": claimed.processingRequest.derivativeCapability,
+        },
         body: new Uint8Array([1, 2, 3, 4]),
       }, bindings);
       expect(overwrite.status).toBe(204);
 
-      const finalized = await submitResult(claimed.resultUrl, result, bindings);
+      const finalized = await submitResult(
+        claimed.resultUrl, claimed.resultCapability, result, bindings,
+      );
       expect(finalized.status).toBe(200);
       await expect(finalized.json()).resolves.toMatchObject({
         job: { id: "job-1", status: "succeeded", playbackKind: "derivative" },
@@ -536,7 +569,9 @@ describe("audio processing Worker control plane", () => {
       });
       expect(native.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
 
-      const lostResponseRetry = await submitResult(claimed.resultUrl, result, bindings);
+      const lostResponseRetry = await submitResult(
+        claimed.resultUrl, claimed.resultCapability, result, bindings,
+      );
       expect(lostResponseRetry.status).toBe(200);
       expect(native.prepare("SELECT COUNT(*) AS count FROM audio_derivatives").get())
         .toEqual({ count: 1 });
@@ -564,7 +599,9 @@ describe("audio processing Worker control plane", () => {
       seedPendingJob(native, media, source);
       const bindings = processorBindings(binding, media);
       const claimed = await claim(bindings);
-      const finalized = await submitResult(claimed.resultUrl, hostedResult(source, null), bindings);
+      const finalized = await submitResult(
+        claimed.resultUrl, claimed.resultCapability, hostedResult(source, null), bindings,
+      );
       expect(finalized.status).toBe(200);
       expect(native.prepare(`
         SELECT
@@ -599,15 +636,16 @@ describe("audio processing Worker control plane", () => {
       seedPendingJob(native, media, source);
       const processor = processorBindings(binding, media);
       const first = await claim(processor);
-      const wrongCapability = new URL(first.processingRequest.sourceDownloadUrl);
-      wrongCapability.searchParams.set("token", "wrong-token");
-      expect((await app.request(wrongCapability, undefined, processor)).status).toBe(401);
+      expect((await app.request(first.processingRequest.sourceDownloadUrl, {
+        headers: { "X-Music-Library-Capability": "wrong-token" },
+      }, processor)).status).toBe(401);
 
       const failureBody = JSON.stringify({ errorCode: "source_decode_failed" });
       const failed = await app.request(first.failureUrl, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${processorToken}`,
+          "X-Music-Library-Capability": first.failureCapability,
           "Content-Type": "application/json",
           "Content-Length": String(new TextEncoder().encode(failureBody).byteLength),
         },
@@ -630,6 +668,7 @@ describe("audio processing Worker control plane", () => {
         method: "POST",
         headers: {
           Authorization: `Bearer ${processorToken}`,
+          "X-Music-Library-Capability": first.failureCapability,
           "Content-Type": "application/json",
           "Content-Length": String(new TextEncoder().encode(failureBody).byteLength),
         },
@@ -672,16 +711,19 @@ describe("audio processing Worker control plane", () => {
         recording: { revision: 3, processingState: "processing" },
       });
       const second = await claim(processor);
-      const staleResult = await submitResult(first.resultUrl, hostedResult(source, null), processor);
+      const staleResult = await submitResult(
+        first.resultUrl, first.resultCapability, hostedResult(source, null), processor,
+      );
       expect(staleResult.status).toBe(409);
-      expect(new URL(second.resultUrl).searchParams.get("token"))
-        .not.toBe(new URL(first.resultUrl).searchParams.get("token"));
+      expect(second.resultCapability).not.toBe(first.resultCapability);
       const mismatchedResult = hostedResult(source, null);
       mismatchedResult.original = {
         ...(mismatchedResult.original as Record<string, unknown>),
         sha256: "d".repeat(64),
       };
-      expect((await submitResult(second.resultUrl, mismatchedResult, processor)).status).toBe(422);
+      expect((await submitResult(
+        second.resultUrl, second.resultCapability, mismatchedResult, processor,
+      )).status).toBe(422);
       expect(native.prepare(`
         SELECT status, attempt_count AS attemptCount FROM audio_processing_jobs
       `).get()).toEqual({ status: "running", attemptCount: 2 });
@@ -709,7 +751,10 @@ describe("audio processing Worker control plane", () => {
         SELECT status, attempt_count AS attemptCount FROM audio_processing_jobs
       `).get()).toEqual({ status: "running", attemptCount: 2 });
       expect(claimed.processingRequest.derivativeUploadUrl)
-        .toContain("/derivative?token=");
+        .toBe("https://app.example.invalid/api/processing/jobs/job-1/derivative");
+      expect(claimed.processingRequest.derivativeCapability).toMatch(
+        /^[A-Za-z0-9_-]{43}\.[a-f0-9]{64}$/u,
+      );
       expect(media.objects.has("recordings/playback/pending/job-1/attempt-1.mp3")).toBe(false);
     } finally {
       native.close();
@@ -869,7 +914,7 @@ describe("audio processing Worker control plane", () => {
       );
 
       const rejected = await submitResult(
-        claimed.resultUrl, hostedResult(source, null), bindings,
+        claimed.resultUrl, claimed.resultCapability, hostedResult(source, null), bindings,
       );
       expect(rejected.status).toBe(422);
       expect(native.prepare(`
@@ -901,11 +946,16 @@ describe("audio processing Worker control plane", () => {
       const claimed = await claim(bindings);
       expect((await app.request(claimed.processingRequest.derivativeUploadUrl, {
         method: "PUT",
-        headers: { "Content-Length": String(derivative.byteLength) },
+        headers: {
+          "Content-Length": String(derivative.byteLength),
+          "X-Music-Library-Capability": claimed.processingRequest.derivativeCapability,
+        },
         body: derivative,
       }, bindings)).status).toBe(201);
       const wrongResult = hostedResult(source, new TextEncoder().encode("different derivative"));
-      const rejected = await submitResult(claimed.resultUrl, wrongResult, bindings);
+      const rejected = await submitResult(
+        claimed.resultUrl, claimed.resultCapability, wrongResult, bindings,
+      );
       expect(rejected.status).toBe(422);
       expect(mismatchDatabase.native.prepare(`
         SELECT status, error_code AS errorCode FROM audio_processing_jobs
@@ -925,7 +975,10 @@ describe("audio processing Worker control plane", () => {
       const claimed = await claim(bindings);
       expect((await app.request(claimed.processingRequest.derivativeUploadUrl, {
         method: "PUT",
-        headers: { "Content-Length": String(derivative.byteLength) },
+        headers: {
+          "Content-Length": String(derivative.byteLength),
+          "X-Music-Library-Capability": claimed.processingRequest.derivativeCapability,
+        },
         body: derivative,
       }, bindings)).status).toBe(201);
       rollbackDatabase.native.exec(`
@@ -936,7 +989,7 @@ describe("audio processing Worker control plane", () => {
         END;
       `);
       const rejected = await submitResult(
-        claimed.resultUrl, hostedResult(source, derivative), bindings,
+        claimed.resultUrl, claimed.resultCapability, hostedResult(source, derivative), bindings,
       );
       expect(rejected.status).toBe(500);
       expect(rollbackDatabase.native.prepare(`

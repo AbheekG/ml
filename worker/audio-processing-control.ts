@@ -5,6 +5,7 @@ export const AUDIO_PROCESSING_LEASE_MS = 60 * 60 * 1000;
 export const MAX_EXPIRED_AUDIO_PROCESSING_ATTEMPTS = 3;
 export const MAX_AUDIO_DERIVATIVE_BYTES = MAX_RECORDING_UPLOAD_BYTES;
 export const MAX_AUDIO_PROCESSING_RESULT_BYTES = 64 * 1024;
+export const AUDIO_PROCESSING_CAPABILITY_HEADER = "X-Music-Library-Capability";
 
 const SAFE_ERROR_CODE = /^[a-z][a-z0-9_]{0,99}$/u;
 const SAFE_JOB_ID = /^[A-Za-z0-9_-]{1,100}$/u;
@@ -143,9 +144,7 @@ export function buildAudioProcessingCapabilityUrl(
   origin: string,
   jobId: string,
   operation: AudioProcessingCapabilityOperation,
-  capabilityToken: string,
 ): string {
   const url = new URL(`/api/processing/jobs/${encodeURIComponent(jobId)}/${operation}`, origin);
-  url.searchParams.set("token", capabilityToken);
   return url.toString();
 }
