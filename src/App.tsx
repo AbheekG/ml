@@ -102,7 +102,6 @@ import {
   subscribeToSessionRevalidation,
 } from "./app-lifecycle";
 import {
-  ACCESS_LOGOUT_PATH,
   PRIVATE_CACHE_NAMESPACE_KEY,
   PRIVATE_DATA_BARRIER_KEY,
   PRIVATE_DATA_CHANNEL_NAME,
@@ -113,7 +112,7 @@ import {
   isPrivateDataBlocked,
   isPrivateDataClearedMessage,
   logoutAndClearPrivateData,
-  markAccessLogoutNavigation,
+  privateDataBoundaryPresentation,
   reconcilePrivateDataSession,
 } from "./private-data";
 
@@ -2677,6 +2676,12 @@ export function App() {
   }, [isOnline, accessLogoutPending, sessionRevalidationSignal]);
 
   const canEdit = !sessionResolved ? null : session?.role === "editor" || session?.role === "admin";
+  const privateBoundary = privateDataBoundaryPresentation({
+    accessLogoutPending,
+    isOnline,
+    sessionResolved,
+    sessionIssue,
+  });
 
   return (
     <UnsavedChangesProvider>
@@ -2697,22 +2702,13 @@ export function App() {
         ? (
           <main className="page-shell" id="main-content">
             <section className="empty-state session-boundary">
-              <h1>{accessLogoutPending ? "Finishing sign-out" : "Signed out"}</h1>
-              <p>{accessLogoutPending
-                ? isOnline
-                  ? "This device’s private library has been cleared. Continue to Cloudflare to finish signing out."
-                  : "This device’s private library has been cleared. Cloudflare sign-out will continue automatically when this device reconnects."
-                : isOnline
-                  ? "This device’s private library has been cleared. Sign in to sync it again."
-                  : "This device’s private library has been cleared. Reconnect before signing in again."}</p>
-              {accessLogoutPending && isOnline && (
-                <a
-                  className="primary-action action-link"
-                  href={ACCESS_LOGOUT_PATH}
-                  onClick={() => { markAccessLogoutNavigation(); }}
-                >Continue sign-out</a>
+              <h1>{privateBoundary.heading}</h1>
+              <p>{privateBoundary.message}</p>
+              {privateBoundary.action && (
+                <a className="primary-action action-link" href={privateBoundary.action.href}>
+                  {privateBoundary.action.label}
+                </a>
               )}
-              {!accessLogoutPending && isOnline && <a className="primary-action action-link" href="/songs">Sign in</a>}
             </section>
           </main>
         )

@@ -9,6 +9,50 @@ const PRIVATE_CACHE_CLEAR_TIMEOUT_MS = 5_000;
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
+export type PrivateDataBoundaryPresentation = {
+  heading: string;
+  message: string;
+  action: { label: string; href: string } | null;
+};
+
+export function privateDataBoundaryPresentation(options: {
+  accessLogoutPending: boolean;
+  isOnline: boolean;
+  sessionResolved: boolean;
+  sessionIssue?: { kind: "authentication" | "unavailable"; message: string } | null;
+}): PrivateDataBoundaryPresentation {
+  if (options.accessLogoutPending) {
+    return {
+      heading: "Finishing sign-out",
+      message: options.isOnline
+        ? "This device’s private library has been cleared. Cloudflare sign-out will open automatically."
+        : "This device’s private library has been cleared. Cloudflare sign-out will continue automatically when this device reconnects.",
+      action: null,
+    };
+  }
+  if (options.isOnline && !options.sessionResolved) {
+    return {
+      heading: "Restoring library",
+      message: "Checking your protected session before syncing this device again.",
+      action: null,
+    };
+  }
+  if (options.isOnline && options.sessionIssue?.kind === "unavailable") {
+    return {
+      heading: "Library unavailable",
+      message: options.sessionIssue.message,
+      action: { label: "Retry", href: "/songs" },
+    };
+  }
+  return {
+    heading: "Signed out",
+    message: options.isOnline
+      ? options.sessionIssue?.message ?? "This device’s private library has been cleared. Sign in to sync it again."
+      : "This device’s private library has been cleared. Reconnect before signing in again.",
+    action: options.isOnline ? { label: "Sign in", href: "/songs" } : null,
+  };
+}
+
 export class PrivateDataBlockedError extends Error {
   constructor() {
     super("Private local data is being cleared");

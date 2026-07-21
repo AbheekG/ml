@@ -14,6 +14,7 @@ import {
   isPrivateDataClearedMessage,
   logoutAndClearPrivateData,
   markAccessLogoutNavigation,
+  privateDataBoundaryPresentation,
   reconcilePrivateDataSession,
   requestPrivateBrowserCacheClear,
 } from "./private-data";
@@ -225,5 +226,48 @@ describe("private local data lifecycle", () => {
     expect(isPrivateDataClearedMessage({ type: "private-data-cleared" })).toBe(true);
     expect(isPrivateDataClearedMessage({ type: "different" })).toBe(false);
     expect(isPrivateDataClearedMessage(null)).toBe(false);
+  });
+
+  it("does not offer a competing navigation while automatic Access logout is pending", () => {
+    expect(privateDataBoundaryPresentation({
+      accessLogoutPending: true,
+      isOnline: true,
+      sessionResolved: false,
+    })).toEqual({
+      heading: "Finishing sign-out",
+      message: "This device’s private library has been cleared. Cloudflare sign-out will open automatically.",
+      action: null,
+    });
+  });
+
+  it("describes session reconciliation instead of flashing a signed-out action", () => {
+    expect(privateDataBoundaryPresentation({
+      accessLogoutPending: false,
+      isOnline: true,
+      sessionResolved: false,
+    })).toMatchObject({ heading: "Restoring library", action: null });
+  });
+
+  it("offers one hard-navigation recovery only after session resolution", () => {
+    expect(privateDataBoundaryPresentation({
+      accessLogoutPending: false,
+      isOnline: true,
+      sessionResolved: true,
+      sessionIssue: { kind: "authentication", message: "Renew the session." },
+    })).toEqual({
+      heading: "Signed out",
+      message: "Renew the session.",
+      action: { label: "Sign in", href: "/songs" },
+    });
+    expect(privateDataBoundaryPresentation({
+      accessLogoutPending: false,
+      isOnline: true,
+      sessionResolved: true,
+      sessionIssue: { kind: "unavailable", message: "Session check failed." },
+    })).toEqual({
+      heading: "Library unavailable",
+      message: "Session check failed.",
+      action: { label: "Retry", href: "/songs" },
+    });
   });
 });
