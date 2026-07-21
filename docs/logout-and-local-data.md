@@ -1,11 +1,12 @@
 # Logout and private local data
 
-Status: accepted in protected staging. The hardened logout boundary and durable
-offline pending-logout fix are deployed as Worker version
-`2e889cf3-f246-4651-ac09-20ee13b7936d` with client/service-worker build
-`0ad3cf28a474`. The owner verified normal online logout and offline local clearing
-followed by automatic Cloudflare logout on reconnect in macOS Safari and Android.
-iOS/iPadOS remains a separately deferred compatibility check.
+Status: accepted in protected staging. The current hardened logout/session path
+is deployed as Worker `f2b7fea4-ddef-4d8e-979e-d761be914273` with
+client/service-worker build `33993fc5514d`. The owner verified normal online
+logout and offline local clearing followed by automatic Cloudflare logout on
+reconnect in macOS Safari and Android, then accepted the repaired single-cycle
+Chrome logout/login flow after the Access verification incident. iOS/iPadOS
+remains a separately deferred compatibility check.
 
 ## Required behavior
 
@@ -20,11 +21,14 @@ data after logout starts.
 If logout begins offline, the app must describe the result precisely: private
 data is cleared locally, while Cloudflare sign-out remains pending. The pending
 state is durable across tabs and browser restarts. On reconnect—or when the app
-is opened online in another tab—the app completes the authenticated cache-clear
-request and navigates to Cloudflare Access logout before it may load a session,
-remove the privacy barrier, or sync private data. A failed remote request keeps
-the pending state and retries on a later connectivity transition; it must never
-be treated as a fresh successful login.
+is opened online in another tab—the app makes one bounded authenticated
+cache-clear request and then navigates to Cloudflare Access logout before it may
+load a session, remove the privacy barrier, or sync private data. The auxiliary
+cache-clear request may fail, redirect, or time out without trapping the user;
+the Access navigation remains authoritative. A same-tab navigation marker must
+match the persistent pending token before the Cloudflare `logged_out` return can
+acknowledge completion. The privacy barrier remains until a later authenticated
+session clears and rebinds the local cache.
 
 The logout operation then attempts all of these independent cleanup mechanisms:
 
@@ -33,8 +37,10 @@ The logout operation then attempts all of these independent cleanup mechanisms:
 - call authenticated `POST /api/logout`, whose network response carries
   `Clear-Site-Data: "cache"` to cover the browser HTTP cache, including private
   media responses where supported; and
-- navigate with history replacement to Cloudflare Access
-  `/cdn-cgi/access/logout`.
+- record the one pending top-level navigation in same-tab session storage, then
+  navigate with history replacement to Cloudflare Access
+  `/cdn-cgi/access/logout`. There is no simultaneous direct logout link that can
+  race the automatic navigation.
 
 The service worker never handles `/api/*` or `/cdn-cgi/access/*`, so it cannot
 serve an offline shell in place of either cleanup request. The privacy barrier
@@ -60,13 +66,15 @@ Android Chrome:
 1. complete a normal catalog sync and open a private Song detail;
 2. keep a second tab/window open on private content where supported;
 3. choose `Sign out and clear this device` in the first tab;
-4. confirm the first tab reaches Cloudflare Access logout/login rather than the
+4. confirm the brief `Finishing sign-out` state offers no competing navigation
+   and automatically reaches Cloudflare Access logout/login rather than the
    cached application shell;
 5. confirm the other tab promptly hides private content and cannot restore it;
 6. while offline, reopen the installed app/site and confirm no catalog or typed
    lyrics are readable;
-7. reconnect and authenticate again, then confirm a fresh sync restores normal
-   offline reading; and
+7. reconnect and authenticate once, allow the brief session-reconciliation
+   state to finish, then confirm a fresh sync restores normal offline reading
+   without another logout/login cycle; and
 8. confirm normal login persistence still works when logout was not requested.
 
 Repeat from a fresh authenticated state while offline. The app must say that

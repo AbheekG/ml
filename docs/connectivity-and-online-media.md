@@ -2,8 +2,8 @@
 
 Status: connectivity and Scan-viewer behavior are deployed and owner-accepted on
 Android Chrome/Brave and macOS Safari. Current protected staging is Worker
-version `c9db96fd-3028-457b-867a-482143732672`, client/service-worker build
-`9f78a8f53da9`; direct optimized-Scan sharing, responsive row actions, and
+version `f2b7fea4-ddef-4d8e-979e-d761be914273`, client/service-worker build
+`33993fc5514d`; direct optimized-Scan sharing, responsive row actions, and
 Recording sharing are owner-accepted without a recorded device/browser for
 those later checks. Broader iPadOS compatibility remains deferred.
 
@@ -21,7 +21,9 @@ HTTP/3 connection in the background.
 
 Individual features own their request outcomes:
 
-- catalog refresh keeps the saved offline copy and reports its bounded error;
+- protected catalog refresh waits for a validated authenticated session, keeps
+  the saved offline copy on transient failure, and routes a definitive 401/403
+  to one explicit session-renewal boundary instead of reporting an empty catalog;
 - writes and uploads remain disabled when the browser reports offline, with no
   offline mutation queue;
 - private Scan and Recording requests remain authenticated and `private,
@@ -64,7 +66,8 @@ state.
   immediate native share action; it does not share an original fallback or add
   media to browser or service-worker storage.
 - Logout still clears and blocks private local data first. An explicit browser
-  reconnection still triggers completion of a pending Cloudflare Access logout.
+  reconnection still triggers the one automatic completion of a pending
+  Cloudflare Access logout; no direct UI navigation races it.
 - Session revalidation after a real browser connectivity transition keeps an
   already-resolved route tree mounted.
 

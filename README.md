@@ -58,7 +58,9 @@ and separately authorized cutover work:
 - catalog search, filters, sorting, and scroll position survive in-app Song navigation and Back in private memory, while reload/logout intentionally resets them; Song details open at the top, and the navigation behavior is owner-accepted on Android and macOS; action-wide errors and duplicate outcomes reveal themselves without moving background-refresh messages or field-level validation away from their context;
 - the deployed audit follow-up gives focus and interactive controls at least 3:1 non-text contrast, completes keyboard/ARIA behavior for the Lists tabs, protects dirty editor state across navigation and reconnect, and classifies terminal pre-intent upload history as informational; the owner accepted its keyboard, unsaved-work, offline/reconnect, and date-input behavior on macOS;
 - the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
-- the current application checkpoint passes 61 Vitest files / 428 tests, all 91 Python audio tests, all three TypeScript projects, the production/service-worker build, a constrained 512 MiB audio conversion inside the reviewed 2 GiB/1,152 MiB runtime limits, whitespace checks, and a clean zero-write staging D1 postflight.
+- the protected Access/session boundary uses a Worker-compatible, bounded rotating JWKS cache; protected catalog refresh waits for a validated session and turns a definitive 401/403 into one explicit renewal screen instead of a false empty catalog. Logout keeps its durable privacy barrier through a matched Cloudflare return, treats the bounded HTTP-cache-clear request as defense in depth, and has only one automatic top-level Access navigation. The owner accepted the repaired Chrome sign-in/catalog and single-cycle logout flow;
+- the current protected-staging deployment is Worker `f2b7fea4-ddef-4d8e-979e-d761be914273` with client/service-worker build `33993fc5514d`; the Account page shows the exact authenticated email and role rather than an inconsistent display name or generic fallback;
+- the current application checkpoint passes 62 Vitest files / 441 tests, all 91 Python audio tests, all three TypeScript projects, the production/service-worker build, a constrained 512 MiB audio conversion inside the reviewed 2 GiB/1,152 MiB runtime limits, whitespace checks, and a clean zero-write staging D1 postflight.
 
 The bounded improvements selected from the 2026-07-18 whole-application audit are
 implemented, deployed, and accepted. No further implementation slice is implied
@@ -123,7 +125,7 @@ The private staging catalog is loaded into an APAC-primary D1 database for the
 application's users in India. After the retained synthetic acceptance records,
 four later genuine Recording uploads, the completed guarded Lyrics imports, and
 the accepted Drive Recording metadata/reparent reconciliation, the verified
-2026-07-20 snapshot has 581 Songs, 335 lyric rows, 499 Scans, 835 Recordings
+2026-07-22 snapshot has 581 Songs, 335 lyric rows, 499 Scans, 835 Recordings
 (833 active), and 1,979 media rows, with zero foreign-key errors. The additional
 retained owner-test Recording/media row is not cleaned up implicitly; read-only
 postflight records one exact playback/original overlap while leaving its review
