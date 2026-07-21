@@ -101,9 +101,14 @@ export async function loadOfflineLibrary(database: D1Database) {
         notebooks.display_name AS notebookName,
         scans.page_label AS pageLabel,
         scans.revision,
+        scans.rotation_quarter_turns AS rotationQuarterTurns,
+        CASE WHEN scan_readability_derivatives.source_media_id IS NULL THEN 0 ELSE 1 END
+          AS hasReadabilityDerivative,
         media_objects.original_filename AS filename
       FROM scans
       JOIN media_objects ON media_objects.id = scans.media_id
+      LEFT JOIN scan_readability_derivatives
+        ON scan_readability_derivatives.source_media_id = media_objects.id
       LEFT JOIN notebooks ON notebooks.id = scans.notebook_id
       WHERE scans.trashed_at IS NULL
       ORDER BY
@@ -121,6 +126,8 @@ export async function loadOfflineLibrary(database: D1Database) {
       notebookName: string | null;
       pageLabel: string | null;
       revision: number;
+      rotationQuarterTurns: 0 | 1 | 2 | 3;
+      hasReadabilityDerivative: number;
       filename: string;
     }>(),
     database.prepare(`
@@ -129,6 +136,10 @@ export async function loadOfflineLibrary(database: D1Database) {
         recordings.id,
         recordings.original_media_id AS originalMediaId,
         recordings.playback_media_id AS playbackMediaId,
+        CASE
+          WHEN recordings.playback_media_id IS NULL THEN media_objects.byte_size
+          ELSE playback_media.byte_size
+        END AS playbackByteSize,
         recordings.description,
         recordings.recorded_on AS recordedOn,
         recordings.revision,
@@ -137,12 +148,15 @@ export async function loadOfflineLibrary(database: D1Database) {
         CASE WHEN recordings.playback_media_id IS NULL THEN 0 ELSE 1 END AS hasPlaybackMedia
       FROM recordings
       JOIN media_objects ON media_objects.id = recordings.original_media_id
+      LEFT JOIN media_objects AS playback_media
+        ON playback_media.id = recordings.playback_media_id
       WHERE recordings.trashed_at IS NULL
       ORDER BY recordings.song_id, recordings.recorded_on, recordings.id
     `).all<SongChild & {
       id: string;
       originalMediaId: string;
       playbackMediaId: string | null;
+      playbackByteSize: number;
       description: string;
       recordedOn: string | null;
       revision: number;
@@ -180,7 +194,10 @@ export async function loadOfflineLibrary(database: D1Database) {
     tags: (tagsBySong.get(song.id) ?? []).map(withoutSongId),
     credits: (creditsBySong.get(song.id) ?? []).map(withoutSongId),
     lyricTexts: (lyricsBySong.get(song.id) ?? []).map(withoutSongId),
-    scans: (scansBySong.get(song.id) ?? []).map(withoutSongId),
+    scans: (scansBySong.get(song.id) ?? []).map((row) => ({
+      ...withoutSongId(row),
+      hasReadabilityDerivative: row.hasReadabilityDerivative === 1,
+    })),
     recordings: (recordingsBySong.get(song.id) ?? []).map((row) => ({
       ...withoutSongId(row),
       hasPlaybackMedia: row.hasPlaybackMedia === 1,

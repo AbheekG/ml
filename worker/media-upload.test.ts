@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { inspectScanImage, safeUploadFilename, sha256Hex } from "./media-upload";
+import {
+  inspectScanImage,
+  MAX_SCAN_UPLOAD_REQUEST_BYTES,
+  safeUploadFilename,
+  scanUploadRequestIsTooLarge,
+  sha256Hex,
+} from "./media-upload";
 
 describe("Scan media validation", () => {
   it("recognizes JPEG, PNG, and WebP from bytes rather than names", () => {
@@ -12,6 +18,13 @@ describe("Scan media validation", () => {
   it("keeps only a safe basename and provides a fallback", () => {
     expect(safeUploadFilename("../private/page.JPG", "jpg")).toBe("page.JPG");
     expect(safeUploadFilename("", "png")).toBe("scan.png");
+  });
+
+  it("rejects oversized declared multipart bodies before parsing them", () => {
+    expect(scanUploadRequestIsTooLarge(undefined)).toBe(false);
+    expect(scanUploadRequestIsTooLarge(String(MAX_SCAN_UPLOAD_REQUEST_BYTES))).toBe(false);
+    expect(scanUploadRequestIsTooLarge(String(MAX_SCAN_UPLOAD_REQUEST_BYTES + 1))).toBe(true);
+    expect(scanUploadRequestIsTooLarge("invalid")).toBe(true);
   });
 
   it("calculates a stable SHA-256 fingerprint", async () => {

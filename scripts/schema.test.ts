@@ -21,13 +21,15 @@ const scanDisplayRotationMigration = readFileSync(resolve("migrations/0014_scan_
 const mediaParentMovesMigration = readFileSync(resolve("migrations/0015_media_parent_moves.sql"), "utf8");
 const playbackDuplicateDetectionMigration = readFileSync(resolve("migrations/0016_playback_duplicate_detection.sql"), "utf8");
 const scanReadabilityDuplicateDetectionMigration = readFileSync(resolve("migrations/0017_scan_readability_duplicate_detection.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}\n${playbackDuplicateDetectionMigration}\n${scanReadabilityDuplicateDetectionMigration}`;
+const indiaRecordingCalendarMigration = readFileSync(resolve("migrations/0018_india_recording_calendar.sql"), "utf8");
+const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}\n${playbackDuplicateDetectionMigration}\n${scanReadabilityDuplicateDetectionMigration}\n${indiaRecordingCalendarMigration}`;
+const sqliteTestPreamble = "PRAGMA legacy_alter_table = OFF;";
 const timestamp = "2026-07-12T00:00:00.000Z";
 
 function runSql(sql: string): string {
   return execFileSync("sqlite3", [":memory:"], {
     encoding: "utf8",
-    input: `${migration}\n${sql}`,
+    input: `${sqliteTestPreamble}\n${migration}\n${sql}`,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -35,7 +37,7 @@ function runSql(sql: string): string {
 function migrateLegacy(beforeMigration: string, afterMigration: string): string {
   return execFileSync("sqlite3", [":memory:"], {
     encoding: "utf8",
-    input: `${initialMigration}\n${beforeMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${afterMigration}`,
+    input: `${sqliteTestPreamble}\n${initialMigration}\n${beforeMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${afterMigration}`,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -43,7 +45,7 @@ function migrateLegacy(beforeMigration: string, afterMigration: string): string 
 function migrateScanIntegrity(beforeMigration: string, afterMigration: string): string {
   return execFileSync("sqlite3", [":memory:"], {
     encoding: "utf8",
-    input: `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${beforeMigration}\n${scanIntegrityMigration}\n${afterMigration}`,
+    input: `${sqliteTestPreamble}\n${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${beforeMigration}\n${scanIntegrityMigration}\n${afterMigration}`,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -51,7 +53,7 @@ function migrateScanIntegrity(beforeMigration: string, afterMigration: string): 
 function migrateScanRotation(beforeMigration: string, afterMigration: string): string {
   return execFileSync("sqlite3", [":memory:"], {
     encoding: "utf8",
-    input: `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${beforeMigration}\n${scanDisplayRotationMigration}\n${afterMigration}`,
+    input: `${sqliteTestPreamble}\n${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${beforeMigration}\n${scanDisplayRotationMigration}\n${afterMigration}`,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -59,6 +61,67 @@ function migrateScanRotation(beforeMigration: string, afterMigration: string): s
 describe("initial database schema", () => {
   it("loads successfully", () => {
     expect(() => runSql("PRAGMA foreign_key_check;")).not.toThrow();
+  });
+
+  it("uses the India calendar boundary for Recording rows and upload intents", () => {
+    const triggerCount = runSql(`
+      SELECT COUNT(*)
+      FROM sqlite_master
+      WHERE type = 'trigger'
+        AND name IN (
+          'validate_recording_values_insert',
+          'validate_recording_values_update',
+          'validate_recording_upload_session_insert'
+        )
+        AND sql LIKE '%date(''now'', ''+5 hours'', ''+30 minutes'')%';
+    `);
+    expect(triggerCount).toBe("3\n");
+
+    const accepted = runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'original-1', 'recordings/original/test', 'test.mp3', 'audio/mpeg', 4,
+        '${"a".repeat(64)}', 'original_audio', '${timestamp}', 'test'
+      );
+      INSERT INTO recordings (
+        id, song_id, original_media_id, description, normalized_description, recorded_on,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'recording-1', 'song-1', 'original-1', 'Take', 'take',
+        date('now', '+5 hours', '+30 minutes'),
+        '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      SELECT recorded_on = date('now', '+5 hours', '+30 minutes') FROM recordings;
+    `);
+    expect(accepted).toBe("1\n");
+
+    expect(() => runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'original-1', 'recordings/original/test', 'test.mp3', 'audio/mpeg', 4,
+        '${"a".repeat(64)}', 'original_audio', '${timestamp}', 'test'
+      );
+      INSERT INTO recordings (
+        id, song_id, original_media_id, description, normalized_description, recorded_on,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'recording-1', 'song-1', 'original-1', 'Take', 'take',
+        date('now', '+5 hours', '+30 minutes', '+1 day'),
+        '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+    `)).toThrow(/invalid_recording_values/);
   });
 
   it("defaults existing Scan orientation to zero and constrains it to quarter turns", () => {
@@ -820,7 +883,7 @@ describe("initial database schema", () => {
 
     expect(() => execFileSync("sqlite3", [":memory:"], {
       encoding: "utf8",
-      input: `${migration}\n${sql}`,
+      input: `${sqliteTestPreamble}\n${migration}\n${sql}`,
       stdio: ["pipe", "pipe", "pipe"],
     })).not.toThrow();
     expect(sql).toContain("Singer''s song");

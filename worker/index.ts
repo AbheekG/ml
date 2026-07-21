@@ -42,6 +42,7 @@ import {
   MAX_SCAN_UPLOAD_BYTES,
   inspectScanImage,
   safeUploadFilename,
+  scanUploadRequestIsTooLarge,
   sha256Hex,
 } from "./media-upload";
 import {
@@ -3714,6 +3715,9 @@ app.post("/api/songs/:songId/lyrics", requireRole("editor"), async (context) => 
 });
 
 app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
+  if (scanUploadRequestIsTooLarge(context.req.header("Content-Length"))) {
+    return context.json({ error: "scan_file_too_large", fields: { file: ["The maximum Scan size is 20 MB"] } }, 413);
+  }
   let form: FormData;
   try {
     form = await context.req.formData();
@@ -4293,6 +4297,9 @@ app.post("/api/songs/:songId/lyrics/:lyricId/trash", requireRole("editor"), asyn
   }
 });
 app.post("/api/songs/:songId/scans/:scanId/media", requireRole("editor"), async (context) => {
+  if (scanUploadRequestIsTooLarge(context.req.header("Content-Length"))) {
+    return context.json({ error: "scan_file_too_large", fields: { file: ["The maximum Scan size is 20 MB"] } }, 413);
+  }
   let form: FormData;
   try {
     form = await context.req.formData();
@@ -5938,30 +5945,11 @@ async function processClaimedScan(
       ),
       env.DB.prepare(`DELETE FROM scan_maintenance_failures WHERE media_id = ?`).bind(pending.mediaId),
     ]);
-    const verified = await env.DB.prepare(`
-      SELECT 1 AS valid
-      FROM media_objects
-      JOIN scan_readability_derivatives
-        ON scan_readability_derivatives.source_media_id = media_objects.id
-      WHERE media_objects.id = ?
-        AND media_objects.sha256 = ?
-        AND scan_readability_derivatives.source_sha256 = ?
-        AND scan_readability_derivatives.sha256 = ?
-        AND scan_readability_derivatives.object_key = ?
-    `).bind(
-      pending.mediaId,
-      sourceSha256,
-      sourceSha256,
-      readability.sha256,
-      readabilityObjectKey,
-    ).first<{ valid: number }>();
-    if (!verified) throw new Error("scan_maintenance_postcondition_failed");
   } catch {
-    try {
-      await env.MEDIA.delete(readabilityObjectKey);
-    } catch {
-      console.error("Failed to remove an uncommitted Scan readability object");
-    }
+    // A D1 failure can be an ambiguous response after the batch committed. Keep
+    // the deterministic private object: deleting it here could remove a
+    // derivative that the committed row now references. If the batch truly did
+    // not commit, the next maintenance attempt safely overwrites the same key.
     await recordScanMaintenanceFailure(env.DB, pending.mediaId, "commit", "scan_maintenance_commit_failed");
     return "failed";
   }

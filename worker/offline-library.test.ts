@@ -33,6 +33,8 @@ describe("loadOfflineLibrary", () => {
             notebookName: "Blue notebook",
             pageLabel: "Page 12",
             revision: 3,
+            rotationQuarterTurns: 2,
+            hasReadabilityDerivative: 1,
             filename: "page.jpg",
           }] };
           if (query.includes("FROM recordings\n")) return { results: [{
@@ -40,6 +42,7 @@ describe("loadOfflineLibrary", () => {
             id: "recording-1",
             originalMediaId: "media-1",
             playbackMediaId: null,
+            playbackByteSize: 1234,
             description: "First take",
             recordedOn: null,
             revision: 4,
@@ -69,10 +72,13 @@ describe("loadOfflineLibrary", () => {
         notebookId: "notebook-1",
         pageLabel: "Page 12",
         revision: 3,
+        rotationQuarterTurns: 2,
+        hasReadabilityDerivative: true,
       })],
       recordings: [expect.objectContaining({
         id: "recording-1",
         revision: 4,
+        playbackByteSize: 1234,
         hasPlaybackMedia: false,
         credits: [expect.objectContaining({ fullName: "A person" })],
       })],

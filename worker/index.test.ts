@@ -71,10 +71,6 @@ describe("historical Scan maintenance", () => {
               events.push("fingerprint_verified");
               return { valid: 1 };
             }
-            if (query.includes("JOIN scan_readability_derivatives")) {
-              events.push("derivative_verified");
-              return { valid: 1 };
-            }
             return null;
           },
           async run() {
@@ -121,7 +117,47 @@ describe("historical Scan maintenance", () => {
       "fingerprint_verified",
       "derivative_stored",
       "derivative_committed",
-      "derivative_verified",
+      "released",
+    ]);
+  });
+
+  it("retains the private derivative when the D1 commit response is ambiguous", async () => {
+    const events: string[] = [];
+    const database = databaseForScanMaintenance(events) as D1Database & {
+      batch: D1Database["batch"];
+    };
+    database.batch = async () => {
+      events.push("derivative_commit_ambiguous");
+      throw new Error("D1 response unavailable");
+    };
+    const media = {
+      async get() {
+        events.push("source_read");
+        return { arrayBuffer: async () => sourceBytes.slice().buffer };
+      },
+      async put() {
+        events.push("derivative_stored");
+        return {};
+      },
+      async delete() {
+        events.push("unexpected_derivative_delete");
+      },
+    } as unknown as R2Bucket;
+
+    await expect(processOnePendingScan({
+      DB: database,
+      MEDIA: media,
+      IMAGES: fakeImages(),
+    })).resolves.toBe("failed");
+    expect(events).toEqual([
+      "selected",
+      "claimed",
+      "source_read",
+      "fingerprint_committed",
+      "fingerprint_verified",
+      "derivative_stored",
+      "derivative_commit_ambiguous",
+      "failure_recorded",
       "released",
     ]);
   });
@@ -1901,6 +1937,33 @@ describe("Scan upload API", () => {
     body.set("pageLabel", "");
     return body;
   }
+
+  it("rejects an oversized declared multipart request before parsing or querying", async () => {
+    let queried = false;
+    const database = {
+      prepare: () => {
+        queried = true;
+        throw new Error("not reached");
+      },
+    } as unknown as D1Database;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/scans",
+      {
+        method: "POST",
+        headers: { "Content-Length": "22000000", "Content-Type": "multipart/form-data" },
+        body: "not parsed",
+      },
+      localBindings(database),
+    );
+
+    expect(response.status).toBe(413);
+    expect(queried).toBe(false);
+    await expect(response.json()).resolves.toEqual({
+      error: "scan_file_too_large",
+      fields: { file: ["The maximum Scan size is 20 MB"] },
+    });
+  });
 
   it("stores verified image bytes before atomically creating Scan records", async () => {
     type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };

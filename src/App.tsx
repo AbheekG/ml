@@ -7,6 +7,7 @@ import { RecordingUploadPage } from "./RecordingUploadPage";
 import { RecordingDateField } from "./RecordingDateField";
 import { CreditRows } from "./CreditRows";
 import { MoveToSongForm } from "./MoveToSongForm";
+import { SkipLink } from "./SkipLink";
 import { FeedbackMessage, useRevealFeedback } from "./FeedbackMessage";
 import { LookupTabs, lookupPanelId, lookupTabId } from "./LookupTabs";
 import {
@@ -474,7 +475,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
   }
 
   async function shareScan(scan: SongDetail["scans"][number]): Promise<void> {
-    if (!isOnline || scanShareBusy !== null) return;
+    if (!isOnline || !scan.hasReadabilityDerivative || scanShareBusy !== null) return;
     const scanId = scan.id;
     const rotationQuarterTurns = scan.rotationQuarterTurns;
     const generation = scanShareGenerationRef.current;
@@ -787,7 +788,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                         title={isOnline ? "View Scan" : "Scans require an internet connection"}
                         onClick={() => setViewerScanId(scan.id)}
                       ><ActionContent kind="view" label="View" /></button>
-                      {supportsOptimizedScanSharing() && (
+                      {scan.hasReadabilityDerivative && supportsOptimizedScanSharing() && (
                         <button
                           className="media-action compact-action"
                           type="button"
@@ -2527,7 +2528,7 @@ export function App() {
   return (
     <UnsavedChangesProvider>
     <div className="app-frame">
-      <a className="skip-link" href="#main-content">Skip to content</a>
+      <SkipLink />
       <header className="app-header">
         <Link className="brand" to="/songs" aria-label="Music Library home">
           <span className="brand-mark" aria-hidden="true">M</span>
