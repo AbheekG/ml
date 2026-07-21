@@ -29,6 +29,13 @@ Individual features own their request outcomes:
 - a Scan or Recording request failure is presented by that viewer or player and
   does not relabel or unmount the whole application.
 
+The authenticated offline-library snapshot carries the same media presentation
+state needed by the saved Song detail: Scan quarter-turn orientation and
+readability-derivative availability, plus the selected Recording playback byte
+size. Going offline therefore does not silently reset Scan orientation, offer a
+share path for an unavailable derivative, or lose the size guard used by
+Recording sharing.
+
 ## Scan-viewer behavior
 
 Opening a Scan mounts the viewer immediately and shows a loading state while the

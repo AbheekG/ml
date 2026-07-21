@@ -136,11 +136,18 @@ in [the legacy file reconciliation status](docs/legacy-file-reconciliation.md).
 
 Staging URL: `https://app.musiclibrary.workers.dev`. The Cloudflare Worker is named `app`; the project, service identifier, browser database, and D1 database retain their descriptive `music-library` names.
 
+The 2026-07-21 audit remediation keeps ambiguous Scan-maintenance commits from
+deleting a possibly referenced readability object, aligns D1 Recording-date
+validation with the shared India calendar, completes offline Scan/Recording
+media metadata, bounds declared Scan multipart bodies before parsing, and fixes
+the skip-link and derivative-aware Scan-sharing UI paths. No catalog or media
+row was rewritten by this release.
+
 Current protected-staging deployment: Worker
-`09f5b751-329c-40f2-82f2-301f84732a5a`, client/service-worker build
-`14194791219b`. Migration `0017_scan_readability_duplicate_detection.sql` is
-fully applied with its readability fingerprint index and both insertion guards
-present; no migration is pending.
+`7a397fed-1c47-4fb1-9a37-81d4643c4624`, client/service-worker build
+`1979c0380e2b`. Migration `0018_india_recording_calendar.sql` is fully applied
+with all three India-calendar validation triggers present; no migration is
+pending.
 Production resources and DNS/cutover remain separately approval-gated.
 
 Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker also validates Access JWT signatures, issuer, and audience on every API request. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.

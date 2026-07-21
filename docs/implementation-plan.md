@@ -8,6 +8,37 @@ deployed and awaits owner device/browser acceptance. Private legacy file work
 remains owner-paused; other optional UX refinement, audit/cleanup, and production
 readiness remain separately prioritized and approved.
 
+Application/deployment checkpoint (2026-07-21): protected staging runs Worker
+`7a397fed-1c47-4fb1-9a37-81d4643c4624`, client/service-worker build
+`1979c0380e2b`. The whole-project audit remediation removes a Scan-maintenance
+data-loss edge by retaining the deterministic private readability object when a
+D1 batch result is ambiguous; a later retry safely overwrites an unreferenced
+object, while a committed derivative can no longer be deleted after the fact.
+Migration `0018_india_recording_calendar.sql` replaces three validation triggers
+so Recording rows and upload intents use the same fixed UTC+05:30 India calendar
+as Worker and client validation. Offline details now include Scan rotation and
+readability availability plus Recording playback byte size. The row Share action
+is offered only for Scans with readability provenance, the skip link focuses the
+main landmark without unmanaged hash navigation, and declared Scan multipart
+bodies above a bounded envelope are rejected before parsing. The schema test
+harness explicitly disables SQLite legacy table-rename behavior.
+
+The gate passed 59 Vitest files / 399 tests, all 90 Python audio tests, all three
+TypeScript projects, a fresh local replay of all 18 D1 migrations with no
+foreign-key errors, and the production/service-worker build. Dependencies did
+not change; the fresh zero-vulnerability advisory result from the audit remains
+applicable, while the environment blocked resending dependency metadata for a
+redundant second lookup. Read-only postflight found the new Worker at 100%, the
+expected Access redirect, no pending migration, all three India-calendar
+triggers, unchanged 581 Songs / 335 lyric rows / 499 Scans / 835 Recordings
+(833 active) / 1,979 media rows, 946 readability and 196 audio derivatives,
+zero missing child-media references, zero foreign-key errors, zero query writes,
+and the unchanged private R2 aggregate of 2,933 objects / 8.1 GB. The resumed
+environment exposed no in-app browser backend for a post-deploy click-through;
+focused browser-DOM regression coverage passed, and no unsupported browser tool
+was substituted. No push, catalog/media cleanup, production, or DNS change was
+performed.
+
 Application/deployment checkpoint (2026-07-20): protected staging runs Worker
 `09f5b751-329c-40f2-82f2-301f84732a5a`, client/service-worker build
 `14194791219b`. Successful Trash restore/move and trashed-duplicate recovery now

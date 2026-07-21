@@ -1,8 +1,8 @@
 # Catalog navigation and action feedback
 
 Status: navigation behavior is deployed and owner-accepted. Current protected
-staging is Worker version `09f5b751-329c-40f2-82f2-301f84732a5a`;
-client/service-worker build `14194791219b`. The owner reports that direct
+staging is Worker version `7a397fed-1c47-4fb1-9a37-81d4643c4624`;
+client/service-worker build `1979c0380e2b`. The owner reports that direct
 Scan-row sharing, the responsive action presentation, the broader action-icon
 consistency pass, and Recording sharing work well. The specific device/browser
 was not recorded for the later UI/sharing acceptance, so no named-platform claim
@@ -44,6 +44,11 @@ Reloading the application still starts from the normal unfiltered catalog at the
 top. This is an intentional boundary, not a durable preference system.
 
 ## Unsaved editor navigation
+
+The global skip link prevents its default fragment navigation, makes the current
+`main` landmark programmatically focusable, and focuses it directly. It therefore
+works with the router-level unsaved-change blocker without creating an unmanaged
+hash/POP navigation or leaving keyboard focus on the page body.
 
 Song, typed-lyric, Scan, Recording-metadata, and Recording-upload/replacement
 screens register dirty state with one router-level guard. An in-app navigation
@@ -94,8 +99,9 @@ tap without moving the page.
 Each Song-row Scan action pairs its text with an eye, connected-share, or pencil
 symbol on wider layouts. Below 37 rem the visible text is removed to preserve the
 semantic Scan label and metadata, while the 44-pixel icon button retains an
-explicit accessible name and disabled state. View and Share remain reader
-actions; Edit remains online and editor-only.
+explicit accessible name and disabled state. View remains a reader action.
+Row-level Share is shown only when that Scan has readability provenance; Edit
+remains online and editor-only.
 
 The deployed follow-up generalizes that same pattern to repeated compact actions:
 Edit Song; typed-lyric Copy, Share, and Edit; and Recording Edit. Recording retry

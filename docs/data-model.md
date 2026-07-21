@@ -28,7 +28,12 @@ Trashed Scan/Recording ── immutable parent-move audit ── source/target S
 - `songs` stores titles, notes, status, revision, audit fields, Trash state, and a latest-mutation identifier used to make optimistic multi-table edits safe.
 - `lyric_texts` stores required content, stable automatic order, audit/Trash fields, and a hidden `user`/`legacy_import` origin. Existing combined workbook text remains intact; editors do not classify language, script, representation, or label.
 - `scans` references exactly one private media object and exposes optional Notebook/Page metadata plus a constrained `0`–`3` clockwise display orientation. Imported Source, Version, Date, ScanText, and Notes remain preserved in hidden `legacy_*` columns but are not part of the initial editor model.
-- `recordings` stores one required, normalized-unique per-Song description, optional recorded date and contributors, processing state, an original media object, and an optional playback object. Imported Version and the four populated Notes are combined losslessly for display and also remain in hidden `legacy_*` columns.
+- `recordings` stores one required, normalized-unique per-Song description,
+  optional recorded date and contributors, processing state, an original media
+  object, and an optional playback object. Recorded dates use the shared India
+  calendar in the client, Worker, and D1 triggers; D1 computes its maximum as
+  UTC+05:30 rather than UTC. Imported Version and the four populated Notes are
+  combined losslessly for display and also remain in hidden `legacy_*` columns.
 - `media_objects` stores private R2 object metadata and recovery state; binary
   data does not enter D1. `original_filename` is retained as provenance and
   authenticated media/recovery metadata, not as the ordinary human-facing label
@@ -87,7 +92,16 @@ Trashed Scan/Recording ── immutable parent-move audit ── source/target S
 - File signatures and decodability are checked from content rather than trusting filename extensions.
 - SHA-256 is recorded for upload verification and duplicate detection. Equal content does not automatically merge distinct historical records.
 - A Recording may point directly to its original media or to a playback derivative whose `audio_derivatives` provenance row names that same original. Database guards reject unrelated playback objects and later hash/size changes that would invalidate recorded provenance.
-- New Scan creation/replacement accepts verified JPEG, PNG, or WebP files up to 20,000,000 bytes, fully decodes them through the Cloudflare Images binding, stores the private original, and creates a correctly oriented JPEG derivative with longest edge at most 2400 pixels at quality 85. Exact content is rejected globally before upload and again by D1 to close races. If storage or D1 finalization fails, both uncommitted objects and rows are removed while prior media remains unchanged.
+- New Scan creation/replacement accepts verified JPEG, PNG, or WebP files up to
+  20,000,000 bytes, rejects an oversized declared multipart envelope before
+  parsing, fully decodes accepted images through the Cloudflare Images binding,
+  stores the private original, and creates a correctly oriented JPEG derivative
+  with longest edge at most 2400 pixels at quality 85. Exact content is rejected
+  globally before upload and again by D1 to close races. Interactive create and
+  replacement retain their existing atomic D1 finalization and cleanup path.
+  Historical maintenance retains its deterministic derivative object after an
+  ambiguous D1 response so it cannot delete bytes a committed provenance row
+  may already reference.
 - Saved quarter-turn corrections are browser presentation metadata. Viewers may rotate locally; editors may persist the absolute orientation with revision/audit guards. Neither the original nor readability derivative is rewritten, and current-view sharing creates only a temporary browser JPEG. The exact behavior is defined in [scan-orientation.md](scan-orientation.md).
 - Imported Scan fingerprints are prepared by a local, dry-run-by-default planner
   that reconciles every Scan/media relationship, verifies the catalog byte size,

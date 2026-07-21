@@ -1,8 +1,8 @@
 # Scan integrity and readability
 
-Status: implemented in protected staging. The exact readability-reupload guard
-is deployed as Worker version `09f5b751-329c-40f2-82f2-301f84732a5a`,
-client/service-worker build `14194791219b`. The owner previously accepted the
+Status: implemented in protected staging. The audit-remediated path is deployed
+as Worker version `7a397fed-1c47-4fb1-9a37-81d4643c4624`,
+client/service-worker build `1979c0380e2b`. The owner previously accepted the
 ten highest-risk local visual candidates and reports that optimized sharing and
 responsive actions work well. The specific device/browser was not recorded, and
 broader iPadOS compatibility remains a later non-blocking gate. The narrow exact
@@ -83,6 +83,11 @@ The daily Worker schedule processes a small bounded batch. For each source it:
 
 Failures use bounded codes and a one-day retry delay; catalog identifiers and
 filenames are not logged. A crash leaves the work eligible after lease expiry.
+Once the deterministic derivative object has been stored, an ambiguous D1 batch
+failure deliberately retains it. If the provenance batch committed, the object
+remains available to the committed row; if it did not, the next leased attempt
+overwrites the same private key. Maintenance never deletes that object merely
+because a post-write database response or verification request failed.
 The operational snapshot reports missing hashes/derivatives, failures, and
 expired leases. The repair never writes to `legacy/` or replaces an original.
 
