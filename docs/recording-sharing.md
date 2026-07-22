@@ -12,8 +12,8 @@ production/service-worker build, whitespace checks, and a zero-result,
 zero-write query-contract probe against the real staging D1 engine.
 The semantic export-filename follow-up is deployed as Worker
 `44168581-3e07-443b-b7b9-0690596fd87b`, client/service-worker build
-`1eb9c1f2e950`; the route and stored media are unchanged, and real-device
-filename acceptance remains pending.
+`1eb9c1f2e950`; the route and stored media are unchanged, and the owner accepted
+the semantic MP3 filename after a successful real-device check.
 
 ## Playback inventory and bound
 

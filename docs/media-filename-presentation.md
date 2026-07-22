@@ -3,10 +3,10 @@
 Status: implemented and deployed to protected staging as Worker
 `31242783-052d-4520-8313-ca1a2bce9531`, client/service-worker build
 `b9c8a5f52641`. Legacy file work remains separately owner-paused and was not
-resumed by this change. Owner device/browser acceptance remains pending. The
-semantic export-filename follow-up is deployed as Worker
-`44168581-3e07-443b-b7b9-0690596fd87b`, client/service-worker build
-`1eb9c1f2e950`; real-device filename acceptance remains pending.
+resumed by this change. The earlier ordinary-view presentation did not record a
+device/browser acceptance. The semantic export-filename follow-up is deployed as
+Worker `44168581-3e07-443b-b7b9-0690596fd87b`, client/service-worker build
+`1eb9c1f2e950`, and is owner-accepted after a successful real-device check.
 
 ## Decision
 

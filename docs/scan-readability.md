@@ -10,8 +10,8 @@ readability-reupload extension is automatically verified but was not manually
 re-exercised with another retained Scan upload; revisit it if natural use
 exposes a problem. The semantic export-filename follow-up is deployed as Worker
 `44168581-3e07-443b-b7b9-0690596fd87b`, client/service-worker build
-`1eb9c1f2e950`; retained originals and derivatives are unchanged, and
-real-device filename acceptance remains pending.
+`1eb9c1f2e950`; retained originals and derivatives are unchanged, and the owner
+accepted the semantic JPEG filename after a successful real-device check.
 
 ## Policy
 

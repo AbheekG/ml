@@ -3,14 +3,16 @@
 Status: the necessary private-beta feature set is implemented and accepted in
 protected staging. The Scan-orientation refinement is deployed and
 owner-accepted. The credentialed PWA-manifest request is deployed and
-owner-accepted on Android Chrome. The filename-presentation refinement is
-deployed and awaits owner device/browser acceptance. Private legacy file work
-remains owner-paused; other optional UX refinement, audit/cleanup, and production
-readiness remain separately prioritized and approved.
+owner-accepted on Android Chrome. The ordinary-view filename-presentation
+refinement is deployed without a separately recorded device check; the semantic
+export-filename follow-up is deployed and owner-accepted on a real device.
+Private legacy file work remains owner-paused; other optional UX refinement,
+audit/cleanup, and production readiness remain separately prioritized and
+approved.
 
-Application/deployment checkpoint (2026-07-21, second audit): protected staging
-runs Worker `e6f1ddc7-4706-4b8b-8b01-0090850b8a23`, client/service-worker build
-`a450b87fa722`, and audio converter image
+At the application/deployment checkpoint from the 2026-07-21 second audit,
+protected staging ran Worker `e6f1ddc7-4706-4b8b-8b01-0090850b8a23`,
+client/service-worker build `a450b87fa722`, and audio converter image
 `sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
 Migration `0019_recording_upload_file_identity.sql` is applied with no pending
 migration. New resumable Recording sessions require one immutable file-manifest
@@ -319,7 +321,7 @@ The semantic-filename follow-up leaves both authenticated routes and retained
 media unchanged: it names native-share files from the Song and Recording/Scan
 presentation metadata. It is deployed as Worker
 `44168581-3e07-443b-b7b9-0690596fd87b`, client/service-worker build
-`1eb9c1f2e950`; real-device filename acceptance remains pending.
+`1eb9c1f2e950` and is owner-accepted after a successful real-device check.
 
 ## Current execution order
 
