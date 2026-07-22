@@ -8,8 +8,10 @@ responsive actions work well. The specific device/browser was not recorded, and
 broader iPadOS compatibility remains a later non-blocking gate. The narrow exact
 readability-reupload extension is automatically verified but was not manually
 re-exercised with another retained Scan upload; revisit it if natural use
-exposes a problem. The semantic export-filename follow-up is implemented locally
-and awaits deployment; retained originals and derivatives are unchanged.
+exposes a problem. The semantic export-filename follow-up is deployed as Worker
+`44168581-3e07-443b-b7b9-0690596fd87b`, client/service-worker build
+`1eb9c1f2e950`; retained originals and derivatives are unchanged, and
+real-device filename acceptance remains pending.
 
 ## Policy
 

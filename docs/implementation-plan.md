@@ -315,9 +315,11 @@ audio tests, all three TypeScript projects, production build, service-worker
 build `9f78a8f53da9`, whitespace checks, and a zero-result/zero-write query probe
 against the real staging D1 engine.
 
-The current local semantic-filename follow-up leaves both authenticated routes
-and retained media unchanged: it names native-share files from the Song and
-Recording/Scan presentation metadata and awaits deployment.
+The semantic-filename follow-up leaves both authenticated routes and retained
+media unchanged: it names native-share files from the Song and Recording/Scan
+presentation metadata. It is deployed as Worker
+`44168581-3e07-443b-b7b9-0690596fd87b`, client/service-worker build
+`1eb9c1f2e950`; real-device filename acceptance remains pending.
 
 ## Current execution order
 

@@ -4,7 +4,9 @@ Status: implemented and deployed to protected staging as Worker
 `97a66e8f-0209-4ce6-920c-12165d61a451`, client/service-worker build
 `51d4d6e88633`; the owner reports that the deployed behavior works well and
 accepts this slice. The device/browser was not recorded. Semantic export names
-for shared current-view files are implemented locally and await deployment.
+for shared current-view files are deployed as Worker
+`44168581-3e07-443b-b7b9-0690596fd87b`, client/service-worker build
+`1eb9c1f2e950`; real-device filename acceptance remains pending.
 
 ## Stored state and media preservation
 

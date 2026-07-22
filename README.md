@@ -50,8 +50,8 @@ and separately authorized cutover work:
 - the protected manifest request explicitly includes the Cloudflare Access session credentials required for Chrome to evaluate the authenticated PWA; the owner confirms that Android Chrome now installs it with the intended standalone app experience instead of creating a browser shortcut;
 - private scans open in an in-app zoom/pan viewer and recordings stream with seeking; starting one Recording pauses any other Recording playing on that Song without changing its verified stored source;
 - the Scan viewer supports clockwise quarter-turn correction: every reader may rotate locally, online editors persist one revision-guarded orientation value, and browser display/share transforms leave both retained originals and readability derivatives unchanged;
-- capable online browsers can share the authenticated optimized JPEG for an individual Scan directly from its Song row or from the viewer through the native system share sheet; original Scan bytes, public URLs, and persistent media caches are not involved, and the owner reports that the deployed behavior works well;
-- private Recording playback sharing is deployed with a Recording-scoped ready-MP3 route, a 50 MiB safety bound, and no client-selected storage identifier or public URL; the current local follow-up replaces generic exported names with semantic filenames derived from the Song title and Recording description and awaits deployment; the owner accepted the principal device behavior after checking correct-row sharing, quiet cancellation, offline disabling, and multiple Recordings on one Song, while the deliberately oversized and slow-download second-tap paths remain automatically covered rather than manually forced;
+- capable online browsers can share the authenticated optimized JPEG for an individual Scan directly from its Song row or from the viewer through the native system share sheet; exported Scan filenames use the Song title, Scan metadata, and stable multi-Scan position without exposing the original basename; original Scan bytes, public URLs, and persistent media caches are not involved, and the earlier sharing behavior is owner-accepted while the new filename presentation awaits a real-device check;
+- private Recording playback sharing is deployed with a Recording-scoped ready-MP3 route, a 50 MiB safety bound, and no client-selected storage identifier or public URL; exported MP3 names use the Song title and Recording description without exposing the original basename; the owner accepted the principal device behavior after checking correct-row sharing, quiet cancellation, offline disabling, and multiple Recordings on one Song, while the new filename presentation and the automatically covered oversized/slow-download paths remain the relevant follow-up gates;
 - ordinary Recording rows, Scan rows/viewer headers, and Trash now use semantic descriptions, Notebook/Page labels, and positions without exposing original upload filenames; editor file selection, upload recovery, duplicate diagnostics, and private provenance metadata retain filenames where operationally useful;
 - repeated Song, typed-lyric, Recording, and Scan actions use accessible symbols with text on wider layouts and 44-pixel icon-only touch targets where compactness helps on narrow layouts; Add, Replace, and higher-consequence actions retain descriptive text;
 - the global offline/read-only indicator follows browser connectivity rather than treating one slow API request as proof that the whole app is offline; online-only media handles request failures locally, and an open Scan viewer remains mounted with immediate loading feedback; the Scan/connectivity behavior is owner-accepted in Android Chrome/Brave and macOS Safari;
@@ -59,8 +59,8 @@ and separately authorized cutover work:
 - the deployed audit follow-up gives focus and interactive controls at least 3:1 non-text contrast, completes keyboard/ARIA behavior for the Lists tabs, protects dirty editor state across navigation and reconnect, and classifies terminal pre-intent upload history as informational; the owner accepted its keyboard, unsaved-work, offline/reconnect, and date-input behavior on macOS;
 - the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
 - the protected Access/session boundary uses a Worker-compatible, bounded rotating JWKS cache; protected catalog refresh waits for a validated session and turns a definitive 401/403 into one explicit renewal screen instead of a false empty catalog. Logout keeps its durable privacy barrier through a matched Cloudflare return, treats the bounded HTTP-cache-clear request as defense in depth, and has only one automatic top-level Access navigation. The owner accepted the repaired Chrome sign-in/catalog and single-cycle logout flow;
-- the current protected-staging deployment is Worker `f2b7fea4-ddef-4d8e-979e-d761be914273` with client/service-worker build `33993fc5514d`; the Account page shows the exact authenticated email and role rather than an inconsistent display name or generic fallback;
-- the current application checkpoint passes 62 Vitest files / 441 tests, all 91 Python audio tests, all three TypeScript projects, the production/service-worker build, a constrained 512 MiB audio conversion inside the reviewed 2 GiB/1,152 MiB runtime limits, whitespace checks, and a clean zero-write staging D1 postflight.
+- the current protected-staging deployment is Worker `44168581-3e07-443b-b7b9-0690596fd87b` with client/service-worker build `1eb9c1f2e950`; the Account page shows the exact authenticated email and role rather than an inconsistent display name or generic fallback;
+- the current application checkpoint passes 63 Vitest files / 446 tests, all 91 Python audio tests, all three TypeScript projects, the production/service-worker build with seven precache entries, whitespace checks, and a clean zero-write staging D1 postflight.
 
 The bounded improvements selected from the 2026-07-18 whole-application audit are
 implemented, deployed, and accepted. No further implementation slice is implied
@@ -158,14 +158,15 @@ the skip-link and derivative-aware Scan-sharing UI paths. No catalog or media
 row was rewritten by this release.
 
 Current protected-staging deployment: Worker
-`e6f1ddc7-4706-4b8b-8b01-0090850b8a23`, client/service-worker build
-`a450b87fa722`, and audio converter image
+`44168581-3e07-443b-b7b9-0690596fd87b`, client/service-worker build
+`1eb9c1f2e950`, and audio converter image
 `sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
 Migration `0019_recording_upload_file_identity.sql` is fully applied with its
 two identity columns and four required/immutable-value triggers present; no
-migration is pending. Converter-first and post-Worker executions both completed
-with exactly one aggregate `no_work` outcome, and the verified quarter-hour
-scheduler is enabled.
+migration is pending. The enforced read-only processor snapshot confirms the
+Scheduler remains enabled, its latest execution succeeded, no job is pending or
+running, and there are no critical or warning alerts. This filename-only Worker
+deployment did not change the converter or Scheduler.
 Production resources and DNS/cutover remain separately approval-gated.
 
 Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker validates Access JWT signatures, issuer, and audience on every API request using a bounded rotating-key cache, rechecks the active application role, and requires exact same-origin evidence plus the route's expected media type for browser mutations. Generic private-media reads require both an active child and active parent Song. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.
