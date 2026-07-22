@@ -94,6 +94,7 @@ import {
   shareRecordingFile,
   supportsRecordingSharing,
 } from "./recording-sharing";
+import { recordingExportFilename, scanExportFilename } from "./export-filename";
 import {
   preserveSessionResolutionDuringRevalidation,
   sessionFailureInvalidatesIdentity,
@@ -516,10 +517,21 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
     }
   }
 
-  async function shareScan(scan: SongDetail["scans"][number]): Promise<void> {
+  async function shareScan(
+    scan: SongDetail["scans"][number],
+    index: number,
+    total: number,
+    songTitle: string,
+  ): Promise<void> {
     if (!isOnline || !scan.hasReadabilityDerivative || scanShareBusy !== null) return;
     const scanId = scan.id;
     const rotationQuarterTurns = scan.rotationQuarterTurns;
+    const filename = scanExportFilename(
+      songTitle,
+      scan,
+      index,
+      total,
+    );
     const generation = scanShareGenerationRef.current;
     setScanShareFeedback(null);
 
@@ -533,7 +545,12 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
         const controller = new AbortController();
         scanShareAbortRef.current?.abort();
         scanShareAbortRef.current = controller;
-        const optimizedFile = await loadOptimizedScanShareFile(scanId, controller.signal);
+        const optimizedFile = await loadOptimizedScanShareFile(
+          scanId,
+          controller.signal,
+          fetch,
+          filename,
+        );
         file = await rotateOptimizedScanShareFile(optimizedFile, rotationQuarterTurns);
         if (generation !== scanShareGenerationRef.current) return;
         if (scanShareAbortRef.current === controller) scanShareAbortRef.current = null;
@@ -576,7 +593,11 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
     }
   }
 
-  async function shareRecording(recordingId: string): Promise<void> {
+  async function shareRecording(
+    recording: SongDetail["recordings"][number],
+    songTitle: string,
+  ): Promise<void> {
+    const recordingId = recording.id;
     if (!isOnline || recordingShareBusy !== null) return;
     const generation = recordingShareGenerationRef.current;
     setRecordingShareFeedback(null);
@@ -590,7 +611,12 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
         const controller = new AbortController();
         recordingShareAbortRef.current?.abort();
         recordingShareAbortRef.current = controller;
-        file = await loadRecordingShareFile(recordingId, controller.signal);
+        file = await loadRecordingShareFile(
+          recordingId,
+          controller.signal,
+          fetch,
+          recordingExportFilename(songTitle, recording.description),
+        );
         if (generation !== recordingShareGenerationRef.current) return;
         if (recordingShareAbortRef.current === controller) recordingShareAbortRef.current = null;
         setPreparedRecordingShare({ recordingId, file });
@@ -757,7 +783,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                             title={recordingShareTooLarge
                               ? "This Recording is larger than 50 MiB"
                               : isOnline ? "Share the playback recording" : "Recording sharing requires an internet connection"}
-                            onClick={() => { void shareRecording(recording.id); }}
+                            onClick={() => { void shareRecording(recording, song.titleLatin); }}
                           ><ActionContent
                               kind="share"
                               label={recordingShareTooLarge
@@ -841,7 +867,9 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                           aria-busy={scanShareBusy?.scanId === scan.id || undefined}
                           aria-describedby={scanShareFeedback?.scanId === scan.id ? `scan-share-${scan.id}` : undefined}
                           title={isOnline ? "Share the optimized scan image" : "Scan sharing requires an internet connection"}
-                          onClick={() => { void shareScan(scan); }}
+                          onClick={() => {
+                            void shareScan(scan, index, song.scans.length, song.titleLatin);
+                          }}
                         ><ActionContent
                             kind="share"
                             label={scanShareBusy?.scanId === scan.id
@@ -880,6 +908,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
       {viewerScanId && (
         <ScanViewer
           songId={song.id}
+          songTitle={song.titleLatin}
           scans={song.scans}
           initialScanId={viewerScanId}
           isOnline={isOnline}

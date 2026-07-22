@@ -3,7 +3,8 @@
 Status: implemented and deployed to protected staging as Worker
 `97a66e8f-0209-4ce6-920c-12165d61a451`, client/service-worker build
 `51d4d6e88633`; the owner reports that the deployed behavior works well and
-accepts this slice. The device/browser was not recorded.
+accepts this slice. The device/browser was not recorded. Semantic export names
+for shared current-view files are implemented locally and await deployment.
 
 ## Stored state and media preservation
 
@@ -38,9 +39,10 @@ mutation queue and viewers never issue the write.
 Viewer sharing uses the complete currently displayed orientation, independent
 of whether an editor save has completed. The browser draws the already loaded,
 authenticated readability image into a dimension-swapped canvas when needed
-and creates a temporary generic `scan.jpg`; zoom and pan do not crop the shared
-page. The temporary file is bounded to 20 MiB, contains no catalog text or
-public URL, and is discarded after the action. A zero-turn direct Song-row
+and creates a temporary semantic JPEG filename from the Song title plus Scan
+Notebook/Page metadata and multi-Scan list position; zoom and pan do not crop
+the shared page. The temporary file is bounded to 20 MiB, contains no separate
+share text or public URL, and is discarded after the action. A zero-turn direct Song-row
 share may reuse the verified readability bytes; a saved nonzero row orientation
 is applied in the browser before sharing.
 
@@ -53,7 +55,7 @@ unsupported browser, or offline device.
 Automated coverage includes schema default/check behavior, viewer write
 denial, editor revision conflicts, all four display transforms, dimension
 swapping, rapid-turn coalescing, current-view sharing without a viewer write,
-generic bounded files, and replacement reset. Real-device acceptance should
+semantic bounded files, and replacement reset. Real-device acceptance should
 check portrait and landscape pages on Safari/iOS and Chrome/Android, all four
 turns, zoom/pan after rotation, Image-only mode, viewer-local behavior,
 editor persistence after reopening, immediate Share while a save is pending,

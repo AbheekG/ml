@@ -80,6 +80,7 @@ describe("Scan viewer rotation", () => {
     render(
       <ScanViewer
         songId="song-1"
+        songTitle="Evening Song"
         scans={[scan]}
         initialScanId={scan.id}
         isOnline
@@ -102,7 +103,11 @@ describe("Scan viewer rotation", () => {
     expect(rotate).toHaveBeenCalledWith(Math.PI / 2);
     expect(drawImage).toHaveBeenCalledWith(image, 0, 0);
     const sharedFile = (share.mock.calls[0][0] as ShareData).files?.[0];
-    expect(sharedFile).toMatchObject({ name: "scan.jpg", type: "image/jpeg", size: 3 });
+    expect(sharedFile).toMatchObject({
+      name: "Evening Song — Scanned Lyrics.jpg",
+      type: "image/jpeg",
+      size: 3,
+    });
   });
 
   it("coalesces rapid editor turns into one absolute revision-guarded save", async () => {
@@ -122,6 +127,7 @@ describe("Scan viewer rotation", () => {
       <StrictMode>
         <ScanViewer
           songId="song-1"
+          songTitle="Evening Song"
           scans={[scan]}
           initialScanId={scan.id}
           isOnline

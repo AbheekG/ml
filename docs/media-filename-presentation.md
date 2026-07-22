@@ -3,7 +3,8 @@
 Status: implemented and deployed to protected staging as Worker
 `31242783-052d-4520-8313-ca1a2bce9531`, client/service-worker build
 `b9c8a5f52641`. Legacy file work remains separately owner-paused and was not
-resumed by this change. Owner device/browser acceptance remains pending.
+resumed by this change. Owner device/browser acceptance remains pending. The
+semantic export-filename follow-up is implemented locally and awaits deployment.
 
 ## Decision
 
@@ -31,6 +32,12 @@ or diagnose storage, but it usually tells a reader nothing about the media.
   source filenames.
 - Reader-facing search, sorting, sharing, and accessible action names do not use
   source filenames.
+- A shared Recording uses `Song title — Recording description.mp3`. A shared
+  Scan uses `Song title — Scanned Lyrics`, followed by Notebook/Page metadata or
+  list position when available. Multi-Scan Songs always include list position so
+  filenames remain distinct even if Notebook/Page metadata repeats. These are
+  temporary semantic export filenames, not changes to retained original or
+  derivative objects.
 
 The change should remove meaningless text, not replace it with internal UUIDs,
 R2 object keys, media IDs, hashes, or generated storage names.
@@ -48,8 +55,10 @@ R2 object keys, media IDs, hashes, or generated storage names.
   Notebook/Page, and status. Include a filename only in a clearly operational
   editor context where it materially helps resolve the problem.
 
-Filenames remain private and must not enter routine logs, public URLs, tracked
-fixtures, analytics, or unauthenticated output.
+Original upload filenames remain private and must not enter routine logs, public
+URLs, tracked fixtures, analytics, or unauthenticated output. Authenticated
+native sharing may expose only the deliberately constructed semantic export
+filename described above.
 
 ## Implemented scope
 

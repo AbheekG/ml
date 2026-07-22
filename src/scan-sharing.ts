@@ -56,6 +56,7 @@ export async function loadOptimizedScanShareFile(
   scanId: string,
   signal?: AbortSignal,
   fetcher: ScanShareFetcher = fetch,
+  filename = "scan.jpg",
 ): Promise<File> {
   let response: Response;
   try {
@@ -113,7 +114,7 @@ export async function loadOptimizedScanShareFile(
     throw new ScanSharingError("invalid_file");
   }
 
-  return new File([blob], "scan.jpg", {
+  return new File([blob], filename, {
     type: "image/jpeg",
     lastModified: 0,
   });
@@ -133,6 +134,7 @@ export async function prepareVisibleScanShareFile(
   image: ScanShareImage,
   rotationQuarterTurns: ScanRotationQuarterTurns,
   canvasFactory: ScanShareCanvasFactory = () => document.createElement("canvas"),
+  filename = sourceFile?.name ?? "scan.jpg",
 ): Promise<File> {
   if (rotationQuarterTurns === 0 && sourceFile) return sourceFile;
   const sourceWidth = image.naturalWidth;
@@ -170,7 +172,7 @@ export async function prepareVisibleScanShareFile(
       ? "file_too_large"
       : "invalid_file");
   }
-  return new File([blob], "scan.jpg", {
+  return new File([blob], filename, {
     type: "image/jpeg",
     lastModified: 0,
   });
@@ -210,6 +212,7 @@ export async function rotateOptimizedScanShareFile(
       loaded.image,
       rotationQuarterTurns,
       canvasFactory,
+      file.name,
     );
   } finally {
     loaded.release();

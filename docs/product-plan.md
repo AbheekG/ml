@@ -137,6 +137,9 @@ The first migration stores each existing workbook `LyricsTyped` block intact and
 - group notebook scans naturally by notebook and page when useful, with stable creation order as fallback;
 - full-screen viewer with zoom and next/previous navigation;
 - clockwise quarter-turn viewing for every reader, with online editor persistence and current-view sharing while retained media stays unchanged;
+- give shared Scan files semantic names from the Song title plus Notebook/Page
+  metadata and stable list position for multi-Scan Songs, without exposing the
+  original upload basename;
 - clear online-only message when offline;
 - editor actions to add, edit metadata, replace a file, move to Trash, or restore.
 
@@ -146,6 +149,8 @@ The first migration stores each existing workbook `LyricsTyped` block intact and
 - do not append the source audio filename in ordinary presentation; the required
   description is the Recording's human-facing identity and the filename remains
   private provenance/upload-recovery metadata;
+- give shared MP3 files semantic names from the Song title and Recording
+  description, without renaming retained media or exposing the source basename;
 - reliable inline play/pause/seek;
 - only one recording plays at a time;
 - prepare any required playback derivative once before the Recording becomes ready; pressing Play never starts transcoding;

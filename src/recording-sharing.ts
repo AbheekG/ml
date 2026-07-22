@@ -44,6 +44,7 @@ export async function loadRecordingShareFile(
   recordingId: string,
   signal?: AbortSignal,
   fetcher: RecordingShareFetcher = fetch,
+  filename = "recording.mp3",
 ): Promise<File> {
   let response: Response;
   try {
@@ -100,7 +101,7 @@ export async function loadRecordingShareFile(
     throw new RecordingSharingError("invalid_file");
   }
 
-  return new File([blob], "recording.mp3", {
+  return new File([blob], filename, {
     type: "audio/mpeg",
     lastModified: 0,
   });

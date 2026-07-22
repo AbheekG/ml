@@ -35,6 +35,7 @@ import {
   shareOptimizedScanFile,
   supportsOptimizedScanSharing,
 } from "./scan-sharing";
+import { scanExportFilename } from "./export-filename";
 
 type WebkitDocument = Document & {
   webkitFullscreenElement?: Element | null;
@@ -65,6 +66,7 @@ function activeFullscreenElement(): Element | null {
 
 export function ScanViewer({
   songId,
+  songTitle,
   scans,
   initialScanId,
   isOnline,
@@ -73,6 +75,7 @@ export function ScanViewer({
   onClose,
 }: {
   songId: string;
+  songTitle: string;
   scans: SongScan[];
   initialScanId: string;
   isOnline: boolean;
@@ -539,6 +542,8 @@ export function ScanViewer({
           null,
           imageRef.current,
           rotationQuarterTurns,
+          undefined,
+          scanExportFilename(songTitle, currentScan, currentIndex, scans.length),
         );
         if (generation !== shareGenerationRef.current) return;
         setPreparedShare({ scanId, rotationQuarterTurns, file });

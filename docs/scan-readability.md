@@ -8,7 +8,8 @@ responsive actions work well. The specific device/browser was not recorded, and
 broader iPadOS compatibility remains a later non-blocking gate. The narrow exact
 readability-reupload extension is automatically verified but was not manually
 re-exercised with another retained Scan upload; revisit it if natural use
-exposes a problem.
+exposes a problem. The semantic export-filename follow-up is implemented locally
+and awaits deployment; retained originals and derivatives are unchanged.
 
 ## Policy
 
@@ -37,16 +38,20 @@ not rewrite either stored representation. See
 
 On capable online browsers, the Song row or viewer can fetch the authenticated
 readability route and pass its exact bytes to the native system share sheet as a
-generic `scan.jpg` file. The client accepts only a successful private response explicitly
-marked `readability`, with JPEG type, a positive exact length, and a 20 MiB
-maximum. An original fallback is rejected rather than shared.
+semantic JPEG file. Its name starts with `Song title — Scanned Lyrics` and adds
+Notebook/Page metadata when present. Multi-Scan Songs always add list position
+so their exported filenames remain distinct. The client accepts only a
+successful private response explicitly marked `readability`, with JPEG type, a
+positive exact length, and a 20 MiB maximum. An original fallback is rejected
+rather than shared.
 
-The share payload contains only the file: it adds no title, catalog text, or
-public URL. The bytes are held only for the immediate action. If the fetch makes
-the browser's user-activation window expire, the prepared file remains in viewer
-memory and a second tap completes the share without another download. Canceling
-the native sheet is quiet; unsupported browsers do not show the action, and the
-action is disabled while offline.
+The share payload contains only the file: apart from its semantic filename, it
+adds no title, catalog text, original upload filename, or public URL. The bytes
+are held only for the immediate action. If the fetch makes the browser's user-
+activation window expire, the prepared file remains in viewer memory and a
+second tap completes the share without another download. Canceling the native
+sheet is quiet; unsupported browsers do not show the action, and the action is
+disabled while offline.
 
 An upload of the exact stored readability JPEG is rejected as a duplicate and
 resolves through immutable derivative provenance to the existing Scan, including

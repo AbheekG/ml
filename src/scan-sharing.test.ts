@@ -35,7 +35,7 @@ describe("optimized Scan sharing", () => {
     })).toBe(true);
   });
 
-  it("loads exact authenticated readability bytes into a generic JPEG file", async () => {
+  it("loads exact authenticated readability bytes into the requested semantic JPEG file", async () => {
     const bytes = new Uint8Array([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9]);
     const fetcher = vi.fn(async () => optimizedResponse(bytes));
     const controller = new AbortController();
@@ -44,6 +44,7 @@ describe("optimized Scan sharing", () => {
       "scan/id",
       controller.signal,
       fetcher,
+      "Evening Song — Scanned Lyrics — Page 2.jpg",
     );
 
     expect(fetcher).toHaveBeenCalledWith("/api/scans/scan%2Fid/image", {
@@ -51,13 +52,13 @@ describe("optimized Scan sharing", () => {
       credentials: "same-origin",
       signal: controller.signal,
     });
-    expect(file.name).toBe("scan.jpg");
+    expect(file.name).toBe("Evening Song — Scanned Lyrics — Page 2.jpg");
     expect(file.type).toBe("image/jpeg");
     expect(file.lastModified).toBe(0);
     expect(new Uint8Array(await file.arrayBuffer())).toEqual(bytes);
   });
 
-  it("rotates the complete visible image into a generic JPEG without another fetch", async () => {
+  it("rotates the complete visible image into a semantic JPEG without another fetch", async () => {
     const operations: Array<[string, ...number[]]> = [];
     const context = {
       translate: (x: number, y: number) => operations.push(["translate", x, y]),
@@ -77,7 +78,13 @@ describe("optimized Scan sharing", () => {
       naturalHeight: 900,
     } as unknown as HTMLImageElement;
 
-    const file = await prepareVisibleScanShareFile(null, image, 1, () => canvas);
+    const file = await prepareVisibleScanShareFile(
+      null,
+      image,
+      1,
+      () => canvas,
+      "Evening Song — Scanned Lyrics.jpg",
+    );
 
     expect(canvas.width).toBe(900);
     expect(canvas.height).toBe(1200);
@@ -85,7 +92,7 @@ describe("optimized Scan sharing", () => {
     expect(operations[1][0]).toBe("rotate");
     expect(operations[1][1]).toBeCloseTo(Math.PI / 2);
     expect(operations[2]).toEqual(["drawImage"]);
-    expect(file.name).toBe("scan.jpg");
+    expect(file.name).toBe("Evening Song — Scanned Lyrics.jpg");
     expect(file.type).toBe("image/jpeg");
     expect(file.size).toBe(3);
   });

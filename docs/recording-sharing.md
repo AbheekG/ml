@@ -10,6 +10,8 @@ Vitest files / 354 tests,
 all 90 Python audio tests, all three TypeScript projects, production build,
 production/service-worker build, whitespace checks, and a zero-result,
 zero-write query-contract probe against the real staging D1 engine.
+The semantic export-filename follow-up is implemented locally and awaits
+deployment; the route and stored media are unchanged.
 
 ## Playback inventory and bound
 
@@ -45,16 +47,19 @@ source. It never accepts a client-selected media or storage identifier.
 
 Before streaming, the route rejects an oversized database record, then requires
 the private R2 object's exact size to match D1. A successful response is
-`private, no-store`, identifies itself as the `playback` representation, and uses
-the generic download name `recording.mp3`; it exposes no original filename or
-public URL.
+`private, no-store`, identifies itself as the `playback` representation, and
+retains the generic response-header name `recording.mp3`; it exposes no original
+filename or public URL.
 
 The client independently requires the playback marker, `audio/mpeg`, a positive
-exact `Content-Length`, and the same 50 MiB bound before constructing the generic
-file. The native share payload contains only that file. Capability gating,
-offline disabling, quiet cancellation, abort/reset behavior, local bounded
-feedback, and the optional prepared-file second tap match accepted Scan sharing.
-Share is available to readers for ready Recordings; Edit remains editor-only.
+exact `Content-Length`, and the same 50 MiB bound before constructing a file named
+`Song title — Recording description.mp3`. Invalid filesystem characters are
+removed, whitespace is normalized, Unicode is preserved, and excessive UTF-8
+length is bounded. The native share payload contains only that file—no separate
+share text, title, original filename, or URL. Capability gating, offline
+disabling, quiet cancellation, abort/reset behavior, local bounded feedback, and
+the optional prepared-file second tap match accepted Scan sharing. Share is
+available to readers for ready Recordings; Edit remains editor-only.
 
 ## Acceptance gates
 
@@ -66,10 +71,10 @@ pre-storage oversized rejection.
 
 On Android and iPadOS, share at least one derivative-backed and one
 canonical-original-backed Recording, plus a larger file. Confirm the resulting
-`recording.mp3` is the same playable audio, native cancellation is quiet, offline
-Share is disabled, the correct row is shared, and a second tap works if a slow
-download consumes user activation. Processing or failed Recordings must not offer
-Share.
+semantic filename identifies the Song and Recording, the MP3 is the same playable
+audio, native cancellation is quiet, offline Share is disabled, the correct row
+is shared, and a second tap works if a slow download consumes user activation.
+Processing or failed Recordings must not offer Share.
 
 The accepted manual checks cover the main interaction and correct-row behavior.
 No deliberately oversized playback file was identified and the tested downloads

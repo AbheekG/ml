@@ -43,7 +43,7 @@ describe("Recording sharing", () => {
     })).toBe(true);
   });
 
-  it("loads exact authenticated playback bytes into a generic MP3 file", async () => {
+  it("loads exact authenticated playback bytes into the requested semantic MP3 file", async () => {
     const bytes = new Uint8Array([0x49, 0x44, 0x33, 1, 2, 3]);
     const fetcher = vi.fn(async () => playbackResponse(bytes));
     const controller = new AbortController();
@@ -52,6 +52,7 @@ describe("Recording sharing", () => {
       "recording/id",
       controller.signal,
       fetcher,
+      "Evening Song — Home rehearsal.mp3",
     );
 
     expect(fetcher).toHaveBeenCalledWith("/api/recordings/recording%2Fid/playback", {
@@ -59,7 +60,7 @@ describe("Recording sharing", () => {
       credentials: "same-origin",
       signal: controller.signal,
     });
-    expect(file.name).toBe("recording.mp3");
+    expect(file.name).toBe("Evening Song — Home rehearsal.mp3");
     expect(file.type).toBe("audio/mpeg");
     expect(file.lastModified).toBe(0);
     expect(new Uint8Array(await file.arrayBuffer())).toEqual(bytes);
@@ -91,7 +92,7 @@ describe("Recording sharing", () => {
     ))).rejects.toMatchObject({ code: "invalid_file" });
   });
 
-  it("shares only the prepared MP3 without title, text, or URL", async () => {
+  it("shares only the prepared MP3 without separate title, text, or URL", async () => {
     const file = new File([new Uint8Array([1, 2, 3])], "recording.mp3", {
       type: "audio/mpeg",
     });

@@ -315,6 +315,10 @@ audio tests, all three TypeScript projects, production build, service-worker
 build `9f78a8f53da9`, whitespace checks, and a zero-result/zero-write query probe
 against the real staging D1 engine.
 
+The current local semantic-filename follow-up leaves both authenticated routes
+and retained media unchanged: it names native-share files from the Song and
+Recording/Scan presentation metadata and awaits deployment.
+
 ## Current execution order
 
 The core read/edit/recovery/search/sharing flows and safe Scan/Recording create/
