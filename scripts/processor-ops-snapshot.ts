@@ -150,6 +150,24 @@ const DEFAULT_OPTIONS: ProcessorOpsSnapshotOptions = {
   enforce: false,
 };
 
+const EXPECTED_SCHEDULER_SCHEDULE = "*/15 * * * *";
+const EXPECTED_SCHEDULER_ATTEMPT_DEADLINE = "30s";
+const EXPECTED_SCHEDULER_OAUTH_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
+const EXPECTED_PROCESSOR_IMAGE_DIGEST =
+  "sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349";
+
+type ProcessorConfigurationExpectations = {
+  schedulerState: string;
+  schedulerSchedule: string;
+  schedulerAttemptDeadline: string;
+  schedulerMaxRetryAttempts: number;
+  schedulerTargetUri: string;
+  schedulerOauthServiceAccountEmail: string;
+  schedulerOauthScope: string;
+  runJobImage: string;
+  schedulerJobsCount: number;
+};
+
 const ALLOWED_STDOUT_KEY_SHAPES = new Set([
   "elapsedMilliseconds,outcome,policyId",
   "elapsedMilliseconds,outcome,playbackKind,policyId",
@@ -386,8 +404,85 @@ function d1ResultRow(raw: unknown): JsonObject {
   return objectValue(results[0], "invalid_d1_result_row");
 }
 
-export function evaluateAlerts(snapshot: Omit<ProcessorOpsSnapshot, "alerts">): ProcessorOpsSnapshot["alerts"] {
+function expectedProcessorConfiguration(
+  options: Pick<
+    ProcessorOpsSnapshotOptions,
+    "projectId" | "region" | "runJob" | "artifactRepo"
+  >,
+): ProcessorConfigurationExpectations {
+  return {
+    schedulerState: "ENABLED",
+    schedulerSchedule: EXPECTED_SCHEDULER_SCHEDULE,
+    schedulerAttemptDeadline: EXPECTED_SCHEDULER_ATTEMPT_DEADLINE,
+    schedulerMaxRetryAttempts: 0,
+    schedulerTargetUri:
+      `https://run.googleapis.com/v2/projects/${options.projectId}/locations/${options.region}/jobs/${options.runJob}:run`,
+    schedulerOauthServiceAccountEmail:
+      `music-audio-scheduler@${options.projectId}.iam.gserviceaccount.com`,
+    schedulerOauthScope: EXPECTED_SCHEDULER_OAUTH_SCOPE,
+    runJobImage:
+      `${options.region}-docker.pkg.dev/${options.projectId}/${options.artifactRepo}/processor@${EXPECTED_PROCESSOR_IMAGE_DIGEST}`,
+    schedulerJobsCount: 1,
+  };
+}
+
+function processorConfigurationDrift(
+  snapshot: Omit<ProcessorOpsSnapshot, "alerts">,
+  expected: ProcessorConfigurationExpectations,
+): string[] {
+  const drift: string[] = [];
+  const compare = (
+    name: string,
+    actual: string | number | null,
+    expectedValue: string | number,
+  ) => {
+    if (actual !== expectedValue) {
+      drift.push(`${name}=${JSON.stringify(actual)} expected=${JSON.stringify(expectedValue)}`);
+    }
+  };
+
+  compare("scheduler.state", snapshot.scheduler.state, expected.schedulerState);
+  compare("scheduler.schedule", snapshot.scheduler.schedule, expected.schedulerSchedule);
+  compare(
+    "scheduler.attemptDeadline",
+    snapshot.scheduler.attemptDeadline,
+    expected.schedulerAttemptDeadline,
+  );
+  compare(
+    "scheduler.maxRetryAttempts",
+    snapshot.scheduler.maxRetryAttempts,
+    expected.schedulerMaxRetryAttempts,
+  );
+  compare("scheduler.targetUri", snapshot.scheduler.targetUri, expected.schedulerTargetUri);
+  compare(
+    "scheduler.oauthServiceAccountEmail",
+    snapshot.scheduler.oauthServiceAccountEmail,
+    expected.schedulerOauthServiceAccountEmail,
+  );
+  compare("scheduler.oauthScope", snapshot.scheduler.oauthScope, expected.schedulerOauthScope);
+  compare("runJob.image", snapshot.runJob.image, expected.runJobImage);
+  compare(
+    "costSurface.schedulerJobsCount",
+    snapshot.costSurface.schedulerJobsCount,
+    expected.schedulerJobsCount,
+  );
+  return drift;
+}
+
+export function evaluateAlerts(
+  snapshot: Omit<ProcessorOpsSnapshot, "alerts">,
+  expectedConfiguration: ProcessorConfigurationExpectations =
+    expectedProcessorConfiguration(DEFAULT_OPTIONS),
+): ProcessorOpsSnapshot["alerts"] {
   const alerts: ProcessorOpsSnapshot["alerts"] = [];
+  const configurationDrift = processorConfigurationDrift(snapshot, expectedConfiguration);
+  if (configurationDrift.length > 0) {
+    alerts.push({
+      code: "processor_configuration_drift",
+      severity: "critical",
+      detail: configurationDrift.join("; "),
+    });
+  }
   if (snapshot.d1.foreignKeyErrors > 0) {
     alerts.push({
       code: "d1_foreign_key_errors",
@@ -496,7 +591,10 @@ export function evaluateAlerts(snapshot: Omit<ProcessorOpsSnapshot, "alerts">): 
 
 export function evaluateAlertsWithLookback(
   snapshot: Omit<ProcessorOpsSnapshot, "alerts">,
-  options: Pick<ProcessorOpsSnapshotOptions, "alertLookbackHours">,
+  options: Pick<
+    ProcessorOpsSnapshotOptions,
+    "alertLookbackHours" | "projectId" | "region" | "runJob" | "artifactRepo"
+  >,
 ): ProcessorOpsSnapshot["alerts"] {
   const alerts = evaluateAlerts({
     ...snapshot,
@@ -511,7 +609,7 @@ export function evaluateAlertsWithLookback(
         exitLines: {},
       },
     },
-  });
+  }, expectedProcessorConfiguration(options));
 
   const capturedAtMilliseconds = isoToMilliseconds(snapshot.capturedAt);
   if (capturedAtMilliseconds === null) {
@@ -902,6 +1000,10 @@ export async function buildProcessorOpsSnapshot(
 
   const alerts = evaluateAlertsWithLookback(snapshotBase, {
     alertLookbackHours: options.alertLookbackHours,
+    projectId: options.projectId,
+    region: options.region,
+    runJob: options.runJob,
+    artifactRepo: options.artifactRepo,
   });
   snapshotBase.logs.stdout.latest = snapshotBase.logs.stdout.latest.slice(0, 10);
   snapshotBase.logs.system.latest = snapshotBase.logs.system.latest.slice(0, 10);

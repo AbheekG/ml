@@ -46,7 +46,7 @@ function runnerFromMap(map: Record<string, unknown>): CommandRunner {
 }
 
 const schedulerDescribe = {
-  state: "PAUSED",
+  state: "ENABLED",
   schedule: "*/15 * * * *",
   lastAttemptTime: tenMinutesAgoIso,
   scheduleTime: twoHoursAgoIso,
@@ -77,7 +77,7 @@ const runJobDescribe = {
           spec: {
             containers: [
               {
-                image: "asia-south1-docker.pkg.dev/music-library-audio-staging/music-audio/processor@sha256:test",
+                image: "asia-south1-docker.pkg.dev/music-library-audio-staging/music-audio/processor@sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349",
               },
             ],
           },
@@ -199,7 +199,7 @@ describe("processor ops snapshot", () => {
     }, runner);
 
     expect(snapshot.schemaVersion).toBe(1);
-    expect(snapshot.scheduler.state).toBe("PAUSED");
+    expect(snapshot.scheduler.state).toBe("ENABLED");
     expect(snapshot.runJob.executionCount).toBe(8);
     expect(snapshot.executions.totalObserved).toBe(2);
     expect(snapshot.executions.byStatus.EXECUTION_SUCCEEDED).toBe(2);
@@ -210,7 +210,67 @@ describe("processor ops snapshot", () => {
     expect(snapshot.d1.missingScanDerivatives).toBe(0);
     expect(snapshot.costSurface.artifactRepoSizeBytes).toBe(429709000);
     expect(snapshot.costSurface.schedulerJobsCount).toBe(1);
-    expect(snapshot.alerts.some((alert) => alert.code === "scheduler_paused")).toBe(true);
+    expect(snapshot.alerts.some((alert) => alert.code === "processor_configuration_drift"))
+      .toBe(false);
+  });
+
+  it("flags Scheduler, invocation identity, and immutable image drift as critical", async () => {
+    const driftedScheduler = structuredClone(schedulerDescribe);
+    Object.assign(driftedScheduler, {
+      state: "PAUSED",
+      schedule: "0 * * * *",
+      attemptDeadline: "60s",
+      retryConfig: { maxRetryAttempts: 2 },
+    });
+    driftedScheduler.httpTarget.uri = "https://example.invalid/wrong-job";
+    driftedScheduler.httpTarget.oauthToken.serviceAccountEmail =
+      "wrong@music-library-audio-staging.iam.gserviceaccount.com";
+    driftedScheduler.httpTarget.oauthToken.scope = "https://www.googleapis.com/auth/userinfo.email";
+
+    const driftedRunJob = structuredClone(runJobDescribe);
+    driftedRunJob.spec.template.spec.template.spec.containers[0]!.image =
+      "asia-south1-docker.pkg.dev/music-library-audio-staging/music-audio/processor:latest";
+
+    const runner = runnerFromMap({
+      "scheduler jobs describe": driftedScheduler,
+      "run jobs describe": driftedRunJob,
+      "run jobs executions list": executionsList,
+      "logs/run.googleapis.com%2Fstdout": stdoutLogs,
+      "logs/run.googleapis.com%2Fvarlog%2Fsystem": systemLogs,
+      "wrangler d1 execute": d1Json,
+      "artifacts repositories describe": artifactDescribe,
+      "scheduler jobs list": [...schedulerList, { name: "unexpected-job" }],
+    });
+
+    const snapshot = await buildProcessorOpsSnapshot({
+      projectId: "music-library-audio-staging",
+      region: "asia-south1",
+      runJob: "music-audio-processor",
+      schedulerJob: "music-audio-processor-quarter-hour",
+      d1Database: "music-library-staging-apac",
+      artifactRepo: "music-audio",
+      stdoutLimit: 200,
+      systemLimit: 120,
+      executionLimit: 200,
+      alertLookbackHours: 24,
+      summary: false,
+      includeExecutionDetails: false,
+      enforce: true,
+    }, runner);
+
+    const alert = snapshot.alerts.find(
+      (candidate) => candidate.code === "processor_configuration_drift",
+    );
+    expect(alert).toEqual(expect.objectContaining({ severity: "critical" }));
+    expect(alert?.detail).toContain("scheduler.state");
+    expect(alert?.detail).toContain("scheduler.schedule");
+    expect(alert?.detail).toContain("scheduler.attemptDeadline");
+    expect(alert?.detail).toContain("scheduler.maxRetryAttempts");
+    expect(alert?.detail).toContain("scheduler.targetUri");
+    expect(alert?.detail).toContain("scheduler.oauthServiceAccountEmail");
+    expect(alert?.detail).toContain("scheduler.oauthScope");
+    expect(alert?.detail).toContain("runJob.image");
+    expect(alert?.detail).toContain("costSurface.schedulerJobsCount");
   });
 
   it("surfaces durable dispatch, upload-intent, and Scan-maintenance drift", async () => {
@@ -532,7 +592,7 @@ describe("processor ops snapshot", () => {
       enforce: false,
     }, runner);
 
-    expect(snapshot.scheduler.state).toBe("PAUSED");
+    expect(snapshot.scheduler.state).toBe("ENABLED");
     expect(snapshot.d1.totalJobs).toBe(1);
     expect(snapshot.d1.foreignKeyErrors).toBe(0);
   });
@@ -581,11 +641,11 @@ describe("processor ops snapshot", () => {
     }, runner);
 
     const summary = buildProcessorOpsSnapshotSummary(snapshot);
-    expect(summary.schedulerState).toBe("PAUSED");
+    expect(summary.schedulerState).toBe("ENABLED");
     expect(summary.runJob.executionCount).toBe(8);
     expect(summary.d1.totalJobs).toBe(1);
     expect(summary.alertCounts.warning).toBeGreaterThan(0);
-    expect(summary.alertCounts.info).toBeGreaterThan(0);
+    expect(summary.alertCounts.info).toBe(0);
     expect(summary.alertCounts.critical).toBe(0);
   });
 });
