@@ -10,8 +10,31 @@ Private legacy file work remains owner-paused; other optional UX refinement,
 audit/cleanup, and production readiness remain separately prioritized and
 approved.
 
-At the application/deployment checkpoint from the 2026-07-21 second audit,
-protected staging ran Worker `e6f1ddc7-4706-4b8b-8b01-0090850b8a23`,
+Current application/deployment checkpoint (2026-07-23): protected staging runs
+Worker `9d69c4fa-a61c-45fe-b977-f3b082ff7443`, client/service-worker build
+`1eb9c1f2e950`, and the unchanged accepted converter image
+`sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
+The audit follow-up now truncates retained upload basenames by Unicode code point,
+normalizes malformed UTF-16 before storage/header encoding, and uses RFC 5987
+for authenticated media response filenames. Migration
+`0020_canonical_recording_dates.sql` adds canonical `YYYY-MM-DD` equality to the
+existing Recording insert/update triggers without rewriting data. The read-only
+processor gate now treats drift in Scheduler state, cadence, deadline, retries,
+target, OAuth identity/scope, Scheduler-job count, or immutable image as
+critical.
+
+The gate passed 63 Vitest files / 449 tests, all 91 Python converter tests, all
+three TypeScript projects, production/service-worker builds, and whitespace
+checks. Read-only postflight found the new Worker at 100%, the expected Access
+redirect, no pending migration, both canonical-date triggers, unchanged 581
+Songs / 335 lyric rows / 499 Scans / 835 Recordings / 1,979 media rows, zero
+noncanonical Recording dates, zero foreign-key errors, and zero query writes.
+The enforced processor snapshot has zero critical/warning alerts. No R2 object,
+converter/Scheduler resource, legacy file, production/DNS setting, or Git remote
+was changed.
+
+At the historical application/deployment checkpoint from the 2026-07-21 second
+audit, protected staging ran Worker `e6f1ddc7-4706-4b8b-8b01-0090850b8a23`,
 client/service-worker build `a450b87fa722`, and audio converter image
 `sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
 Migration `0019_recording_upload_file_identity.sql` is applied with no pending

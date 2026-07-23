@@ -157,16 +157,23 @@ media metadata, bounds declared Scan multipart bodies before parsing, and fixes
 the skip-link and derivative-aware Scan-sharing UI paths. No catalog or media
 row was rewritten by this release.
 
+The 2026-07-23 audit follow-up makes retained upload basenames and authenticated
+media response headers safe for astral Unicode and malformed UTF-16, requires
+persisted Recording dates to use canonical `YYYY-MM-DD` text on both insert and
+update, and makes the enforced processor snapshot fail on drift in Scheduler
+state/cadence/target/identity/retries or the reviewed immutable converter image.
+Migration `0020_canonical_recording_dates.sql` replaces only two validation
+triggers; it does not rewrite application data.
+
 Current protected-staging deployment: Worker
-`44168581-3e07-443b-b7b9-0690596fd87b`, client/service-worker build
+`9d69c4fa-a61c-45fe-b977-f3b082ff7443`, client/service-worker build
 `1eb9c1f2e950`, and audio converter image
 `sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
-Migration `0019_recording_upload_file_identity.sql` is fully applied with its
-two identity columns and four required/immutable-value triggers present; no
-migration is pending. The enforced read-only processor snapshot confirms the
-Scheduler remains enabled, its latest execution succeeded, no job is pending or
-running, and there are no critical or warning alerts. This filename-only Worker
-deployment did not change the converter or Scheduler.
+Migrations through `0020_canonical_recording_dates.sql` are fully applied with
+none pending. The enforced read-only processor snapshot confirms the Scheduler
+and immutable image match the reviewed configuration, its latest execution
+succeeded, no job is pending or running, and there are no critical or warning
+alerts. This Worker/schema deployment did not change the converter or Scheduler.
 Production resources and DNS/cutover remain separately approval-gated.
 
 Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker validates Access JWT signatures, issuer, and audience on every API request using a bounded rotating-key cache, rechecks the active application role, and requires exact same-origin evidence plus the route's expected media type for browser mutations. Generic private-media reads require both an active child and active parent Song. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.
@@ -319,7 +326,10 @@ npm run ops:processor-snapshot
 ```
 
 Add `-- --enforce` to return a non-zero exit code when any `critical` alert is
-present, suitable for CI/automation gates. This command is read-only: it queries
+present, suitable for CI/automation gates. Critical configuration drift covers
+the enabled Scheduler state, quarter-hour cadence, deadline, retry count, exact
+Cloud Run target, dedicated OAuth identity/scope, single Scheduler-job count,
+and reviewed immutable converter image. This command is read-only: it queries
 Cloud Run Job/Scheduler state, recent aggregate processor logs, and D1 aggregate
 invariants for processing jobs, direct dispatch, upload intents, Scan integrity,
 maintenance failures/leases, and foreign keys without mutating cloud resources.

@@ -69,8 +69,9 @@ Rules should be enforced at every relevant layer:
   calendar is `Asia/Kolkata`: browser and server both use the current date in
   India as the latest allowed date. The field keeps its short normal label; only
   while the device and India have different dates does it show a compact India-
-  date note. Stored values remain timezone-free calendar dates and are not
-  converted or rewritten for viewers elsewhere.
+  date note. Stored values use exact timezone-free `YYYY-MM-DD` text; D1 enforces
+  that canonical form on both insert and update. Dates are not converted or
+  rewritten for viewers elsewhere.
 - Recording contributors remain optional and hidden when absent. The original audio is retained, with a compatible playback derivative generated when required.
 
 ### Media upload and playback
@@ -82,6 +83,10 @@ Rules should be enforced at every relevant layer:
   the basename in storage metadata; do not replace it with an internal ID or
   erase it through a presentation-only change. See
   [media-filename-presentation.md](media-filename-presentation.md).
+- Normalize malformed UTF-16 in a retained basename before storage, truncate only
+  at complete Unicode code-point boundaries, and encode authenticated media
+  response filenames with RFC 5987. This protects provenance and response
+  construction without renaming any existing R2 object.
 - Inspect actual file signatures/codecs rather than trusting extensions and calculate a SHA-256 content fingerprint before finalizing an upload.
 - Reject an accidental exact-content duplicate and link to the existing record.
   For Recordings, compare the upload with both retained originals and generated
