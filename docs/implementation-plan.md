@@ -610,6 +610,15 @@ Deliverable: safe online maintenance by the primary editor.
 
 ## Phase 5 — later improvements
 
+- admin-only portable preservation export is the next selected slice: create a
+  transactionally frozen metadata/media plan behind the existing Access/admin
+  boundary, build and verify a human-readable BagIt + RO-Crate + ZIP64 archive
+  locally, and prove importability with an idempotent dry-run-capable local
+  reference restore. Do not add a normal cloud import or upload the final
+  archive to R2. The exact scope, security boundary, package profile, tests, and
+  protected-staging gate are in
+  [portable-library-export.md](portable-library-export.md) and
+  [portable-library-archive-profile.md](portable-library-archive-profile.md);
 - further phonetic/transliteration tuning, language-specific alternatives, or a field-scope control only if tested real queries expose remaining gaps;
 - compact repeatable credit rows are now implemented locally for Song editing,
   Recording editing, and new Recording upload: an Add contributor action,
