@@ -83,6 +83,29 @@ describe("Recording multipart upload contract", () => {
       .resolves.toMatch(/^[a-f0-9]{64}$/u);
   });
 
+  it("truncates original names by Unicode code point and replaces malformed UTF-16", () => {
+    const parsed = parseRecordingUploadCreate({
+      clientMutationId: "123e4567-e89b-42d3-a456-426614174000",
+      fileManifestSha256: "e".repeat(64),
+      filename: `${"a".repeat(254)}😀tail`,
+      byteSize: 3,
+    });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) throw new Error("fixture failed");
+    expect(parsed.data.filename).toBe(`${"a".repeat(254)}😀`);
+    expect(Array.from(parsed.data.filename)).toHaveLength(255);
+
+    const malformed = parseRecordingUploadCreate({
+      clientMutationId: "123e4567-e89b-42d3-a456-426614174001",
+      fileManifestSha256: "f".repeat(64),
+      filename: `take-\ud800.wav`,
+      byteSize: 3,
+    });
+    expect(malformed.success).toBe(true);
+    if (!malformed.success) throw new Error("fixture failed");
+    expect(malformed.data.filename).toBe("take-\ufffd.wav");
+  });
+
   it("requires a complete replacement target and rejects extra replacement fields", () => {
     expect(parseRecordingUploadCreate({
       clientMutationId: "123e4567-e89b-42d3-a456-426614174000",

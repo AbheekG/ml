@@ -20,6 +20,14 @@ describe("Scan media validation", () => {
     expect(safeUploadFilename("", "png")).toBe("scan.png");
   });
 
+  it("truncates names by Unicode code point and replaces malformed UTF-16", () => {
+    const longName = `${"a".repeat(246)}😀${"z".repeat(20)}`;
+    const filename = safeUploadFilename(longName, "png");
+    expect(filename).toBe(`${"a".repeat(246)}😀.png`);
+    expect(Array.from(filename)).toHaveLength(251);
+    expect(safeUploadFilename(`page-\ud800.png`, "png")).toBe("page-\ufffd.png");
+  });
+
   it("rejects oversized declared multipart bodies before parsing them", () => {
     expect(scanUploadRequestIsTooLarge(undefined)).toBe(false);
     expect(scanUploadRequestIsTooLarge(String(MAX_SCAN_UPLOAD_REQUEST_BYTES))).toBe(false);

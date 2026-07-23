@@ -47,6 +47,7 @@ import {
   scanUploadRequestIsTooLarge,
   sha256Hex,
 } from "./media-upload";
+import { encodeRfc5987Filename } from "./filename-safety";
 import {
   createScanReadabilityDerivative,
   scanReadabilityObjectKey,
@@ -6226,7 +6227,10 @@ app.get("/api/scans/:scanId/image", async (context) => {
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("Content-Type", scan.mimeType ?? "application/octet-stream");
-  headers.set("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(scan.filename)}`);
+  headers.set(
+    "Content-Disposition",
+    `inline; filename*=UTF-8''${encodeRfc5987Filename(scan.filename)}`,
+  );
   headers.set("Content-Length", String(object.size));
   headers.set("Cache-Control", "private, no-store");
   headers.set("ETag", object.httpEtag);
@@ -6347,7 +6351,10 @@ app.get("/api/media/:mediaId", async (context) => {
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("Content-Type", media.mimeType ?? "application/octet-stream");
-  headers.set("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(media.filename)}`);
+  headers.set(
+    "Content-Disposition",
+    `inline; filename*=UTF-8''${encodeRfc5987Filename(media.filename)}`,
+  );
   headers.set("Accept-Ranges", "bytes");
   headers.set("Cache-Control", "private, no-store");
   headers.set("ETag", object.httpEtag);

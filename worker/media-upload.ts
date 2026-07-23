@@ -1,3 +1,5 @@
+import { truncateFilename, wellFormedFilename } from "./filename-safety";
+
 // Cloudflare's private Images binding accepts at most 20 MB of source bytes.
 export const MAX_SCAN_UPLOAD_BYTES = 20_000_000;
 export const MAX_SCAN_UPLOAD_REQUEST_BYTES = MAX_SCAN_UPLOAD_BYTES + 1_048_576;
@@ -32,11 +34,13 @@ export function inspectScanImage(bytes: Uint8Array): ScanImageType | null {
 }
 
 export function safeUploadFilename(value: string, extension: ScanImageType["extension"]): string {
-  const basename = value.replaceAll("\0", "").split(/[\\/]/u).at(-1)?.trim() ?? "";
+  const basename = wellFormedFilename(
+    value.replaceAll("\0", "").split(/[\\/]/u).at(-1)?.trim() ?? "",
+  );
   const fallback = `scan.${extension}`;
   if (!basename) return fallback;
-  if (basename.length <= 255) return basename;
-  return `${basename.slice(0, 250 - extension.length)}.${extension}`;
+  if (Array.from(basename).length <= 255) return basename;
+  return `${truncateFilename(basename, 250 - extension.length)}.${extension}`;
 }
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {

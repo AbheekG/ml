@@ -1776,7 +1776,7 @@ describe("Worker API", () => {
       prepare: () => ({ bind: () => ({ first: async () => ({
         id: "media-1",
         objectKey: "recordings/example.mp3",
-        filename: "example.mp3",
+        filename: "take'\ud800.mp3",
         mimeType: "audio/mpeg",
       }) }) }),
     } as unknown as D1Database;
@@ -1798,6 +1798,8 @@ describe("Worker API", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("audio/mpeg");
+    expect(response.headers.get("content-disposition"))
+      .toBe("inline; filename*=UTF-8''take%27%EF%BF%BD.mp3");
     expect(response.headers.get("accept-ranges")).toBe("bytes");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     await expect(response.text()).resolves.toBe("audio");
@@ -1807,7 +1809,7 @@ describe("Worker API", () => {
     const database = {
       prepare: () => ({ bind: () => ({ first: async () => ({
         objectKey: "scans/readability/media-1.jpg",
-        filename: "private-page.png",
+        filename: "page (漢字).png",
         mimeType: "image/jpeg",
         isDerivative: 1,
       }) }) }),
@@ -1835,6 +1837,8 @@ describe("Worker API", () => {
     expect(response.status).toBe(200);
     expect(requestedKey).toBe("scans/readability/media-1.jpg");
     expect(response.headers.get("content-type")).toBe("image/jpeg");
+    expect(response.headers.get("content-disposition"))
+      .toBe("inline; filename*=UTF-8''page%20%28%E6%BC%A2%E5%AD%97%29.png");
     expect(response.headers.get("content-length")).toBe(String(image.byteLength));
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("x-scan-representation")).toBe("readability");

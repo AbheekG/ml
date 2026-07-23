@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { truncateFilename, wellFormedFilename } from "./filename-safety";
 import { parseRecordingCreateMetadata } from "./recording-writes";
 
 export const RECORDING_UPLOAD_PART_BYTES = 8 * 1024 * 1024;
@@ -83,8 +84,10 @@ export type RecordingUploadReplacementParseResult =
   | { success: false; fields: Record<string, string[]> };
 
 function safeOriginalFilename(value: string): string {
-  const basename = value.replaceAll("\0", "").split(/[\\/]/u).at(-1)?.trim() ?? "";
-  return (basename || "recording").slice(0, 255);
+  const basename = wellFormedFilename(
+    value.replaceAll("\0", "").split(/[\\/]/u).at(-1)?.trim() ?? "",
+  );
+  return truncateFilename(basename || "recording", 255);
 }
 
 function mimeTypeHint(value: string | null | undefined): string | null {
