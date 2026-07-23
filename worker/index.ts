@@ -96,6 +96,18 @@ import {
   validGoogleJobTriggerConfig,
   type GoogleJobTriggerConfig,
 } from "./google-job-trigger";
+import {
+  cleanupPortableExports,
+  createPortableExport,
+  loadPortableExport,
+  pagePortableExportItems,
+  pagePortableExportRecords,
+  parsePortableExportCreate,
+  parsePortablePage,
+  portableExportContentResponse,
+  revokePortableExport,
+  validPortableSourceCommit,
+} from "./portable-export";
 
 export type AppRole = "viewer" | "editor" | "admin";
 export type AppUser = {
@@ -112,6 +124,7 @@ type Bindings = {
   ACCESS_AUD: string;
   ACCESS_ISSUER: string;
   ACCESS_JWKS_URL: string;
+  SOURCE_COMMIT?: string;
   LOCAL_ROLE?: AppRole;
   AUDIO_PROCESSOR_TOKEN?: string;
   AUDIO_PROCESSOR_TRANSFER_ORIGIN?: string;
@@ -2328,6 +2341,145 @@ app.post("/api/logout", (context) => {
       "Clear-Site-Data": '"cache"',
     },
   });
+});
+
+app.post("/api/admin/portable-exports", requireRole("admin"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  const input = parsePortableExportCreate(body);
+  if (!input.success) return context.json({ error: "invalid_portable_export_request" }, 400);
+  const sourceCommit = context.env.SOURCE_COMMIT
+    ?? (context.env.AUTH_MODE === "local" ? "local-development" : undefined);
+  if (!validPortableSourceCommit(sourceCommit)) {
+    return context.json({ error: "portable_export_not_configured" }, 503);
+  }
+  let session;
+  try {
+    session = await createPortableExport(
+      context.env.DB,
+      context.get("appUser").identity,
+      sourceCommit,
+      context.env.AUTH_MODE === "local" ? "local-development" : "protected-staging",
+      input.clientMutationId,
+    );
+  } catch {
+    return context.json({ error: "portable_export_preparation_failed" }, 503);
+  }
+  if (session.state === "failed") {
+    return context.json({
+      error: "portable_export_precondition_failed",
+      export: session,
+    }, 409);
+  }
+  return context.json({ export: session }, 201);
+});
+
+app.get("/api/admin/portable-exports/:exportId", requireRole("admin"), async (context) => {
+  const exportId = context.req.param("exportId");
+  if (!/^[0-9a-f]{32}$/u.test(exportId)) {
+    return context.json({ error: "portable_export_not_found" }, 404);
+  }
+  const session = await loadPortableExport(
+    context.env.DB,
+    exportId,
+    context.get("appUser").identity,
+  );
+  if (!session) return context.json({ error: "portable_export_not_found" }, 404);
+  return context.json({ export: session });
+});
+
+app.get("/api/admin/portable-exports/:exportId/records", requireRole("admin"), async (context) => {
+  const exportId = context.req.param("exportId");
+  const page = parsePortablePage(new URL(context.req.url));
+  if (!page) return context.json({ error: "invalid_portable_export_page" }, 400);
+  const session = await loadPortableExport(
+    context.env.DB,
+    exportId,
+    context.get("appUser").identity,
+  );
+  if (!session) return context.json({ error: "portable_export_not_found" }, 404);
+  if (session.state === "revoked" || session.state === "expired") {
+    return context.json({ error: `portable_export_${session.state}` }, 410);
+  }
+  if (session.state !== "ready" || session.detailPurgedAt) {
+    return context.json({ error: "portable_export_unavailable" }, 409);
+  }
+  const result = await pagePortableExportRecords(
+    context.env.DB,
+    exportId,
+    context.get("appUser").identity,
+    page,
+  );
+  if (!result) return context.json({ error: "portable_export_unavailable" }, 409);
+  return context.json(result);
+});
+
+app.get("/api/admin/portable-exports/:exportId/items", requireRole("admin"), async (context) => {
+  const exportId = context.req.param("exportId");
+  const page = parsePortablePage(new URL(context.req.url));
+  if (!page) return context.json({ error: "invalid_portable_export_page" }, 400);
+  const session = await loadPortableExport(
+    context.env.DB,
+    exportId,
+    context.get("appUser").identity,
+  );
+  if (!session) return context.json({ error: "portable_export_not_found" }, 404);
+  if (session.state === "revoked" || session.state === "expired") {
+    return context.json({ error: `portable_export_${session.state}` }, 410);
+  }
+  if (session.state !== "ready" || session.detailPurgedAt) {
+    return context.json({ error: "portable_export_unavailable" }, 409);
+  }
+  const result = await pagePortableExportItems(
+    context.env.DB,
+    exportId,
+    context.get("appUser").identity,
+    page,
+  );
+  if (!result) return context.json({ error: "portable_export_unavailable" }, 409);
+  return context.json({
+    ...result,
+    items: result.items.map((item) => ({
+      ...item,
+      contentPath: `/api/admin/portable-exports/${exportId}/items/${item.id}/content`,
+    })),
+  });
+});
+
+app.get(
+  "/api/admin/portable-exports/:exportId/items/:itemId/content",
+  requireRole("admin"),
+  portableExportContentResponse,
+);
+
+app.post("/api/admin/portable-exports/:exportId/revoke", requireRole("admin"), async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: "invalid_json" }, 400);
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) {
+    return context.json({ error: "invalid_portable_export_revoke" }, 400);
+  }
+  const exportId = context.req.param("exportId");
+  if (!/^[0-9a-f]{32}$/u.test(exportId)) {
+    return context.json({ error: "portable_export_not_found" }, 404);
+  }
+  const session = await revokePortableExport(
+    context.env.DB,
+    exportId,
+    context.get("appUser").identity,
+  );
+  if (!session) return context.json({ error: "portable_export_not_found" }, 404);
+  if (session.state !== "revoked") {
+    return context.json({ error: `portable_export_${session.state}` }, 409);
+  }
+  return context.json({ export: session });
 });
 
 app.get("/api/song-editor/options", requireRole("editor"), async (context) => {
@@ -6678,8 +6830,15 @@ export default {
     return app.fetch(request, env, executionContext);
   },
   scheduled(_controller, env, executionContext) {
-    executionContext.waitUntil(processPendingScans(env, 5).then((result) => {
-      console.log(JSON.stringify({ event: "scan_maintenance", ...result }));
+    executionContext.waitUntil(Promise.all([
+      processPendingScans(env, 5),
+      cleanupPortableExports(env.DB),
+    ]).then(([scanResult, exportResult]) => {
+      console.log(JSON.stringify({
+        event: "scheduled_maintenance",
+        scans: scanResult,
+        portableExports: exportResult,
+      }));
     }));
   },
 } satisfies ExportedHandler<Bindings>;

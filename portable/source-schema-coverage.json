@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "sourceSchema": "0020",
+  "sourceSchema": "0021",
   "tables": {
     "app_users": {
       "treatment": "included_as_historical_actors",
@@ -42,6 +42,18 @@
     "people": {
       "treatment": "included_as_people",
       "includedColumns": ["id", "full_name", "normalized_name", "created_at", "updated_at"]
+    },
+    "portable_export_items": {
+      "treatment": "excluded_derived_export_state_and_storage_locators",
+      "excludedColumns": ["id", "export_id", "source_kind", "source_id", "representation", "object_key", "mime_type", "byte_size", "sha256"]
+    },
+    "portable_export_records": {
+      "treatment": "excluded_derived_export_state",
+      "excludedColumns": ["export_id", "record_kind", "record_key", "order_key", "frozen_json"]
+    },
+    "portable_export_sessions": {
+      "treatment": "excluded_derived_export_state",
+      "excludedColumns": ["id", "profile_version", "client_mutation_id", "request_fingerprint", "state", "source_schema_version", "source_commit", "source_environment", "snapshot_at", "created_at", "created_by", "expires_at", "record_count", "item_count", "planned_bytes", "plan_digest", "ready_at", "revoked_at", "expired_at", "failed_at", "failure_code", "detail_purged_at"]
     },
     "recording_credits": {
       "treatment": "included_as_recording_relationships",
