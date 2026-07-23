@@ -41,6 +41,7 @@ CREATE TABLE portable_export_sessions (
   record_count INTEGER NOT NULL DEFAULT 0 CHECK (record_count >= 0),
   item_count INTEGER NOT NULL DEFAULT 0 CHECK (item_count >= 0),
   planned_bytes INTEGER NOT NULL DEFAULT 0 CHECK (planned_bytes >= 0),
+  summary_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(summary_json)),
   plan_digest TEXT CHECK (
     plan_digest IS NULL
     OR (
@@ -241,7 +242,7 @@ BEFORE UPDATE OF
   id, profile_version, client_mutation_id, request_fingerprint,
   source_schema_version, source_commit, source_environment,
   snapshot_at, created_at, created_by, expires_at,
-  record_count, item_count, planned_bytes, plan_digest, ready_at
+  record_count, item_count, planned_bytes, summary_json, plan_digest, ready_at
 ON portable_export_sessions
 WHEN OLD.state <> 'preparing'
 BEGIN

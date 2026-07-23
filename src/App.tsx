@@ -5,6 +5,7 @@ import { ActionContent } from "./ActionContent";
 import { CatalogControls } from "./CatalogControls";
 import { RecordingUploadPage } from "./RecordingUploadPage";
 import { RecordingDateField } from "./RecordingDateField";
+import { PortableBackupSection } from "./PortableBackupSection";
 import { CreditRows } from "./CreditRows";
 import { MoveToSongForm } from "./MoveToSongForm";
 import { SkipLink } from "./SkipLink";
@@ -2295,11 +2296,13 @@ function SongEditorPage({
   );
 }
 
-function AccountPage({
+export function AccountPage({
   session,
+  isOnline,
   onLogout,
 }: {
   session: AppSession | null;
+  isOnline: boolean;
   onLogout: () => Promise<void>;
 }) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -2317,6 +2320,7 @@ function AccountPage({
           <dd>{session?.role ?? "Unavailable"}</dd>
         </div>
       </dl>
+      {session?.role === "admin" && <PortableBackupSection isOnline={isOnline} />}
       <button
         className="danger-action"
         type="button"
@@ -2781,7 +2785,7 @@ export function App() {
         <Route path="/songs/:songId" element={<SongDetailPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/trash" element={<TrashPage isOnline={isOnline} canEdit={canEdit} />} />
         <Route path="/manage" element={<ManageLookupsPage isOnline={isOnline} canEdit={canEdit} />} />
-        <Route path="/account" element={<AccountPage session={session} onLogout={logoutAndClear} />} />
+        <Route path="/account" element={<AccountPage session={session} isOnline={isOnline} onLogout={logoutAndClear} />} />
         <Route path="*" element={<Navigate to="/songs" replace />} />
       </Routes>}
 

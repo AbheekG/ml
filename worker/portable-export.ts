@@ -21,6 +21,16 @@ export type PortableExportSession = {
   recordCount: number;
   itemCount: number;
   plannedBytes: number;
+  activeSongs: number | null;
+  trashedSongs: number | null;
+  activeLyrics: number | null;
+  trashedLyrics: number | null;
+  activeScans: number | null;
+  trashedScans: number | null;
+  activeRecordings: number | null;
+  trashedRecordings: number | null;
+  historyRelationships: number | null;
+  unassignedMedia: number | null;
   planDigest: string | null;
   readyAt: string | null;
   revokedAt: string | null;
@@ -311,6 +321,16 @@ const SESSION_SELECT = `
     record_count AS recordCount,
     item_count AS itemCount,
     planned_bytes AS plannedBytes,
+    json_extract(summary_json, '$.activeSongs') AS activeSongs,
+    json_extract(summary_json, '$.trashedSongs') AS trashedSongs,
+    json_extract(summary_json, '$.activeLyrics') AS activeLyrics,
+    json_extract(summary_json, '$.trashedLyrics') AS trashedLyrics,
+    json_extract(summary_json, '$.activeScans') AS activeScans,
+    json_extract(summary_json, '$.trashedScans') AS trashedScans,
+    json_extract(summary_json, '$.activeRecordings') AS activeRecordings,
+    json_extract(summary_json, '$.trashedRecordings') AS trashedRecordings,
+    json_extract(summary_json, '$.historyRelationships') AS historyRelationships,
+    json_extract(summary_json, '$.unassignedMedia') AS unassignedMedia,
     plan_digest AS planDigest,
     ready_at AS readyAt,
     revoked_at AS revokedAt,
@@ -472,6 +492,34 @@ export async function createPortableExport(
           planned_bytes = COALESCE((
             SELECT SUM(byte_size) FROM portable_export_items WHERE export_id = ?
           ), 0),
+          summary_json = json_object(
+            'activeSongs', (SELECT COUNT(*) FROM songs WHERE trashed_at IS NULL),
+            'trashedSongs', (SELECT COUNT(*) FROM songs WHERE trashed_at IS NOT NULL),
+            'activeLyrics', (SELECT COUNT(*) FROM lyric_texts WHERE trashed_at IS NULL),
+            'trashedLyrics', (SELECT COUNT(*) FROM lyric_texts WHERE trashed_at IS NOT NULL),
+            'activeScans', (SELECT COUNT(*) FROM scans WHERE trashed_at IS NULL),
+            'trashedScans', (SELECT COUNT(*) FROM scans WHERE trashed_at IS NOT NULL),
+            'activeRecordings', (SELECT COUNT(*) FROM recordings WHERE trashed_at IS NULL),
+            'trashedRecordings', (SELECT COUNT(*) FROM recordings WHERE trashed_at IS NOT NULL),
+            'historyRelationships', (
+              (SELECT COUNT(*) FROM scan_media_history)
+              + (SELECT COUNT(*) FROM recording_media_history)
+              + (SELECT COUNT(*) FROM media_parent_moves)
+            ),
+            'unassignedMedia', (
+              SELECT COUNT(*)
+              FROM media_objects
+              WHERE id NOT IN (
+                SELECT media_id FROM scans
+                UNION SELECT original_media_id FROM recordings
+                UNION SELECT playback_media_id FROM recordings WHERE playback_media_id IS NOT NULL
+                UNION SELECT media_id FROM scan_media_history
+                UNION SELECT original_media_id FROM recording_media_history
+                UNION SELECT playback_media_id FROM recording_media_history
+                  WHERE playback_media_id IS NOT NULL
+              )
+            )
+          ),
           plan_digest = ?,
           ready_at = ?
       WHERE id = ? AND state = 'preparing'

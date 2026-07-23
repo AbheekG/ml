@@ -881,6 +881,42 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.portable-backup {
+  margin: 2rem 0;
+}
+
+.portable-backup h2 {
+  margin-top: 0.2rem;
+}
+
+.portable-requirements {
+  display: grid;
+  gap: 0.45rem;
+  padding-left: 1.25rem;
+}
+
+.portable-export-summary {
+  margin-block: 0;
+}
+
+.portable-export-actions {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.portable-command {
+  padding: 0.8rem 1rem;
+  overflow-wrap: anywhere;
+  border-left: 4px solid var(--accent);
+  border-radius: 0.35rem;
+  background: #f4eadb;
+}
+
+.portable-command code {
+  display: block;
+  white-space: normal;
+}
+
 .editor-heading {
   max-width: 48rem;
   margin-bottom: 2rem;

@@ -53,7 +53,7 @@
     },
     "portable_export_sessions": {
       "treatment": "excluded_derived_export_state",
-      "excludedColumns": ["id", "profile_version", "client_mutation_id", "request_fingerprint", "state", "source_schema_version", "source_commit", "source_environment", "snapshot_at", "created_at", "created_by", "expires_at", "record_count", "item_count", "planned_bytes", "plan_digest", "ready_at", "revoked_at", "expired_at", "failed_at", "failure_code", "detail_purged_at"]
+      "excludedColumns": ["id", "profile_version", "client_mutation_id", "request_fingerprint", "state", "source_schema_version", "source_commit", "source_environment", "snapshot_at", "created_at", "created_by", "expires_at", "record_count", "item_count", "planned_bytes", "summary_json", "plan_digest", "ready_at", "revoked_at", "expired_at", "failed_at", "failure_code", "detail_purged_at"]
     },
     "recording_credits": {
       "treatment": "included_as_recording_relationships",
