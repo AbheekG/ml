@@ -243,6 +243,41 @@ future digest or changed processing path. The first approved Cloud Run no-work
 execution must still prove readability of the platform's actual root-owned
 secret volume.
 
+### Accepted residual CRI ADX/AAX decoder risk
+
+Artifact Analysis is continuously updated even when an image digest is
+unchanged. A 2026-07-23 recheck added later disclosures to the deployed
+Debian-trixie image. A fresh package-and-runtime-path review found the current
+critical/high Perl, ACL/attr, Expat, JPEG XL, hardware-video, video-decoder,
+subtitle, network-demuxer, and unused-output-muxer findings outside the hosted
+processor's execution contract. One newly disclosed FFmpeg issue,
+`CVE-2026-64835`, is different: a deliberately crafted CRI ADX/AAX game-audio
+file can reach the `adpcm_adx` decoder because every selected audio stream is
+fully decoded before the normal MP3 policy is applied. CRI AAX is not Audible
+AAX, and ordinary MP3, M4A/AAC, WAV, FLAC, and Ogg uploads do not exercise this
+decoder.
+
+The owner accepts this residual risk for the current small private deployment:
+
+- Cloudflare Access admits only allowlisted identities, the Worker independently
+  requires an active application account, and Recording-upload routes require
+  the `editor` role (which also permits administrators); viewers cannot upload;
+- the users and their audio sources are trusted, and the library does not
+  intentionally use CRI ADX/AAX game-audio files;
+- the processor remains non-root, single-task, resource/deadline bounded, and
+  restricted to local `file,pipe` FFmpeg inputs; and
+- Debian currently offers no straightforward patched package for the pinned
+  runtime, while maintaining a custom FFmpeg build would be disproportionate
+  for this threat model.
+
+Do not rebuild or redeploy solely to clear this accepted finding. Reopen the
+decision when Debian publishes a suitable patched FFmpeg package, the identity
+or upload trust boundary expands, CRI ADX/AAX support becomes intentional, the
+processor contract changes, or a future scan identifies another finding
+reachable through selected-audio probing or decoding. This is a path- and
+threat-model-specific acceptance, not a blanket waiver for future scanner
+results.
+
 ## Protected-staging state
 
 The credential/runtime rollout is complete in staging. Secret Manager retains
