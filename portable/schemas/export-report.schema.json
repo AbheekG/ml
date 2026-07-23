@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:music-library:schema:portable-export-report:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profile",
+    "exportId",
+    "snapshotAt",
+    "toolVersion",
+    "archiveFilename",
+    "archiveBytes",
+    "counts",
+    "download",
+    "manifestEntries",
+    "verificationStartedAt",
+    "verificationCompletedAt",
+    "gates",
+    "reconciliationDigest",
+    "verified"
+  ],
+  "properties": {
+    "profile": {
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "const": "urn:music-library:portable-archive-profile:1" },
+        "version": { "const": "1.0.0" }
+      }
+    },
+    "exportId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "snapshotAt": { "type": "string", "format": "date-time" },
+    "toolVersion": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "archiveFilename": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "archiveBytes": { "type": "integer", "minimum": 1 },
+    "counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+    "download": {
+      "type": "object",
+      "required": ["attempts", "resumes", "transferredBytes"],
+      "properties": {
+        "attempts": { "type": "integer", "minimum": 0 },
+        "resumes": { "type": "integer", "minimum": 0 },
+        "transferredBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "manifestEntries": { "type": "integer", "minimum": 1 },
+    "verificationStartedAt": { "type": "string", "format": "date-time" },
+    "verificationCompletedAt": { "type": "string", "format": "date-time" },
+    "gates": { "type": "object", "additionalProperties": { "const": "passed" } },
+    "reconciliationDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "verified": { "const": true }
+  }
+}

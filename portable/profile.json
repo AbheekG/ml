@@ -1,0 +1,25 @@
+{
+  "$schema": "./schemas/profile.schema.json",
+  "id": "urn:music-library:portable-archive-profile:1",
+  "version": "1.0.0",
+  "bagItVersion": "1.0",
+  "roCrateVersion": "1.3",
+  "hashAlgorithm": "sha256",
+  "zipCompression": "stored",
+  "zip64": true,
+  "textEncoding": "UTF-8",
+  "pathRules": {
+    "normalization": "NFC",
+    "caseCollision": "unicode-casefold-approximation",
+    "maxComponentUtf8Bytes": 120,
+    "maxPathUtf8Bytes": 512,
+    "stableIdSuffixLength": 8
+  },
+  "limits": {
+    "maxCatalogBytes": 67108864,
+    "maxKitEntryBytes": 67108864,
+    "maxArchiveEntries": 100000,
+    "maxArchiveBytes": 1099511627776,
+    "maxExpansionRatio": 1
+  }
+}

@@ -1,0 +1,128 @@
+{
+  "version": "1.0.0",
+  "sourceSchema": "0020",
+  "tables": {
+    "app_users": {
+      "treatment": "included_as_historical_actors",
+      "includedColumns": ["identity", "display_name", "role", "is_active", "created_at", "updated_at"]
+    },
+    "audio_derivatives": {
+      "treatment": "included_as_derivative_provenance",
+      "includedColumns": ["playback_media_id", "source_media_id", "policy_id", "source_sha256", "source_byte_size", "derivative_sha256", "derivative_byte_size"]
+    },
+    "audio_processing_dispatch_attempts": {
+      "treatment": "excluded_operational_dispatch_state",
+      "excludedColumns": ["id", "job_id", "trigger_source", "status", "requested_at", "requested_by", "completed_at", "error_code"]
+    },
+    "audio_processing_jobs": {
+      "treatment": "excluded_operational_processing_state",
+      "excludedColumns": ["id", "recording_id", "source_media_id", "source_sha256", "source_byte_size", "policy_id", "status", "attempt_count", "lease_token_hash", "lease_expires_at", "playback_kind", "derivative_media_id", "error_code", "created_at", "updated_at"]
+    },
+    "languages": {
+      "treatment": "included_as_vocabulary",
+      "includedColumns": ["id", "display_name", "bcp47_tag", "sort_order", "normalized_name"]
+    },
+    "lyric_texts": {
+      "treatment": "included_as_song_children_and_exact_utf8_payloads",
+      "includedColumns": ["id", "song_id", "content", "origin", "sort_order", "revision", "created_at", "created_by", "updated_at", "updated_by", "trashed_at", "trashed_by"]
+    },
+    "media_objects": {
+      "treatment": "included_as_durable_representations",
+      "includedColumns": ["id", "original_filename", "mime_type", "byte_size", "sha256", "kind", "state", "created_at", "created_by", "trashed_at", "trashed_by"],
+      "serverOnlyColumns": { "object_key": "storage locator used only by authenticated content routing" }
+    },
+    "media_parent_moves": {
+      "treatment": "included_as_relationship_history",
+      "includedColumns": ["id", "scan_id", "recording_id", "from_song_id", "to_song_id", "moved_at", "moved_by"]
+    },
+    "notebooks": {
+      "treatment": "included_as_vocabulary",
+      "includedColumns": ["id", "display_name", "sort_order", "normalized_name"]
+    },
+    "people": {
+      "treatment": "included_as_people",
+      "includedColumns": ["id", "full_name", "normalized_name", "created_at", "updated_at"]
+    },
+    "recording_credits": {
+      "treatment": "included_as_recording_relationships",
+      "includedColumns": ["id", "recording_id", "person_id", "role", "sort_order"]
+    },
+    "recording_media_history": {
+      "treatment": "included_as_replacement_history",
+      "includedColumns": ["id", "recording_id", "original_media_id", "playback_media_id", "replaced_at", "replaced_by", "revision_at_replacement"]
+    },
+    "recording_upload_credits": {
+      "treatment": "excluded_operational_upload_state",
+      "excludedColumns": ["session_id", "person_id", "role", "sort_order"]
+    },
+    "recording_upload_intents": {
+      "treatment": "excluded_operational_upload_state",
+      "excludedColumns": ["session_id", "intent_kind", "target_recording_id", "target_recording_revision", "created_at", "created_by"]
+    },
+    "recording_upload_parts": {
+      "treatment": "excluded_operational_upload_state_and_etags",
+      "excludedColumns": ["session_id", "part_number", "etag", "byte_size", "uploaded_at", "uploaded_by", "sha256"]
+    },
+    "recording_upload_sessions": {
+      "treatment": "excluded_operational_upload_state_and_storage_capabilities",
+      "excludedColumns": ["id", "song_id", "client_mutation_id", "request_fingerprint", "description", "recorded_on", "original_filename", "mime_type_hint", "byte_size", "part_size", "part_count", "object_key", "r2_upload_id", "status", "revision", "sha256", "duplicate_media_id", "recording_id", "error_code", "expires_at", "created_at", "created_by", "updated_at", "updated_by", "file_manifest_sha256"]
+    },
+    "recordings": {
+      "treatment": "included_as_song_children",
+      "includedColumns": ["id", "song_id", "original_media_id", "playback_media_id", "legacy_version", "recorded_on", "legacy_notes", "revision", "created_at", "created_by", "updated_at", "updated_by", "trashed_at", "trashed_by", "description", "normalized_description", "processing_state", "processing_error"]
+    },
+    "scan_fingerprint_members": {
+      "treatment": "included_as_duplicate_preservation_annotations",
+      "includedColumns": ["media_id", "sha256", "is_historical_duplicate", "registered_at"]
+    },
+    "scan_fingerprints": {
+      "treatment": "included_as_duplicate_preservation_annotations",
+      "includedColumns": ["sha256", "canonical_media_id", "first_seen_at"]
+    },
+    "scan_maintenance_failures": {
+      "treatment": "excluded_operational_retry_state",
+      "excludedColumns": ["media_id", "stage", "error_code", "attempt_count", "first_failed_at", "last_failed_at", "retry_after"]
+    },
+    "scan_maintenance_leases": {
+      "treatment": "excluded_operational_lease_state",
+      "excludedColumns": ["media_id", "lease_token", "leased_at", "lease_expires_at"]
+    },
+    "scan_media_history": {
+      "treatment": "included_as_replacement_history",
+      "includedColumns": ["id", "scan_id", "media_id", "replaced_at", "replaced_by", "revision_at_replacement"]
+    },
+    "scan_readability_derivatives": {
+      "treatment": "included_as_derivative_provenance",
+      "includedColumns": ["source_media_id", "source_sha256", "source_byte_size", "mime_type", "byte_size", "sha256", "width", "height", "policy_id", "created_at", "created_by"],
+      "serverOnlyColumns": { "object_key": "storage locator used only by authenticated content routing" }
+    },
+    "scans": {
+      "treatment": "included_as_song_children",
+      "includedColumns": ["id", "song_id", "media_id", "notebook_id", "page_label", "legacy_version", "legacy_captured_on", "legacy_source", "legacy_scan_text", "legacy_notes", "revision", "created_at", "created_by", "updated_at", "updated_by", "trashed_at", "trashed_by", "rotation_quarter_turns"]
+    },
+    "song_aliases": {
+      "treatment": "included_as_song_relationships",
+      "includedColumns": ["id", "song_id", "alias", "normalized_alias", "sort_order"]
+    },
+    "song_credits": {
+      "treatment": "included_as_song_relationships",
+      "includedColumns": ["id", "song_id", "person_id", "role", "sort_order"]
+    },
+    "song_languages": {
+      "treatment": "included_as_song_relationships",
+      "includedColumns": ["song_id", "language_id", "sort_order"]
+    },
+    "song_tags": {
+      "treatment": "included_as_song_relationships",
+      "includedColumns": ["song_id", "tag_id", "sort_order"]
+    },
+    "songs": {
+      "treatment": "included_as_songs",
+      "includedColumns": ["id", "title_latin", "title_native", "status", "notes", "revision", "created_at", "created_by", "updated_at", "updated_by", "trashed_at", "trashed_by", "normalized_title_latin", "last_mutation_id"]
+    },
+    "tags": {
+      "treatment": "included_as_vocabulary",
+      "includedColumns": ["id", "display_name", "sort_order", "normalized_name"]
+    }
+  }
+}

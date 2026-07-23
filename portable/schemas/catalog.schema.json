@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:music-library:schema:portable-catalog:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profile",
+    "export",
+    "source",
+    "collection",
+    "actors",
+    "languages",
+    "tags",
+    "notebooks",
+    "people",
+    "songs",
+    "unassignedMedia",
+    "relationshipHistory",
+    "extensions"
+  ],
+  "properties": {
+    "profile": { "$ref": "#/$defs/profileReference" },
+    "export": {
+      "type": "object",
+      "required": ["id", "snapshotAt", "expiresAt", "planDigest"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+        "snapshotAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "planDigest": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["commit", "schemaVersion", "environment", "includedTables", "excludedTables"],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^(?:[0-9a-f]{7,40}|local-development)$" },
+        "schemaVersion": { "const": "0021" },
+        "environment": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "includedTables": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "excludedTables": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    "collection": {
+      "type": "object",
+      "required": ["counts", "plannedObjects", "plannedBytes"],
+      "properties": {
+        "counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "plannedObjects": { "type": "integer", "minimum": 0 },
+        "plannedBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "actors": { "type": "array", "items": { "$ref": "#/$defs/entity" } },
+    "languages": { "type": "array", "items": { "$ref": "#/$defs/entity" } },
+    "tags": { "type": "array", "items": { "$ref": "#/$defs/entity" } },
+    "notebooks": { "type": "array", "items": { "$ref": "#/$defs/entity" } },
+    "people": { "type": "array", "items": { "$ref": "#/$defs/entity" } },
+    "songs": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/entity" },
+          {
+            "type": "object",
+            "required": [
+              "titleLatin",
+              "folderPath",
+              "languageIds",
+              "tagIds",
+              "aliases",
+              "credits",
+              "lyricTexts",
+              "scans",
+              "recordings"
+            ]
+          }
+        ]
+      }
+    },
+    "unassignedMedia": { "type": "array", "items": { "$ref": "#/$defs/representation" } },
+    "relationshipHistory": { "type": "array", "items": { "$ref": "#/$defs/entity" } },
+    "extensions": {
+      "type": "object",
+      "required": ["musicLibrary"],
+      "properties": {
+        "musicLibrary": {
+          "type": "object",
+          "required": ["sourceRecords", "sourceCoverageVersion"],
+          "properties": {
+            "sourceRecords": {
+              "type": "object",
+              "additionalProperties": { "type": "array", "items": { "type": "object" } }
+            },
+            "sourceCoverageVersion": { "const": "1.0.0" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "profileReference": {
+      "type": "object",
+      "required": ["id", "version", "bagItVersion", "roCrateVersion"],
+      "properties": {
+        "id": { "const": "urn:music-library:portable-archive-profile:1" },
+        "version": { "const": "1.0.0" },
+        "bagItVersion": { "const": "1.0" },
+        "roCrateVersion": { "const": "1.3" }
+      }
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\).+$"
+    },
+    "entity": {
+      "type": "object",
+      "required": ["id", "type", "extensions"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 320 },
+        "type": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "extensions": { "type": "object" }
+      }
+    },
+    "representation": {
+      "allOf": [
+        { "$ref": "#/$defs/entity" },
+        {
+          "type": "object",
+          "required": ["path", "mimeType", "byteSize", "sha256", "semanticRole"],
+          "properties": {
+            "path": { "$ref": "#/$defs/path" },
+            "mimeType": { "type": "string", "minLength": 3, "maxLength": 200 },
+            "byteSize": { "type": "integer", "minimum": 1 },
+            "sha256": { "$ref": "#/$defs/sha256" },
+            "semanticRole": { "type": "string", "minLength": 1, "maxLength": 100 }
+          }
+        }
+      ]
+    }
+  }
+}

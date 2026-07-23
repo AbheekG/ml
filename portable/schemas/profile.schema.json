@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:music-library:schema:portable-profile:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "bagItVersion",
+    "roCrateVersion",
+    "hashAlgorithm",
+    "zipCompression",
+    "zip64",
+    "textEncoding",
+    "pathRules",
+    "limits"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": { "const": "urn:music-library:portable-archive-profile:1" },
+    "version": { "const": "1.0.0" },
+    "bagItVersion": { "const": "1.0" },
+    "roCrateVersion": { "const": "1.3" },
+    "hashAlgorithm": { "const": "sha256" },
+    "zipCompression": { "const": "stored" },
+    "zip64": { "const": true },
+    "textEncoding": { "const": "UTF-8" },
+    "pathRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "normalization",
+        "caseCollision",
+        "maxComponentUtf8Bytes",
+        "maxPathUtf8Bytes",
+        "stableIdSuffixLength"
+      ],
+      "properties": {
+        "normalization": { "const": "NFC" },
+        "caseCollision": { "type": "string", "minLength": 1 },
+        "maxComponentUtf8Bytes": { "type": "integer", "minimum": 32, "maximum": 240 },
+        "maxPathUtf8Bytes": { "type": "integer", "minimum": 128, "maximum": 1024 },
+        "stableIdSuffixLength": { "type": "integer", "minimum": 6, "maximum": 16 }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxCatalogBytes",
+        "maxKitEntryBytes",
+        "maxArchiveEntries",
+        "maxArchiveBytes",
+        "maxExpansionRatio"
+      ],
+      "properties": {
+        "maxCatalogBytes": { "type": "integer", "minimum": 1048576 },
+        "maxKitEntryBytes": { "type": "integer", "minimum": 1048576 },
+        "maxArchiveEntries": { "type": "integer", "minimum": 1000 },
+        "maxArchiveBytes": { "type": "integer", "minimum": 1073741824 },
+        "maxExpansionRatio": { "const": 1 }
+      }
+    }
+  }
+}

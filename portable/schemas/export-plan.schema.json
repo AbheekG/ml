@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:music-library:schema:portable-export-plan:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profile",
+    "exportId",
+    "origin",
+    "snapshotAt",
+    "expiresAt",
+    "planDigest",
+    "catalogSha256",
+    "objectCount",
+    "plannedBytes",
+    "items"
+  ],
+  "properties": {
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "const": "urn:music-library:portable-archive-profile:1" },
+        "version": { "const": "1.0.0" }
+      }
+    },
+    "exportId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "origin": { "type": "string", "pattern": "^https://[^/?#]+$" },
+    "snapshotAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "planDigest": { "$ref": "#/$defs/sha256" },
+    "catalogSha256": { "$ref": "#/$defs/sha256" },
+    "objectCount": { "type": "integer", "minimum": 0 },
+    "plannedBytes": { "type": "integer", "minimum": 0 },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "sourceKind",
+          "sourceId",
+          "representation",
+          "contentPath",
+          "payloadPath",
+          "mimeType",
+          "byteSize",
+          "sha256"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+          "sourceKind": { "enum": ["media_object", "scan_readability"] },
+          "sourceId": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "representation": {
+            "enum": ["scan_original", "scan_optimized", "recording_original", "recording_playback"]
+          },
+          "contentPath": { "type": "string", "pattern": "^/api/admin/portable-exports/[0-9a-f]{32}/items/[0-9a-f]{32}/content$" },
+          "payloadPath": { "$ref": "#/$defs/path" },
+          "mimeType": { "type": "string", "minLength": 3, "maxLength": 200 },
+          "byteSize": { "type": "integer", "minimum": 1 },
+          "sha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\).+$"
+    }
+  }
+}
