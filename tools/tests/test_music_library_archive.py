@@ -10,8 +10,10 @@ import tempfile
 import unittest
 import urllib.error
 import zipfile
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 
 TOOLS_ROOT = Path(__file__).resolve().parents[1]
@@ -243,18 +245,26 @@ def catalog() -> dict[str, Any]:
             "environment": "synthetic-test",
             "includedTables": sorted(archive.ALLOWED_SOURCE_TABLES),
             "excludedTables": [
-                "recording_upload_sessions",
-                "portable_export_sessions",
+                *sorted(archive.EXCLUDED_SOURCE_TABLES),
             ],
         },
         "collection": {
             "counts": {
+                "app_users": 1,
                 "songs": 1,
                 "activeSongs": 1,
                 "trashedSongs": 0,
+                "activeLyrics": 1,
+                "trashedLyrics": 0,
+                "activeScans": 1,
+                "trashedScans": 0,
+                "activeRecordings": 0,
+                "trashedRecordings": 0,
+                "languages": 1,
                 "lyric_texts": 1,
                 "scans": 1,
                 "media_objects": 1,
+                "song_languages": 1,
                 "unassignedMedia": 0,
             },
             "plannedObjects": 1,
@@ -301,15 +311,29 @@ class FakeResponse(io.BytesIO):
         self.close()
 
 
+class FailingStreamResponse(FakeResponse):
+    def __init__(self, data: bytes, status: int, headers: dict[str, str]) -> None:
+        super().__init__(data, status, headers)
+        self.first_read = True
+
+    def read(self, size: int = -1) -> bytes:
+        if self.first_read:
+            self.first_read = False
+            return super().read(5)
+        raise OSError("synthetic stream interruption")
+
+
 class FakeOpener:
     def __init__(
         self,
         *,
         ignore_range_once: bool = False,
         reject_token_once: bool = False,
+        stream_fail_once: bool = False,
     ) -> None:
         self.ignore_range_once = ignore_range_once
         self.reject_token_once = reject_token_once
+        self.stream_fail_once = stream_fail_once
         self.calls: list[dict[str, str]] = []
 
     def open(self, request: Any, timeout: int = 0) -> FakeResponse:
@@ -338,6 +362,9 @@ class FakeOpener:
         }
         if content_range:
             response_headers["Content-Range"] = content_range
+        if self.stream_fail_once:
+            self.stream_fail_once = False
+            return FailingStreamResponse(data, status, response_headers)
         return FakeResponse(data, status, response_headers)
 
 
@@ -348,11 +375,12 @@ def write_kit(root: Path, *, mutate: Any = None) -> dict[str, Any]:
     data_catalog = catalog()
     if mutate:
         mutate(data_catalog)
-    profile = json.loads((REPOSITORY_ROOT / "portable/profile.json").read_text())
     files: dict[str, bytes] = {
         "README.html": b"<p>Private synthetic kit</p>\n",
         "metadata/catalog.json": archive._canonical_json(data_catalog, pretty=True),
-        "metadata/profile.json": archive._canonical_json(profile, pretty=True),
+        "metadata/profile.json": (
+            REPOSITORY_ROOT / "portable/profile.json"
+        ).read_bytes(),
         "tools/music_library_archive.py": (
             REPOSITORY_ROOT / "tools/music_library_archive.py"
         ).read_bytes(),
@@ -368,6 +396,8 @@ def write_kit(root: Path, *, mutate: Any = None) -> dict[str, Any]:
         ).read_bytes()
     plan = {
         "profile": {"id": archive.PROFILE_ID, "version": archive.PROFILE_VERSION},
+        "toolVersion": archive.TOOL_VERSION,
+        "creatorBound": True,
         "exportId": EXPORT_ID,
         "origin": "https://archive.invalid",
         "snapshotAt": STAMP,
@@ -504,6 +534,47 @@ class ArchiveToolTests(unittest.TestCase):
         self.assertTrue(rebuilt.is_file())
         self.assertEqual(resume_opener.calls[0].get("range"), "bytes=3-")
 
+    def test_stream_failure_resumes_and_cloudflared_token_stays_out_of_output(self) -> None:
+        original_sleep = archive.time.sleep
+        archive.time.sleep = lambda _: None
+        try:
+            output, _, opener = self._build(
+                opener=FakeOpener(stream_fail_once=True),
+            )
+        finally:
+            archive.time.sleep = original_sleep
+        self.assertTrue(output.is_file())
+        self.assertEqual(opener.calls[1].get("range"), "bytes=5-")
+
+        calls: list[tuple[list[str], dict[str, Any]]] = []
+
+        def run(arguments: list[str], **options: Any) -> Any:
+            calls.append((arguments, options))
+            if arguments[2] == "login":
+                print("Open the synthetic browser URL")
+                return mock.Mock(stdout="")
+            return mock.Mock(stdout="synthetic-access-token\n")
+
+        output_capture = io.StringIO()
+        with (
+            mock.patch.object(archive.shutil, "which", return_value="/bin/cloudflared"),
+            mock.patch.object(archive.subprocess, "run", side_effect=run),
+            redirect_stdout(output_capture),
+        ):
+            token = archive.AccessTokenManager("https://archive.invalid").token()
+        self.assertEqual(token, "synthetic-access-token")
+        self.assertIn("Open the synthetic browser URL", output_capture.getvalue())
+        self.assertNotIn(token, output_capture.getvalue())
+        self.assertEqual(calls[0][0], [
+            "/bin/cloudflared", "access", "login", "https://archive.invalid"
+        ])
+        self.assertNotIn("stdout", calls[0][1])
+        self.assertEqual(calls[1][0], [
+            "/bin/cloudflared", "access", "token",
+            "-app=https://archive.invalid",
+        ])
+        self.assertIs(calls[1][1]["stdout"], archive.subprocess.PIPE)
+
     def test_corrupt_cache_and_partial_are_quarantined_without_private_names(self) -> None:
         work = self.root / "work"
         objects = work / "objects"
@@ -553,6 +624,16 @@ class ArchiveToolTests(unittest.TestCase):
         ):
             archive.load_kit(self.kit)
 
+        shutil.rmtree(self.kit)
+        write_kit(self.kit)
+        schema = self.kit / "metadata/schemas/catalog.schema.json"
+        schema.write_text("{}\n", encoding="utf-8")
+        self._refresh_manifest()
+        with self.assertRaisesRegex(
+            archive.ArchiveError, "profile_contract_mismatch"
+        ):
+            archive.load_kit(self.kit)
+
     def _refresh_manifest(self) -> None:
         files = {
             path.relative_to(self.kit).as_posix(): archive._hash_file(path)[1]
@@ -595,6 +676,15 @@ class ArchiveToolTests(unittest.TestCase):
         with self.assertRaisesRegex(archive.ArchiveError, "orphan_song_languages"):
             archive._validate_catalog(
                 orphan, archive._validate_profile(json.loads(
+                    (REPOSITORY_ROOT / "portable/profile.json").read_text()
+                ))
+            )
+
+        wrong_counts = catalog()
+        wrong_counts["collection"]["counts"]["songs"] = 2
+        with self.assertRaisesRegex(archive.ArchiveError, "catalog_count_mismatch"):
+            archive._validate_catalog(
+                wrong_counts, archive._validate_profile(json.loads(
                     (REPOSITORY_ROOT / "portable/profile.json").read_text()
                 ))
             )
@@ -668,6 +758,24 @@ class ArchiveToolTests(unittest.TestCase):
                 )
         finally:
             archive.shutil.disk_usage = original
+
+        nested = self.root / "not-created" / "output"
+        original = archive.shutil.disk_usage
+        archive.shutil.disk_usage = lambda _: usage
+        try:
+            with self.assertRaisesRegex(
+                archive.ArchiveError, "insufficient_disk_space"
+            ):
+                archive.build_archive(
+                    self.kit,
+                    nested / "archive.zip",
+                    work=nested / "work",
+                    token_provider=lambda _: "token",
+                    opener=FakeOpener(),
+                )
+        finally:
+            archive.shutil.disk_usage = original
+        self.assertFalse((self.root / "not-created").exists())
 
 
 class AdversarialArchiveTests(unittest.TestCase):

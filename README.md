@@ -19,15 +19,16 @@ The application is being rebuilt from private legacy attempts (grouped inside th
 
 See [the product plan](docs/product-plan.md) and [the implementation plan](docs/implementation-plan.md).
 
-The next selected feature is an admin-only portable preservation export. Its
-final archive will be assembled and fully verified on the administrator's
-computer from a frozen Access-protected metadata/media plan, using a versioned
-BagIt + RO-Crate + ZIP64 profile. The selected scope includes active and trashed
-catalog data, retained originals/derivatives, replacement history, and
-provenance, plus a tested local reference restore; it deliberately does not add
-a normal cloud-import UI. See
+The admin-only portable preservation export is implemented locally. Its final
+archive is assembled and fully verified on the administrator's computer from a
+frozen Access-protected metadata/media plan, using a versioned BagIt + RO-Crate
++ ZIP64 profile. The scope includes active and trashed catalog data, retained
+originals/derivatives, replacement history, and provenance, plus a tested local
+reference restore; it deliberately does not add a normal cloud-import UI. See
 [the export/recovery design](docs/portable-library-export.md) and
 [the normative archive profile](docs/portable-library-archive-profile.md).
+Operator commands are in
+[the portable export runbook](docs/portable-library-export-runbook.md).
 
 ## Repository privacy
 

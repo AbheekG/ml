@@ -60,7 +60,7 @@ const session: FrozenExportSession = {
   sourceCommit: "1234567890abcdef1234567890abcdef12345678",
   sourceSchemaVersion: "0021",
   sourceEnvironment: "synthetic-test",
-  recordCount: 0,
+  recordCount: 29,
   itemCount: 7,
   plannedBytes: 280,
 };
@@ -391,6 +391,12 @@ describe("portable archive model", () => {
 
   it("rejects missing plan items, altered fixity, and cross-platform path collisions", async () => {
     await expect(buildPortableExportModel(
+      { ...session, recordCount: session.recordCount + 1 },
+      records,
+      items,
+    )).rejects.toThrow("portable_record_count_mismatch");
+
+    await expect(buildPortableExportModel(
       { ...session, itemCount: 6, plannedBytes: 270 },
       records,
       items.slice(1),
@@ -401,4 +407,3 @@ describe("portable archive model", () => {
       .rejects.toThrow("portable_item_source_mismatch");
   });
 });
-

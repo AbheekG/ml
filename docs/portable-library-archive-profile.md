@@ -1,8 +1,10 @@
 # Music Library portable archive profile 1.0
 
-Status: normative selected design. The implementation must either conform to
-this profile or document and obtain owner approval for a deliberate revision
-before deployment.
+Status: normative profile implemented as version 1.0.0. The TypeScript exporter
+and standard-library Python builder/verifier/local restore share the bundled
+machine-readable contracts and synthetic cross-language round-trip gates. A
+future implementation change must either conform to this profile or document
+and obtain owner approval for a deliberate revision before deployment.
 
 Profile identifier:
 

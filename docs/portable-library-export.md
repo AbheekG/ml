@@ -1,9 +1,11 @@
 # Portable library export and tested recovery
 
-Status: selected design for the next implementation slice. This record does not
+Status: profile 1.0.0 is implemented locally with the frozen admin API, private
+browser kit, standard-library Python builder/verifier/inspector/local restore,
+and synthetic/adversarial/round-trip coverage. Protected-staging rollout and
+authenticated owner acceptance are recorded separately. This record does not
 authorize a production/DNS change, a catalog or media mutation, an R2 write or
-deletion, a legacy change, or a full-cloud import feature. Implementation and
-protected-staging rollout remain a separate, explicit task.
+deletion, a legacy change, or a full-cloud import feature.
 
 This decision defines an admin-only export that produces a complete, private,
 human-readable preservation archive of the durable library. The archive is
@@ -21,7 +23,10 @@ local reference restore. There is no normal in-app or one-click cloud import.
 
 See [the normative archive profile](portable-library-archive-profile.md) for
 the exact package structure, metadata contract, naming rules, and validation
-requirements.
+requirements. See
+[the operator runbook](portable-library-export-runbook.md) for the concise
+build, verification, inspection, restore, privacy, and current provider-limit
+instructions.
 
 ## Decision summary
 

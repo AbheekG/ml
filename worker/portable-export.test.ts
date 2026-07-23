@@ -81,12 +81,14 @@ class TestR2 {
   ]);
   reads = 0;
   sizeAdjustment = 0;
+  failReads = false;
 
   async get(
     key: string,
     options?: { range?: { offset: number; length: number } },
   ): Promise<R2ObjectBody | null> {
     this.reads += 1;
+    if (this.failReads) throw new Error("synthetic R2 failure");
     const bytes = this.objects.get(key);
     if (!bytes) return null;
     const range = options?.range;
@@ -249,6 +251,18 @@ describe("portable export server", () => {
     expect(first.state).toBe("ready");
     expect(first.itemCount).toBe(3);
     expect(first.plannedBytes).toBe(12);
+    expect(first).toMatchObject({
+      activeSongs: 1,
+      trashedSongs: 0,
+      activeLyrics: 1,
+      trashedLyrics: 0,
+      activeScans: 1,
+      trashedScans: 0,
+      activeRecordings: 1,
+      trashedRecordings: 0,
+      historyRelationships: 0,
+      unassignedMedia: 0,
+    });
 
     database.sqlite.exec("UPDATE songs SET title_latin = 'Later edit' WHERE id = 'song-1'");
     const page = await pagePortableExportRecords(
@@ -436,6 +450,12 @@ describe("portable export server", () => {
     mediaBucket.sizeAdjustment = 1;
     const changed = await app.request(path, {}, env(database, mediaBucket));
     expect(changed.status).toBe(409);
+
+    mediaBucket.sizeAdjustment = 0;
+    mediaBucket.failReads = true;
+    const unavailable = await app.request(path, {}, env(database, mediaBucket));
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.text()).not.toContain("recordings/original");
   });
 
   it("revokes/expires and purges only export detail after the six-hour grace", async () => {

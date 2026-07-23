@@ -8,6 +8,7 @@ import {
   buildPortableExportModel,
   PORTABLE_PROFILE_ID,
   PORTABLE_PROFILE_VERSION,
+  PORTABLE_TOOL_VERSION,
   type FrozenExportItem,
   type FrozenExportSession,
   type PortableExportModel,
@@ -323,6 +324,8 @@ export async function buildPrivateExportKit(
   const catalogBytes = canonicalPrettyJson(model.catalog);
   const plan = {
     profile: { id: PORTABLE_PROFILE_ID, version: PORTABLE_PROFILE_VERSION },
+    toolVersion: PORTABLE_TOOL_VERSION,
+    creatorBound: true,
     exportId: session.id,
     origin: exactOrigin,
     snapshotAt: session.snapshotAt,

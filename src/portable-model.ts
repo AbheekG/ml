@@ -462,6 +462,9 @@ export async function buildPortableExportModel(
   if (session.sourceSchemaVersion !== PORTABLE_SCHEMA_VERSION) {
     throw new Error("portable_source_schema_unsupported");
   }
+  if (snapshotRecords.length !== session.recordCount) {
+    throw new Error("portable_record_count_mismatch");
+  }
   const groups = recordGroups(snapshotRecords);
   const mediaById = byId(groups, "media_objects");
   const songById = byId(groups, "songs");

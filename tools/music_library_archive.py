@@ -91,6 +91,52 @@ ALLOWED_SOURCE_TABLES = {
     "songs",
     "tags",
 }
+EXCLUDED_SOURCE_TABLES = {
+    "audio_processing_dispatch_attempts",
+    "audio_processing_jobs",
+    "recording_upload_credits",
+    "recording_upload_intents",
+    "recording_upload_parts",
+    "recording_upload_sessions",
+    "scan_maintenance_failures",
+    "scan_maintenance_leases",
+    "d1_migrations",
+    "portable_export_sessions",
+    "portable_export_records",
+    "portable_export_items",
+}
+CONTRACT_SHA256 = {
+    "metadata/profile.json":
+        "18012b5e2f195ffd6479be2c4a7ee74d3d95dc9d4cd191b4e98a5bd77a457887",
+    "metadata/schemas/catalog.schema.json":
+        "5c730868b217469232903a40a840d809260793cd203800f33f068ec2632462a0",
+    "metadata/schemas/export-plan.schema.json":
+        "565d9620cebf02f22ffeefe0af0f73ff837f0872cf65050075f13e83b569889e",
+    "metadata/schemas/export-report.schema.json":
+        "129153da656d22ac529314e6fddaf2cc945d1aaa677aba093f947e2c857e956f",
+    "metadata/schemas/profile.schema.json":
+        "dfafa995d6c9ec170dc59193fc2ddb84fa19658daa0b4773ea78a2ba1fa1c1d4",
+}
+FIXED_ARCHIVE_PAYLOADS = {
+    "README.html",
+    "ro-crate-metadata.json",
+    "ro-crate-preview.html",
+    "metadata/catalog.json",
+    "metadata/export-report.json",
+    *CONTRACT_SHA256,
+    "tools/music_library_archive.py",
+}
+REPORT_GATES = {
+    "kit",
+    "downloads",
+    "container",
+    "bagit",
+    "roCrate",
+    "profile",
+    "relations",
+    "representations",
+    "reconciliation",
+}
 FORBIDDEN_KEYS = {
     "object_key",
     "objectKey",
@@ -311,6 +357,16 @@ def _manifest_bytes(entries: Mapping[str, str]) -> bytes:
     ).encode("utf-8")
 
 
+def _validate_contract_digests(
+    manifest: Mapping[str, str],
+    *,
+    prefix: str = "",
+) -> None:
+    for path, expected in CONTRACT_SHA256.items():
+        if manifest.get(f"{prefix}{path}") != expected:
+            raise ArchiveError("profile_contract_mismatch")
+
+
 def _validate_profile(profile: Any) -> dict[str, Any]:
     if not isinstance(profile, dict):
         raise ArchiveError("invalid_profile")
@@ -333,8 +389,15 @@ def _validate_profile(profile: Any) -> dict[str, Any]:
         raise ArchiveError("invalid_profile")
     if (
         path_rules.get("normalization") != "NFC"
+        or path_rules.get("caseCollision") != "unicode-casefold-approximation"
         or path_rules.get("maxComponentUtf8Bytes") != MAX_COMPONENT_BYTES
         or path_rules.get("maxPathUtf8Bytes") != MAX_PATH_BYTES
+        or path_rules.get("stableIdSuffixLength") != 8
+        or limits.get("maxCatalogBytes") != MAX_KIT_ENTRY_BYTES
+        or limits.get("maxKitEntryBytes") != MAX_KIT_ENTRY_BYTES
+        or limits.get("maxArchiveEntries") != MAX_ARCHIVE_ENTRIES
+        or limits.get("maxArchiveBytes") != MAX_ARCHIVE_BYTES
+        or limits.get("maxExpansionRatio") != 1
     ):
         raise ArchiveError("unsupported_path_profile")
     return profile
@@ -496,6 +559,15 @@ def _validate_catalog(catalog: Any, profile: Mapping[str, Any]) -> dict[str, Any
         or not OPAQUE_ID_RE.fullmatch(str(export.get("id", "")))
         or not SHA256_RE.fullmatch(str(export.get("planDigest", "")))
         or not isinstance(collection, dict)
+        or not isinstance(source.get("environment"), str)
+        or not 1 <= len(source["environment"]) <= 100
+        or any(character in source["environment"] for character in "\r\n")
+        or not isinstance(source.get("includedTables"), list)
+        or len(source["includedTables"]) != len(ALLOWED_SOURCE_TABLES)
+        or set(source["includedTables"]) != ALLOWED_SOURCE_TABLES
+        or not isinstance(source.get("excludedTables"), list)
+        or len(source["excludedTables"]) != len(EXCLUDED_SOURCE_TABLES)
+        or set(source["excludedTables"]) != EXCLUDED_SOURCE_TABLES
     ):
         raise ArchiveError("invalid_catalog_header")
     _parse_utc(export.get("snapshotAt"), "snapshot_time")
@@ -507,6 +579,41 @@ def _validate_catalog(catalog: Any, profile: Mapping[str, Any]) -> dict[str, Any
         raise ArchiveError("invalid_catalog_collections")
     _assert_no_capabilities(catalog)
     _validate_source_relations(catalog)
+    source_rows = _source_rows(catalog)
+    counts = collection.get("counts")
+    expected_counts = {
+        table: len(values) for table, values in source_rows.items()
+    }
+    expected_counts["activeSongs"] = sum(
+        row.get("trashed_at") is None for row in source_rows.get("songs", [])
+    )
+    expected_counts["trashedSongs"] = (
+        len(source_rows.get("songs", [])) - expected_counts["activeSongs"]
+    )
+    expected_counts["activeLyrics"] = sum(
+        row.get("trashed_at") is None
+        for row in source_rows.get("lyric_texts", [])
+    )
+    expected_counts["trashedLyrics"] = (
+        len(source_rows.get("lyric_texts", [])) - expected_counts["activeLyrics"]
+    )
+    expected_counts["activeScans"] = sum(
+        row.get("trashed_at") is None for row in source_rows.get("scans", [])
+    )
+    expected_counts["trashedScans"] = (
+        len(source_rows.get("scans", [])) - expected_counts["activeScans"]
+    )
+    expected_counts["activeRecordings"] = sum(
+        row.get("trashed_at") is None
+        for row in source_rows.get("recordings", [])
+    )
+    expected_counts["trashedRecordings"] = (
+        len(source_rows.get("recordings", []))
+        - expected_counts["activeRecordings"]
+    )
+    expected_counts["unassignedMedia"] = len(catalog["unassignedMedia"])
+    if counts != expected_counts:
+        raise ArchiveError("catalog_count_mismatch")
 
     actor_ids: set[str] = set()
     for actor in catalog["actors"]:
@@ -518,6 +625,25 @@ def _validate_catalog(catalog: Any, profile: Mapping[str, Any]) -> dict[str, Any
         ):
             raise ArchiveError("invalid_actor")
         actor_ids.add(actor["id"])
+    if not {
+        row.get("identity") for row in source_rows.get("app_users", [])
+    }.issubset(actor_ids):
+        raise ArchiveError("catalog_actor_mismatch")
+
+    for collection_name, table in (
+        ("languages", "languages"),
+        ("tags", "tags"),
+        ("notebooks", "notebooks"),
+        ("people", "people"),
+    ):
+        portable_ids = {
+            value.get("id")
+            for value in catalog[collection_name]
+            if isinstance(value, dict)
+        }
+        source_ids = {value.get("id") for value in source_rows.get(table, [])}
+        if portable_ids != source_ids or None in portable_ids:
+            raise ArchiveError("catalog_entity_mismatch")
 
     song_ids: set[str] = set()
     lyric_ids: set[str] = set()
@@ -584,6 +710,22 @@ def _validate_catalog(catalog: Any, profile: Mapping[str, Any]) -> dict[str, Any
                     raise ArchiveError("invalid_unavailable_playback")
             else:
                 raise ArchiveError("invalid_playback_selection")
+    if song_ids != {
+        row.get("id") for row in source_rows.get("songs", [])
+    }:
+        raise ArchiveError("catalog_song_mismatch")
+    if lyric_ids != {
+        row.get("id") for row in source_rows.get("lyric_texts", [])
+    }:
+        raise ArchiveError("catalog_lyric_mismatch")
+    if scan_ids != {
+        row.get("id") for row in source_rows.get("scans", [])
+    }:
+        raise ArchiveError("catalog_scan_mismatch")
+    if recording_ids != {
+        row.get("id") for row in source_rows.get("recordings", [])
+    }:
+        raise ArchiveError("catalog_recording_mismatch")
     _validate_path_set(declared_paths)
     return catalog
 
@@ -628,6 +770,8 @@ def _validate_plan(
         not isinstance(profile_ref, dict)
         or profile_ref.get("id") != PROFILE_ID
         or profile_ref.get("version") != PROFILE_VERSION
+        or plan.get("toolVersion") != TOOL_VERSION
+        or plan.get("creatorBound") is not True
         or plan.get("exportId") != export.get("id")
         or plan.get("planDigest") != export.get("planDigest")
         or not SHA256_RE.fullmatch(str(plan.get("catalogSha256", "")))
@@ -759,6 +903,7 @@ def load_kit(root: Path) -> Kit:
         size, digest = _hash_file(path)
         if size > MAX_KIT_ENTRY_BYTES or digest != expected:
             raise ArchiveError("kit_integrity_failed")
+    _validate_contract_digests(manifest)
     profile = _validate_profile(_read_json(root / "metadata/profile.json"))
     catalog = _validate_catalog(_read_json(root / "metadata/catalog.json"), profile)
     plan = _read_json(root / "export-plan.json")
@@ -824,8 +969,6 @@ class AccessTokenManager:
                 subprocess.run(
                     [executable, "access", "login", self.origin],
                     stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
                     check=True,
                     timeout=300,
                 )
@@ -868,9 +1011,19 @@ def _unsafe_broad_path(path: Path, kit_root: Path | None = None) -> bool:
     return "legacy" in {part.casefold() for part in resolved.parts}
 
 
+def _existing_ancestor(path: Path) -> Path:
+    candidate = path.resolve()
+    while not candidate.exists():
+        parent = candidate.parent
+        if parent == candidate:
+            raise ArchiveError("filesystem_preflight_failed")
+        candidate = parent
+    return candidate
+
+
 def _same_device(left: Path, right: Path) -> bool:
-    left_probe = left if left.exists() else left.parent
-    right_probe = right if right.exists() else right.parent
+    left_probe = _existing_ancestor(left if left.exists() else left.parent)
+    right_probe = _existing_ancestor(right if right.exists() else right.parent)
     return left_probe.stat().st_dev == right_probe.stat().st_dev
 
 
@@ -881,13 +1034,13 @@ def _preflight_disk(kit: Kit, work: Path, output: Path) -> None:
     output_required = output_estimate + DISK_MARGIN_BYTES
     if _same_device(work, output):
         required = work_required + output_required
-        available = shutil.disk_usage(work.parent).free
+        available = shutil.disk_usage(_existing_ancestor(work.parent)).free
         if available < required:
             raise ArchiveError("insufficient_disk_space")
     else:
-        if shutil.disk_usage(work.parent).free < work_required:
+        if shutil.disk_usage(_existing_ancestor(work.parent)).free < work_required:
             raise ArchiveError("insufficient_work_disk_space")
-        if shutil.disk_usage(output.parent).free < output_required:
+        if shutil.disk_usage(_existing_ancestor(output.parent)).free < output_required:
             raise ArchiveError("insufficient_output_disk_space")
 
 
@@ -989,44 +1142,51 @@ def _download_one(
                 continue
             raise ArchiveError("portable_export_download_failed") from error
 
-        with response:
-            status = getattr(response, "status", response.getcode())
-            if offset and status == 206:
-                expected_range = f"bytes {offset}-{item.byte_size - 1}/{item.byte_size}"
-                if response.headers.get("Content-Range") != expected_range:
-                    raise ArchiveError("portable_export_range_mismatch")
-                mode = "ab"
-                stats.add(resumes=1)
-            elif status == 200:
-                mode = "wb"
-                offset = 0
-            else:
-                raise ArchiveError("portable_export_response_invalid")
-            if response.headers.get("X-Portable-Representation") != item.representation:
-                raise ArchiveError("portable_export_representation_mismatch")
-            expected_length = item.byte_size - offset
-            try:
-                declared_length = int(response.headers.get("Content-Length", ""))
-            except ValueError as error:
-                raise ArchiveError("portable_export_length_invalid") from error
-            if declared_length != expected_length:
-                raise ArchiveError("portable_export_length_invalid")
-            transferred = 0
-            with partial_path.open(mode) as destination:
-                os.chmod(partial_path, 0o600)
-                while chunk := response.read(CHUNK_SIZE):
-                    transferred += len(chunk)
-                    if offset + transferred > item.byte_size:
-                        raise ArchiveError("portable_export_response_overflow")
-                    destination.write(chunk)
-                destination.flush()
-                os.fsync(destination.fileno())
-            stats.add(transferred_bytes=transferred)
-            if transferred != expected_length:
-                transport_attempt += 1
-                if transport_attempt <= MAX_RETRIES:
-                    continue
-                raise ArchiveError("portable_export_response_truncated")
+        try:
+            with response:
+                status = getattr(response, "status", response.getcode())
+                if offset and status == 206:
+                    expected_range = f"bytes {offset}-{item.byte_size - 1}/{item.byte_size}"
+                    if response.headers.get("Content-Range") != expected_range:
+                        raise ArchiveError("portable_export_range_mismatch")
+                    mode = "ab"
+                    stats.add(resumes=1)
+                elif status == 200:
+                    mode = "wb"
+                    offset = 0
+                else:
+                    raise ArchiveError("portable_export_response_invalid")
+                if response.headers.get("X-Portable-Representation") != item.representation:
+                    raise ArchiveError("portable_export_representation_mismatch")
+                expected_length = item.byte_size - offset
+                try:
+                    declared_length = int(response.headers.get("Content-Length", ""))
+                except ValueError as error:
+                    raise ArchiveError("portable_export_length_invalid") from error
+                if declared_length != expected_length:
+                    raise ArchiveError("portable_export_length_invalid")
+                transferred = 0
+                with partial_path.open(mode) as destination:
+                    os.chmod(partial_path, 0o600)
+                    while chunk := response.read(CHUNK_SIZE):
+                        transferred += len(chunk)
+                        if offset + transferred > item.byte_size:
+                            raise ArchiveError("portable_export_response_overflow")
+                        destination.write(chunk)
+                        stats.add(transferred_bytes=len(chunk))
+                    destination.flush()
+                    os.fsync(destination.fileno())
+                if transferred != expected_length:
+                    transport_attempt += 1
+                    if transport_attempt <= MAX_RETRIES:
+                        continue
+                    raise ArchiveError("portable_export_response_truncated")
+        except (OSError, TimeoutError, http.client.HTTPException):
+            transport_attempt += 1
+            if transport_attempt <= MAX_RETRIES:
+                time.sleep(min(8.0, (2 ** (transport_attempt - 1)) + random.random()))
+                continue
+            raise ArchiveError("portable_export_download_failed") from None
         size, digest = _hash_file(partial_path)
         if size != item.byte_size or digest != item.sha256:
             _quarantine(partial_path)
@@ -1279,6 +1439,29 @@ def _write_zip_entry(
                 shutil.copyfileobj(input_file, destination, CHUNK_SIZE)
 
 
+def _catalog_reconciliation_digest(catalog: Mapping[str, Any]) -> str:
+    payloads = [
+        {
+            "path": path,
+            "size": representation["byteSize"],
+            "sha256": representation["sha256"],
+        }
+        for path, representation in _representation_map(catalog).items()
+    ]
+    for song in catalog["songs"]:
+        for lyric in song.get("lyricTexts", []):
+            payloads.append({
+                "path": lyric["payloadPath"],
+                "size": lyric["byteSize"],
+                "sha256": lyric["sha256"],
+            })
+    payloads.sort(key=lambda value: value["path"].encode("utf-8"))
+    return _sha256_bytes(_canonical_json({
+        "catalog": catalog,
+        "durablePayloadManifest": payloads,
+    }))
+
+
 def _archive_root(kit: Kit) -> str:
     date = _parse_utc(kit.plan["snapshotAt"], "snapshot_time").date().isoformat()
     return f"music-library-preservation-{date}-{kit.plan['exportId'][:8]}"
@@ -1326,20 +1509,7 @@ def _payload_inputs(
         payload[item.payload_path] = source
         item_mimes[item.payload_path] = item.mime_type
 
-    reconciliation_digest = _sha256_bytes(
-        _canonical_json({
-            "catalog": kit.catalog,
-            "items": [
-                {
-                    "id": item.item_id,
-                    "path": item.payload_path,
-                    "size": item.byte_size,
-                    "sha256": item.sha256,
-                }
-                for item in kit.items
-            ],
-        })
-    )
+    reconciliation_digest = _catalog_reconciliation_digest(kit.catalog)
     snapshot = kit.plan["snapshotAt"]
     report: dict[str, Any] = {
         "profile": {"id": PROFILE_ID, "version": PROFILE_VERSION},
@@ -1515,10 +1685,10 @@ def build_archive(
             raise ArchiveError("partial_archive_already_exists")
     if _unsafe_broad_path(output, kit.root) or _unsafe_broad_path(work, kit.root):
         raise ArchiveError("unsafe_output_or_work_path")
+    _preflight_disk(kit, work, output)
     output.parent.mkdir(parents=True, exist_ok=True)
     work.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(work, 0o700)
-    _preflight_disk(kit, work, output)
     print(
         f"Plan prepared: {len(kit.items)} private objects, "
         f"{sum(item.byte_size for item in kit.items)} bytes. "
@@ -1716,9 +1886,17 @@ def _validate_archive_catalog(
         ):
             raise ArchiveError("archive_representation_fixity_mismatch")
     durable_paths = set(representations) | lyric_paths
-    for path in durable_paths:
-        if f"data/{path}" not in manifest:
-            raise ArchiveError("archive_durable_payload_missing")
+    expected_payloads = {
+        f"data/{path}" for path in FIXED_ARCHIVE_PAYLOADS | durable_paths
+    }
+    if set(manifest) != expected_payloads:
+        raise ArchiveError("archive_payload_inventory_mismatch")
+    if (
+        catalog["collection"].get("plannedObjects") != len(representations)
+        or catalog["collection"].get("plannedBytes")
+        != sum(value["byteSize"] for value in representations.values())
+    ):
+        raise ArchiveError("archive_collection_aggregate_mismatch")
 
 
 def verify_archive(path: Path) -> VerificationResult:
@@ -1807,6 +1985,7 @@ def verify_archive(path: Path) -> VerificationResult:
             }
             if not required_payloads.issubset(payload_manifest):
                 raise ArchiveError("profile_payload_missing")
+            _validate_contract_digests(payload_manifest, prefix="data/")
             profile = _validate_profile(json.loads(_read_zip_bounded(
                 archive, payload_entries["data/metadata/profile.json"], MAX_KIT_ENTRY_BYTES
             )))
@@ -1818,6 +1997,8 @@ def verify_archive(path: Path) -> VerificationResult:
                 payload_entries["data/metadata/export-report.json"],
                 MAX_KIT_ENTRY_BYTES,
             ))
+            expected_gates = {key: "passed" for key in REPORT_GATES}
+            download = report.get("download") if isinstance(report, dict) else None
             if (
                 not isinstance(report, dict)
                 or report.get("verified") is not True
@@ -1829,12 +2010,20 @@ def verify_archive(path: Path) -> VerificationResult:
                 or report.get("toolVersion") != TOOL_VERSION
                 or report.get("manifestEntries") != len(payload_manifest)
                 or report.get("archiveBytes") != path.stat().st_size
-                or not SHA256_RE.fullmatch(
-                    str(report.get("reconciliationDigest", ""))
+                or report.get("counts") != _privacy_counts(catalog)
+                or report.get("reconciliationDigest")
+                != _catalog_reconciliation_digest(catalog)
+                or report.get("gates") != expected_gates
+                or not isinstance(download, dict)
+                or set(download) != {"attempts", "resumes", "transferredBytes"}
+                or any(
+                    not isinstance(value, int) or value < 0
+                    for value in download.values()
                 )
-                or any(value != "passed" for value in report.get("gates", {}).values())
             ):
                 raise ArchiveError("export_report_invalid")
+            _parse_utc(report.get("verificationStartedAt"), "verification_start")
+            _parse_utc(report.get("verificationCompletedAt"), "verification_end")
             _validate_archive_catalog(catalog, payload_manifest, payload_sizes)
             crate = json.loads(_read_zip_bounded(
                 archive,

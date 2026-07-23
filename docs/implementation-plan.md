@@ -10,6 +10,18 @@ Private legacy file work remains owner-paused; other optional UX refinement,
 audit/cleanup, and production readiness remain separately prioritized and
 approved.
 
+Portable-export implementation checkpoint (2026-07-24): profile 1.0.0,
+migration `0021_portable_exports.sql`, the admin-only frozen API and Account
+workflow, Access-authenticated resumable local downloads, and the
+standard-library Python BagIt + attached RO-Crate + stored ZIP64 builder,
+verifier, privacy-conscious inspector, and idempotent local reference restore
+are complete locally. The schema-coverage guard maps every table/column through
+0021, and synthetic cross-language plus adversarial gates cover the complete
+source-to-restored-reference boundary. No normal import UI or cloud import
+adapter was added. Protected-staging migration/deployment and authenticated
+owner archive acceptance are recorded separately in the portable export
+runbook and current handoff.
+
 Current application/deployment checkpoint (2026-07-23): protected staging runs
 Worker `9d69c4fa-a61c-45fe-b977-f3b082ff7443`, client/service-worker build
 `1eb9c1f2e950`, and the unchanged accepted converter image
@@ -610,7 +622,7 @@ Deliverable: safe online maintenance by the primary editor.
 
 ## Phase 5 — later improvements
 
-- admin-only portable preservation export is the next selected slice: create a
+- admin-only portable preservation export is implemented: it creates a
   transactionally frozen metadata/media plan behind the existing Access/admin
   boundary, build and verify a human-readable BagIt + RO-Crate + ZIP64 archive
   locally, and prove importability with an idempotent dry-run-capable local
