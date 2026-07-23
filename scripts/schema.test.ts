@@ -23,7 +23,8 @@ const playbackDuplicateDetectionMigration = readFileSync(resolve("migrations/001
 const scanReadabilityDuplicateDetectionMigration = readFileSync(resolve("migrations/0017_scan_readability_duplicate_detection.sql"), "utf8");
 const indiaRecordingCalendarMigration = readFileSync(resolve("migrations/0018_india_recording_calendar.sql"), "utf8");
 const recordingUploadFileIdentityMigration = readFileSync(resolve("migrations/0019_recording_upload_file_identity.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}\n${playbackDuplicateDetectionMigration}\n${scanReadabilityDuplicateDetectionMigration}\n${indiaRecordingCalendarMigration}\n${recordingUploadFileIdentityMigration}`;
+const canonicalRecordingDatesMigration = readFileSync(resolve("migrations/0020_canonical_recording_dates.sql"), "utf8");
+const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}\n${playbackDuplicateDetectionMigration}\n${scanReadabilityDuplicateDetectionMigration}\n${indiaRecordingCalendarMigration}\n${recordingUploadFileIdentityMigration}\n${canonicalRecordingDatesMigration}`;
 const sqliteTestPreamble = "PRAGMA legacy_alter_table = OFF;";
 const timestamp = "2026-07-12T00:00:00.000Z";
 
@@ -78,6 +79,18 @@ describe("initial database schema", () => {
     `);
     expect(triggerCount).toBe("3\n");
 
+    const canonicalTriggerCount = runSql(`
+      SELECT COUNT(*)
+      FROM sqlite_master
+      WHERE type = 'trigger'
+        AND name IN (
+          'validate_recording_values_insert',
+          'validate_recording_values_update'
+        )
+        AND sql LIKE '%date(NEW.recorded_on) <> NEW.recorded_on%';
+    `);
+    expect(canonicalTriggerCount).toBe("2\n");
+
     const accepted = runSql(`
       INSERT INTO songs (
         id, title_latin, normalized_title_latin, status,
@@ -122,6 +135,51 @@ describe("initial database schema", () => {
         date('now', '+5 hours', '+30 minutes', '+1 day'),
         '${timestamp}', 'test', '${timestamp}', 'test'
       );
+    `)).toThrow(/invalid_recording_values/);
+
+    expect(() => runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'original-1', 'recordings/original/test', 'test.mp3', 'audio/mpeg', 4,
+        '${"a".repeat(64)}', 'original_audio', '${timestamp}', 'test'
+      );
+      INSERT INTO recordings (
+        id, song_id, original_media_id, description, normalized_description, recorded_on,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'recording-1', 'song-1', 'original-1', 'Take', 'take',
+        '2020-02-29T00:00:00Z',
+        '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+    `)).toThrow(/invalid_recording_values/);
+
+    expect(() => runSql(`
+      INSERT INTO songs (
+        id, title_latin, normalized_title_latin, status,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES ('song-1', 'Test', 'test', 'draft', '${timestamp}', 'test', '${timestamp}', 'test');
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'original-1', 'recordings/original/test', 'test.mp3', 'audio/mpeg', 4,
+        '${"a".repeat(64)}', 'original_audio', '${timestamp}', 'test'
+      );
+      INSERT INTO recordings (
+        id, song_id, original_media_id, description, normalized_description, recorded_on,
+        created_at, created_by, updated_at, updated_by
+      ) VALUES (
+        'recording-1', 'song-1', 'original-1', 'Take', 'take', '2020-02-29',
+        '${timestamp}', 'test', '${timestamp}', 'test'
+      );
+      UPDATE recordings SET recorded_on = '2020-02-29T00:00:00Z'
+      WHERE id = 'recording-1';
     `)).toThrow(/invalid_recording_values/);
   });
 
