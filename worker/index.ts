@@ -105,6 +105,7 @@ import {
   parsePortableExportCreate,
   parsePortablePage,
   portableExportContentResponse,
+  portableExportRangeSmokeResponse,
   revokePortableExport,
   validPortableSourceCommit,
 } from "./portable-export";
@@ -2454,6 +2455,12 @@ app.get(
   "/api/admin/portable-exports/:exportId/items/:itemId/content",
   requireRole("admin"),
   portableExportContentResponse,
+);
+
+app.get(
+  "/api/admin/portable-exports/:exportId/items/:itemId/range-smoke",
+  requireRole("admin"),
+  portableExportRangeSmokeResponse,
 );
 
 app.post("/api/admin/portable-exports/:exportId/revoke", requireRole("admin"), async (context) => {

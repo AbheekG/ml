@@ -615,6 +615,21 @@ describe("portable export server", () => {
     expect(suffix.status).toBe(206);
     expect([...new Uint8Array(await suffix.arrayBuffer())]).toEqual([11, 12]);
 
+    const rangeSmoke = await app.request(
+      `${contentPath.replace(/\/content$/u, "")}/range-smoke`,
+      {},
+      env(database, mediaBucket),
+    );
+    expect(rangeSmoke.status).toBe(200);
+    expect(await json(rangeSmoke)).toEqual({
+      status: "ok",
+      byteLength: 5,
+      rangeStart: 0,
+      rangeEnd: 4,
+      totalBytes: 5,
+      representation: "recording_original",
+    });
+
     for (const invalid of ["bytes=0-1,3-4", "bytes=9-", "bytes=-0", "items=0-1"]) {
       const rejected = await app.request(contentPath, {
         headers: { Range: invalid },
