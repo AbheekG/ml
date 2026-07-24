@@ -5,6 +5,8 @@ export const PORTABLE_EXPORT_SCHEMA_VERSION = "0021";
 export const PORTABLE_EXPORT_LIFETIME_MS = 24 * 60 * 60 * 1000;
 export const PORTABLE_EXPORT_CLEANUP_GRACE_MS = 6 * 60 * 60 * 1000;
 export const PORTABLE_EXPORT_PAGE_MAX = 200;
+export const PORTABLE_EXPORT_RECORD_CHUNK_SIZE = 64;
+export const PORTABLE_EXPORT_RECORD_CHUNK_PAGE_MAX = 1;
 
 export type PortableExportState = "preparing" | "ready" | "revoked" | "expired" | "failed";
 
@@ -318,7 +320,10 @@ const SESSION_SELECT = `
     snapshot_at AS snapshotAt,
     created_at AS createdAt,
     expires_at AS expiresAt,
-    record_count AS recordCount,
+    COALESCE(
+      CAST(json_extract(summary_json, '$.logicalRecordCount') AS INTEGER),
+      record_count
+    ) AS recordCount,
     item_count AS itemCount,
     planned_bytes AS plannedBytes,
     json_extract(summary_json, '$.activeSongs') AS activeSongs,
@@ -357,6 +362,15 @@ function opaqueId(): string {
   return crypto.randomUUID().replaceAll("-", "").toLowerCase();
 }
 
+function portableSnapshotFailureCode(
+  error: unknown,
+): "snapshot_precondition_failed" | "snapshot_execution_failed" {
+  const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
+  return /constraint|not null|foreign key|unique|portable_export_/iu.test(detail)
+    ? "snapshot_precondition_failed"
+    : "snapshot_execution_failed";
+}
+
 export function parsePortableExportCreate(
   value: unknown,
 ): { success: true; clientMutationId: string } | { success: false } {
@@ -383,8 +397,36 @@ function recordStatement(database: D1Database, exportId: string, spec: SnapshotS
     INSERT INTO portable_export_records (
       export_id, record_kind, record_key, order_key, frozen_json
     )
-    SELECT ?, '${spec.table}', ${spec.key}, ${spec.order}, ${spec.json}
-    FROM ${spec.table}
+    WITH ordered_records AS (
+      SELECT
+        CAST(${spec.key} AS TEXT) AS source_key,
+        CAST(${spec.order} AS TEXT) AS source_order_key,
+        ${spec.json} AS source_json,
+        row_number() OVER (
+          ORDER BY ${spec.order}, ${spec.key}
+        ) AS source_position
+      FROM ${spec.table}
+    ),
+    chunked_records AS (
+      SELECT
+        CAST((source_position - 1) / ${PORTABLE_EXPORT_RECORD_CHUNK_SIZE} AS INTEGER)
+          AS chunk_index,
+        json_object(
+          'key', source_key,
+          'orderKey', source_order_key,
+          'data', json(source_json)
+        ) AS chunk_entry
+      FROM ordered_records
+    )
+    SELECT
+      ?,
+      '${spec.table}',
+      printf('@chunk:%08d', chunk_index),
+      printf('@chunk:%08d', chunk_index),
+      json_group_array(json(chunk_entry))
+    FROM chunked_records
+    GROUP BY chunk_index
+    ORDER BY chunk_index
   `).bind(exportId);
 }
 
@@ -493,6 +535,11 @@ export async function createPortableExport(
             SELECT SUM(byte_size) FROM portable_export_items WHERE export_id = ?
           ), 0),
           summary_json = json_object(
+            'logicalRecordCount', (
+              SELECT COALESCE(SUM(json_array_length(frozen_json)), 0)
+              FROM portable_export_records
+              WHERE export_id = ?
+            ),
             'activeSongs', (SELECT COUNT(*) FROM songs WHERE trashed_at IS NULL),
             'trashedSongs', (SELECT COUNT(*) FROM songs WHERE trashed_at IS NOT NULL),
             'activeLyrics', (SELECT COUNT(*) FROM lyric_texts WHERE trashed_at IS NULL),
@@ -523,7 +570,7 @@ export async function createPortableExport(
           plan_digest = ?,
           ready_at = ?
       WHERE id = ? AND state = 'preparing'
-    `).bind(exportId, exportId, exportId, planDigest, snapshotAt, exportId),
+    `).bind(exportId, exportId, exportId, exportId, planDigest, snapshotAt, exportId),
   ];
   if (statements.length !== PORTABLE_SNAPSHOT_STATEMENT_COUNT || statements.length >= 50) {
     throw new Error("portable_snapshot_query_boundary_invalid");
@@ -532,17 +579,18 @@ export async function createPortableExport(
   try {
     const results = await database.batch(statements);
     if (results.at(-1)?.meta.changes !== 1) throw new Error("portable_snapshot_not_ready");
-  } catch {
+  } catch (error) {
     const ambiguous = await sessionByMutation(database, actor, clientMutationId).catch(() => null);
     if (ambiguous?.state === "ready") return ambiguous;
     if (ambiguous) return ambiguous;
+    const failureCode = portableSnapshotFailureCode(error);
     await database.prepare(`
       INSERT INTO portable_export_sessions (
         id, profile_version, client_mutation_id, request_fingerprint, state,
         source_schema_version, source_commit, source_environment,
         snapshot_at, created_at, created_by, expires_at,
         failed_at, failure_code
-      ) VALUES (?, ?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, 'snapshot_precondition_failed')
+      ) VALUES (?, ?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(created_by, client_mutation_id) DO NOTHING
     `).bind(
       exportId,
@@ -557,6 +605,7 @@ export async function createPortableExport(
       actor,
       expiresAt,
       snapshotAt,
+      failureCode,
     ).run().catch(() => undefined);
     const failed = await sessionByMutation(database, actor, clientMutationId).catch(() => null);
     if (failed) return failed;
@@ -641,6 +690,7 @@ export async function pagePortableExportRecords(
 ): Promise<{ records: PortableExportRecord[]; nextOffset: number | null } | null> {
   const session = await loadPortableExport(database, exportId, actor, now);
   if (!session || session.state !== "ready" || session.detailPurgedAt) return null;
+  const storageLimit = Math.min(page.limit, PORTABLE_EXPORT_RECORD_CHUNK_PAGE_MAX);
   const result = await database.prepare(`
     SELECT
       record_kind AS kind,
@@ -651,21 +701,69 @@ export async function pagePortableExportRecords(
     WHERE export_id = ?
     ORDER BY record_kind, order_key, record_key
     LIMIT ? OFFSET ?
-  `).bind(exportId, page.limit + 1, page.offset).all<{
+  `).bind(exportId, storageLimit + 1, page.offset).all<{
     kind: string;
     key: string;
     orderKey: string;
     frozenJson: string;
   }>();
-  const hasMore = result.results.length > page.limit;
+  const hasMore = result.results.length > storageLimit;
+  const records = result.results.slice(0, storageLimit).flatMap((row) => {
+    const parsed = JSON.parse(row.frozenJson) as unknown;
+    if (!row.key.startsWith("@chunk:")) {
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("portable_frozen_record_invalid");
+      }
+      return [{
+        kind: row.kind,
+        key: row.key,
+        orderKey: row.orderKey,
+        data: parsed as Record<string, unknown>,
+      }];
+    }
+    if (
+      !/^@chunk:\d{8}$/u.test(row.key)
+      || !Array.isArray(parsed)
+      || parsed.length < 1
+      || parsed.length > PORTABLE_EXPORT_RECORD_CHUNK_SIZE
+    ) {
+      throw new Error("portable_frozen_record_chunk_invalid");
+    }
+    const expanded = parsed.map((value): PortableExportRecord => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("portable_frozen_record_chunk_invalid");
+      }
+      const entry = value as Record<string, unknown>;
+      if (
+        Object.keys(entry).length !== 3
+        || typeof entry.key !== "string"
+        || entry.key.length < 1
+        || entry.key.length > 500
+        || entry.key.includes("\0")
+        || typeof entry.orderKey !== "string"
+        || entry.orderKey.length < 1
+        || entry.orderKey.length > 1_000
+        || entry.orderKey.includes("\0")
+        || !entry.data
+        || typeof entry.data !== "object"
+        || Array.isArray(entry.data)
+      ) {
+        throw new Error("portable_frozen_record_chunk_invalid");
+      }
+      return {
+        kind: row.kind,
+        key: entry.key,
+        orderKey: entry.orderKey,
+        data: entry.data as Record<string, unknown>,
+      };
+    });
+    return expanded.sort((left, right) => (
+      left.orderKey.localeCompare(right.orderKey) || left.key.localeCompare(right.key)
+    ));
+  });
   return {
-    records: result.results.slice(0, page.limit).map((row) => ({
-      kind: row.kind,
-      key: row.key,
-      orderKey: row.orderKey,
-      data: JSON.parse(row.frozenJson) as Record<string, unknown>,
-    })),
-    nextOffset: hasMore ? page.offset + page.limit : null,
+    records,
+    nextOffset: hasMore ? page.offset + storageLimit : null,
   };
 }
 

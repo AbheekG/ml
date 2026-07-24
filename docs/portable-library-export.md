@@ -264,9 +264,9 @@ portable_export_sessions
 portable_export_records
   export_id
   record_kind
-  stable record key
-  deterministic order key
-  frozen versioned JSON fragment
+  bounded storage-chunk key and order key
+  frozen versioned JSON array containing stable record keys,
+    deterministic order keys, and source fragments
 
 portable_export_items
   export_id
@@ -284,17 +284,25 @@ their own export.
 
 One D1 `batch()` transaction creates the session, copies every included source
 row into versioned snapshot records, and copies every declared media
-representation into the item plan. D1 documents `batch()` as a transaction whose
-statements run sequentially and non-concurrently, with the entire sequence
-rolled back on failure. This gives the snapshot one database boundary without a
-global application write lock:
+representation into the item plan. The record copy groups at most 64 ordered
+source rows into each internal JSON storage chunk. This keeps the same atomic
+database boundary while avoiding thousands of redundant primary/page-index
+writes. Each chunk remains subject to the migration's 1 MiB JSON limit; an
+oversized or malformed chunk aborts the whole transaction. The session exposes
+the logical source-record count from its frozen summary, while the migration
+guard validates the internal chunk count against the physical rows.
+
+D1 documents `batch()` as a transaction whose statements run sequentially and
+non-concurrently, with the entire sequence rolled back on failure. This gives
+the snapshot one database boundary without a global application write lock:
 
 <https://developers.cloudflare.com/d1/worker-api/d1-database/#batch>
 
 The initial request should receive only identifiers and aggregate results. The
-browser fetches the frozen records in bounded deterministic pages and constructs
-the metadata-only kit locally. This avoids serializing the whole database in the
-10 ms Worker CPU budget in one response.
+browser fetches one frozen storage chunk at a time; the Worker validates and
+expands it into at most 64 logical records before returning the deterministic
+page. The browser then constructs the metadata-only kit locally. This avoids
+serializing the whole database in the 10 ms Worker CPU budget in one response.
 
 The implementation must remain below the Workers Free limit of 50 D1 queries
 per invocation. Group snapshot statements where needed, and test the complete

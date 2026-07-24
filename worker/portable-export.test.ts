@@ -9,7 +9,9 @@ import {
   loadPortableExport,
   pagePortableExportRecords,
   parsePortableRange,
+  type PortableExportRecord,
   PORTABLE_EXPORT_CLEANUP_GRACE_MS,
+  PORTABLE_EXPORT_RECORD_CHUNK_SIZE,
   PORTABLE_SNAPSHOT_STATEMENT_COUNT,
 } from "./portable-export";
 
@@ -225,6 +227,28 @@ async function json(response: Response): Promise<Record<string, any>> {
   return response.json() as Promise<Record<string, any>>;
 }
 
+async function allRecordPages(
+  database: TestD1,
+  exportId: string,
+  now = new Date("2026-07-24T01:01:00.000Z"),
+) {
+  const records: PortableExportRecord[] = [];
+  let offset: number | null = 0;
+  while (offset !== null) {
+    const page = await pagePortableExportRecords(
+      database as unknown as D1Database,
+      exportId,
+      "local@example.invalid",
+      { limit: 200, offset },
+      now,
+    );
+    if (!page) throw new Error("synthetic portable page unavailable");
+    records.push(...page.records);
+    offset = page.nextOffset;
+  }
+  return records;
+}
+
 describe("portable export server", () => {
   let database: TestD1;
   let mediaBucket: TestR2;
@@ -251,6 +275,12 @@ describe("portable export server", () => {
     expect(first.state).toBe("ready");
     expect(first.itemCount).toBe(3);
     expect(first.plannedBytes).toBe(12);
+    const physicalRecords = database.sqlite.prepare(`
+      SELECT COUNT(*) AS count
+      FROM portable_export_records
+      WHERE export_id = ?
+    `).get(first.id) as { count: number };
+    expect(first.recordCount).toBeGreaterThan(physicalRecords.count);
     expect(first).toMatchObject({
       activeSongs: 1,
       trashedSongs: 0,
@@ -265,14 +295,9 @@ describe("portable export server", () => {
     });
 
     database.sqlite.exec("UPDATE songs SET title_latin = 'Later edit' WHERE id = 'song-1'");
-    const page = await pagePortableExportRecords(
-      database as unknown as D1Database,
-      first.id,
-      "local@example.invalid",
-      { limit: 200, offset: 0 },
-      new Date("2026-07-24T01:01:00.000Z"),
-    );
-    expect(page?.records.find((entry) => entry.kind === "songs")?.data.title_latin)
+    const records = await allRecordPages(database, first.id);
+    expect(records).toHaveLength(first.recordCount);
+    expect(records.find((entry) => entry.kind === "songs")?.data.title_latin)
       .toBe("Synthetic Song");
 
     const replay = await createPortableExport(
@@ -286,6 +311,63 @@ describe("portable export server", () => {
     expect(replay.id).toBe(first.id);
     expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM portable_export_sessions")
       .get()).toEqual({ count: 1 });
+  });
+
+  it("stores bounded chunks, expands stable logical pages, and rejects a malformed chunk", async () => {
+    const insertAlias = database.sqlite.prepare(`
+      INSERT INTO song_aliases (id, song_id, alias, normalized_alias, sort_order)
+      VALUES (?, 'song-1', ?, ?, ?)
+    `);
+    for (let index = 0; index < PORTABLE_EXPORT_RECORD_CHUNK_SIZE * 2; index += 1) {
+      const suffix = index.toString().padStart(3, "0");
+      insertAlias.run(
+        `alias-many-${suffix}`,
+        `Synthetic Alias ${suffix}`,
+        `synthetic alias ${suffix}`,
+        index + 1,
+      );
+    }
+    const created = await createPortableExport(
+      database as unknown as D1Database,
+      "local@example.invalid",
+      "1234567890abcdef1234567890abcdef12345678",
+      "synthetic",
+      "chunk-mutation",
+      new Date("2026-07-24T01:00:00.000Z"),
+    );
+    expect(database.sqlite.prepare(`
+      SELECT COUNT(*) AS count
+      FROM portable_export_records
+      WHERE export_id = ? AND record_kind = 'song_aliases'
+    `).get(created.id)).toEqual({ count: 3 });
+
+    const records = await allRecordPages(database, created.id);
+    const aliases = records.filter((record) => record.kind === "song_aliases");
+    expect(records).toHaveLength(created.recordCount);
+    expect(aliases).toHaveLength(PORTABLE_EXPORT_RECORD_CHUNK_SIZE * 2 + 1);
+    expect(new Set(aliases.map((record) => record.key)).size).toBe(aliases.length);
+    expect(aliases.map((record) => record.orderKey)).toEqual(
+      [...aliases.map((record) => record.orderKey)].sort(),
+    );
+
+    database.sqlite.exec("DROP TRIGGER prevent_portable_export_record_update");
+    database.sqlite.prepare(`
+      UPDATE portable_export_records
+      SET frozen_json = '{"unexpected":"shape"}'
+      WHERE export_id = ? AND record_kind = 'song_aliases' AND record_key = '@chunk:00000000'
+    `).run(created.id);
+    const corruptOffset = database.sqlite.prepare(`
+      SELECT COUNT(*) AS count
+      FROM portable_export_records
+      WHERE export_id = ? AND record_kind < 'song_aliases'
+    `).get(created.id) as { count: number };
+    await expect(pagePortableExportRecords(
+      database as unknown as D1Database,
+      created.id,
+      "local@example.invalid",
+      { limit: 200, offset: corruptOffset.count },
+      new Date("2026-07-24T01:01:00.000Z"),
+    )).rejects.toThrow("portable_frozen_record_chunk_invalid");
   });
 
   it("rolls back an invalid snapshot and retains only a bounded failed replay stub", async () => {
@@ -307,10 +389,27 @@ describe("portable export server", () => {
       new Date("2026-07-24T01:00:00.000Z"),
     );
     expect(failed.state).toBe("failed");
+    expect(failed.failureCode).toBe("snapshot_precondition_failed");
     expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM portable_export_records")
       .get()).toEqual({ count: 0 });
     expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM portable_export_items")
       .get()).toEqual({ count: 0 });
+
+    database.batch = async () => {
+      throw new Error("synthetic execution boundary");
+    };
+    const executionFailed = await createPortableExport(
+      database as unknown as D1Database,
+      "local@example.invalid",
+      "1234567890abcdef1234567890abcdef12345678",
+      "synthetic",
+      "mutation-execution-failed",
+      new Date("2026-07-24T01:00:00.000Z"),
+    );
+    expect(executionFailed).toMatchObject({
+      state: "failed",
+      failureCode: "snapshot_execution_failed",
+    });
   });
 
   it("enforces role, active Access middleware, creator binding, mutation media type, and private paging", async () => {
