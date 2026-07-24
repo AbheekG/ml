@@ -108,6 +108,19 @@ describe("browser kit and Python archive interoperability", () => {
           trashed_at: null,
           trashed_by: null,
         }),
+        record("media_objects", "media-history-1", {
+          id: "media-history-1",
+          original_filename: "historical.jpg",
+          mime_type: "image/jpeg",
+          byte_size: media.byteLength,
+          sha256: mediaSha256,
+          kind: "scan",
+          state: "active",
+          created_at: stamp,
+          created_by: actor,
+          trashed_at: null,
+          trashed_by: null,
+        }),
         record("scans", "scan-synthetic-1", {
           id: "scan-synthetic-1",
           song_id: "song-synthetic-1",
@@ -128,6 +141,14 @@ describe("browser kit and Python archive interoperability", () => {
           trashed_by: null,
           rotation_quarter_turns: 0,
         }),
+        record("scan_media_history", "scan-history-synthetic-1", {
+          id: "scan-history-synthetic-1",
+          scan_id: "scan-synthetic-1",
+          media_id: "media-history-1",
+          replaced_at: stamp,
+          replaced_by: actor,
+          revision_at_replacement: 1,
+        }),
       ];
       const session: PortableExportSession = {
         id: "a".repeat(32),
@@ -140,8 +161,8 @@ describe("browser kit and Python archive interoperability", () => {
         createdAt: "2026-07-24T10:00:00.000Z",
         expiresAt: "2026-07-25T10:00:00.000Z",
         recordCount: records.length,
-        itemCount: 1,
-        plannedBytes: media.byteLength,
+        itemCount: 2,
+        plannedBytes: media.byteLength * 2,
         planDigest: "b".repeat(64),
         readyAt: "2026-07-24T10:00:00.000Z",
         revokedAt: null,
@@ -157,20 +178,25 @@ describe("browser kit and Python archive interoperability", () => {
         trashedScans: 0,
         activeRecordings: 0,
         trashedRecordings: 0,
-        historyRelationships: 0,
+        historyRelationships: 1,
         unassignedMedia: 0,
       };
-      const itemId = "1".padStart(32, "0");
-      const items: FrozenExportItem[] = [{
-        id: itemId,
-        sourceKind: "media_object",
-        sourceId: "media-synthetic-1",
-        representation: "scan_original",
-        mimeType: "image/jpeg",
-        byteSize: media.byteLength,
-        sha256: mediaSha256,
-        contentPath: `/api/admin/portable-exports/${session.id}/items/${itemId}/content`,
-      }];
+      const items: FrozenExportItem[] = [
+        "media-synthetic-1",
+        "media-history-1",
+      ].map((sourceId, index) => {
+        const itemId = (index + 1).toString(16).padStart(32, "0");
+        return {
+          id: itemId,
+          sourceKind: "media_object",
+          sourceId,
+          representation: "scan_original",
+          mimeType: "image/jpeg",
+          byteSize: media.byteLength,
+          sha256: mediaSha256,
+          contentPath: `/api/admin/portable-exports/${session.id}/items/${itemId}/content`,
+        };
+      });
       const kit = await buildPrivateExportKit(
         session,
         records,
@@ -279,7 +305,7 @@ module.build_archive(
       expect(restore).toMatchObject({
         verified: true,
         sourceRecords: records.length,
-        restoredPayloads: 1,
+        restoredPayloads: 2,
       });
       expect(readFileSync(
         join(

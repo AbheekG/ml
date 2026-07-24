@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   buildPrivateExportKit,
   downloadPrivateExportKit,
   formatPrivateBytes,
+  loadCurrentPortableExport,
   loadPortableExportSnapshot,
   preparePortableExport,
   revokePortableExport,
@@ -11,6 +12,7 @@ import {
 import type { FrozenExportItem, SnapshotRecord } from "./portable-model";
 
 export type PortableBackupDependencies = {
+  loadCurrent: () => Promise<PortableExportSession | null>;
   prepare: () => Promise<PortableExportSession>;
   loadSnapshot: (
     exportId: string,
@@ -21,12 +23,50 @@ export type PortableBackupDependencies = {
 };
 
 const defaultDependencies: PortableBackupDependencies = {
+  loadCurrent: loadCurrentPortableExport,
   prepare: preparePortableExport,
   loadSnapshot: loadPortableExportSnapshot,
   buildKit: buildPrivateExportKit,
   downloadKit: downloadPrivateExportKit,
   revoke: revokePortableExport,
 };
+
+const PORTABLE_EXPORT_UI_STORAGE_KEY = "music-library:portable-export-ui:v1";
+
+type StoredPortableExportUi = {
+  exportId: string;
+  kitDownloaded: boolean;
+};
+
+function readStoredPortableExportUi(): StoredPortableExportUi | null {
+  try {
+    const value = window.localStorage.getItem(PORTABLE_EXPORT_UI_STORAGE_KEY);
+    if (!value) return null;
+    const parsed = JSON.parse(value) as Partial<StoredPortableExportUi>;
+    if (
+      typeof parsed.exportId !== "string"
+      || !/^[0-9a-f]{32}$/u.test(parsed.exportId)
+      || typeof parsed.kitDownloaded !== "boolean"
+    ) {
+      return null;
+    }
+    return { exportId: parsed.exportId, kitDownloaded: parsed.kitDownloaded };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredPortableExportUi(value: StoredPortableExportUi | null): void {
+  try {
+    if (value) {
+      window.localStorage.setItem(PORTABLE_EXPORT_UI_STORAGE_KEY, JSON.stringify(value));
+    } else {
+      window.localStorage.removeItem(PORTABLE_EXPORT_UI_STORAGE_KEY);
+    }
+  } catch {
+    // The server remains authoritative when browser storage is unavailable.
+  }
+}
 
 function count(value: number | null): string {
   return value === null ? "Unavailable" : value.toLocaleString();
@@ -41,9 +81,67 @@ export function PortableBackupSection({
 }) {
   const [prepared, setPrepared] = useState<PortableExportSession | null>(null);
   const [stage, setStage] = useState<
-    "idle" | "preparing" | "ready" | "building-kit" | "kit-downloaded" | "revoking" | "revoked"
-  >("idle");
+    "loading" | "idle" | "preparing" | "ready" | "building-kit" | "kit-downloaded" | "revoking" | "revoked"
+  >("loading");
   const [error, setError] = useState<string | null>(null);
+  const stageRef = useRef(stage);
+  stageRef.current = stage;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshCurrent = async (initial: boolean) => {
+      if (!isOnline || (!initial && ["preparing", "building-kit", "revoking"].includes(stageRef.current))) {
+        if (initial && !cancelled) setStage("idle");
+        return;
+      }
+      if (initial) setStage("loading");
+      try {
+        const session = await dependencies.loadCurrent();
+        if (cancelled) return;
+        setPrepared(session);
+        if (!session) {
+          writeStoredPortableExportUi(null);
+          setStage("idle");
+          return;
+        }
+        const stored = readStoredPortableExportUi();
+        const kitDownloaded = stored?.exportId === session.id && stored.kitDownloaded;
+        writeStoredPortableExportUi({
+          exportId: session.id,
+          kitDownloaded: Boolean(kitDownloaded),
+        });
+        setStage(kitDownloaded ? "kit-downloaded" : "ready");
+        setError(null);
+      } catch (loadError) {
+        if (cancelled) return;
+        if (initial) setStage("idle");
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "The current export plan could not be checked.",
+        );
+      }
+    };
+
+    void refreshCurrent(true);
+    const refreshOnFocus = () => { void refreshCurrent(false); };
+    const refreshOnVisibility = () => {
+      if (document.visibilityState === "visible") void refreshCurrent(false);
+    };
+    const refreshOnStorage = (event: StorageEvent) => {
+      if (event.key === PORTABLE_EXPORT_UI_STORAGE_KEY) void refreshCurrent(false);
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnVisibility);
+    window.addEventListener("storage", refreshOnStorage);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnVisibility);
+      window.removeEventListener("storage", refreshOnStorage);
+    };
+  }, [dependencies, isOnline]);
 
   const prepare = async () => {
     setStage("preparing");
@@ -51,6 +149,7 @@ export function PortableBackupSection({
     try {
       const session = await dependencies.prepare();
       setPrepared(session);
+      writeStoredPortableExportUi({ exportId: session.id, kitDownloaded: false });
       setStage("ready");
     } catch (prepareError) {
       setStage("idle");
@@ -71,6 +170,7 @@ export function PortableBackupSection({
         window.location.origin,
       );
       dependencies.downloadKit(kit);
+      writeStoredPortableExportUi({ exportId: prepared.id, kitDownloaded: true });
       setStage("kit-downloaded");
     } catch (downloadError) {
       setStage("ready");
@@ -84,6 +184,7 @@ export function PortableBackupSection({
     setError(null);
     try {
       setPrepared(await dependencies.revoke(prepared.id));
+      writeStoredPortableExportUi(null);
       setStage("revoked");
     } catch (revokeError) {
       setStage(prepared.state === "ready" ? "ready" : "revoked");
@@ -93,7 +194,7 @@ export function PortableBackupSection({
 
   const estimatedArchive = prepared ? Math.ceil(prepared.plannedBytes * 1.03) + 64 * 1024 * 1024 : 0;
   const requiredDisk = prepared ? (prepared.plannedBytes * 2) + 1024 * 1024 * 1024 : 0;
-  const busy = ["preparing", "building-kit", "revoking"].includes(stage);
+  const busy = ["loading", "preparing", "building-kit", "revoking"].includes(stage);
   const usable = prepared?.state === "ready" && stage !== "revoked";
 
   return (
@@ -124,7 +225,11 @@ export function PortableBackupSection({
           disabled={!isOnline || busy}
           onClick={() => { void prepare(); }}
         >
-          {stage === "preparing" ? "Preparing frozen plan…" : "Prepare export kit"}
+          {stage === "loading"
+            ? "Checking for current export…"
+            : stage === "preparing"
+              ? "Preparing frozen plan…"
+              : "Prepare export kit"}
         </button>
       ) : (
         <>
@@ -183,4 +288,3 @@ export function PortableBackupSection({
     </section>
   );
 }
-

@@ -102,6 +102,15 @@ export async function loadPortableExportSession(
   return payload.export;
 }
 
+export async function loadCurrentPortableExport(): Promise<PortableExportSession | null> {
+  const response = await fetch(
+    "/api/admin/portable-exports/current",
+    { credentials: "same-origin" },
+  );
+  const payload = await responseJson<{ export: PortableExportSession | null }>(response);
+  return payload.export;
+}
+
 async function loadAllPages<T>(
   path: string,
   field: "records" | "items",

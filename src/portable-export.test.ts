@@ -3,6 +3,7 @@ import {
   buildStoredZip,
   canonicalPrettyJson,
   formatPrivateBytes,
+  loadCurrentPortableExport,
   loadPortableExportSnapshot,
   preparePortableExport,
   revokePortableExport,
@@ -70,6 +71,8 @@ describe("private portable export kit", () => {
       if (url === "/api/admin/portable-exports") {
         body = { export: { id: "a".repeat(32) } };
         status = 201;
+      } else if (url === "/api/admin/portable-exports/current") {
+        body = { export: { id: "a".repeat(32), state: "ready" } };
       } else if (url.includes("/records") && url.endsWith("offset=0")) {
         body = {
           records: [{ kind: "songs", key: "song-1", orderKey: "song-1", data: { id: "song-1" } }],
@@ -93,6 +96,10 @@ describe("private portable export kit", () => {
     vi.stubGlobal("fetch", fetcher);
 
     await preparePortableExport("mutation-1");
+    await expect(loadCurrentPortableExport()).resolves.toMatchObject({
+      id: "a".repeat(32),
+      state: "ready",
+    });
     const snapshot = await loadPortableExportSnapshot("a".repeat(32));
     await revokePortableExport("a".repeat(32));
     expect(snapshot.records).toHaveLength(2);
@@ -105,6 +112,7 @@ describe("private portable export kit", () => {
     });
     expect(fetcher.mock.calls.map((call) => String(call[0]))).toEqual(expect.arrayContaining([
       "/api/admin/portable-exports",
+      "/api/admin/portable-exports/current",
       `/api/admin/portable-exports/${"a".repeat(32)}/records?limit=200&offset=0`,
       `/api/admin/portable-exports/${"a".repeat(32)}/items?limit=200&offset=0`,
       `/api/admin/portable-exports/${"a".repeat(32)}/records?limit=200&offset=1`,

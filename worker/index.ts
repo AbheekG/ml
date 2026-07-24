@@ -99,6 +99,7 @@ import {
 import {
   cleanupPortableExports,
   createPortableExport,
+  loadCurrentPortableExport,
   loadPortableExport,
   pagePortableExportItems,
   pagePortableExportRecords,
@@ -2357,6 +2358,11 @@ app.post("/api/admin/portable-exports", requireRole("admin"), async (context) =>
   if (!validPortableSourceCommit(sourceCommit)) {
     return context.json({ error: "portable_export_not_configured" }, 503);
   }
+  const current = await loadCurrentPortableExport(
+    context.env.DB,
+    context.get("appUser").identity,
+  );
+  if (current) return context.json({ export: current });
   let session;
   try {
     session = await createPortableExport(
@@ -2376,6 +2382,14 @@ app.post("/api/admin/portable-exports", requireRole("admin"), async (context) =>
     }, 409);
   }
   return context.json({ export: session }, 201);
+});
+
+app.get("/api/admin/portable-exports/current", requireRole("admin"), async (context) => {
+  const session = await loadCurrentPortableExport(
+    context.env.DB,
+    context.get("appUser").identity,
+  );
+  return context.json({ export: session });
 });
 
 app.get("/api/admin/portable-exports/:exportId", requireRole("admin"), async (context) => {

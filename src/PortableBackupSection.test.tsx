@@ -10,7 +10,10 @@ import {
 } from "./PortableBackupSection";
 import type { PortableExportSession, PrivateExportKit } from "./portable-export";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.localStorage.clear();
+});
 
 const prepared: PortableExportSession = {
   id: "a".repeat(32),
@@ -46,6 +49,7 @@ const prepared: PortableExportSession = {
 
 function dependencies(): PortableBackupDependencies {
   return {
+    loadCurrent: vi.fn(async () => null),
     prepare: vi.fn(async () => prepared),
     loadSnapshot: vi.fn(async () => ({ records: [], items: [] })),
     buildKit: vi.fn(async () => ({
@@ -71,7 +75,7 @@ describe("PortableBackupSection", () => {
     expect(screen.getByText(/not a completed backup/i)).toBeTruthy();
     expect(screen.getByText(/Plan prepared → Kit downloaded → Media incomplete → Archive built → Verified/)).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Prepare export kit" }));
+    await user.click(await screen.findByRole("button", { name: "Prepare export kit" }));
     expect((await screen.findAllByText("2 active · 1 Trash")).length).toBe(3);
     expect(screen.getByText("3 objects · 1.0 KiB")).toBeTruthy();
     expect(screen.getByText(/24-hour|expires/i)).toBeTruthy();
@@ -93,6 +97,23 @@ describe("PortableBackupSection", () => {
     render(<PortableBackupSection isOnline={false} dependencies={dependencies()} />);
     expect(screen.getByRole("button", { name: "Prepare export kit" })).toHaveProperty("disabled", true);
     expect(screen.getByText(/Go online to use portable backup/)).toBeTruthy();
+  });
+
+  it("recovers the active plan and downloaded-kit stage across a remount", async () => {
+    const user = userEvent.setup();
+    const api = dependencies();
+    const first = render(<PortableBackupSection isOnline dependencies={api} />);
+    await user.click(await screen.findByRole("button", { name: "Prepare export kit" }));
+    await user.click(await screen.findByRole("button", { name: "Download export kit" }));
+    expect(await screen.findByText(/Kit downloaded\. Extract it/)).toBeTruthy();
+    first.unmount();
+
+    const recovered = dependencies();
+    recovered.loadCurrent = vi.fn(async () => prepared);
+    render(<PortableBackupSection isOnline dependencies={recovered} />);
+    expect(await screen.findByText("Kit downloaded · media incomplete")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Download kit again" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Revoke this kit" })).toBeTruthy();
   });
 
   it("is rendered by Account only for an administrator", () => {

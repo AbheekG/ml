@@ -804,6 +804,11 @@ export async function buildPortableExportModel(
         ...portableEntity(entry, "ScanReplacement"),
         mediaId: stringValue(entry, "media_id"),
         path: payloadPathBySource.get(`media_object:${stringValue(entry, "media_id")}`)!,
+        original: mediaRepresentation(
+          mediaById.get(stringValue(entry, "media_id")!)!,
+          payloadPathBySource.get(`media_object:${stringValue(entry, "media_id")}`)!,
+          "scan_historical_original",
+        ) as unknown as JsonValue,
         replacedAt: stringValue(entry, "replaced_at"),
         replacedBy: stringValue(entry, "replaced_by"),
         revisionAtReplacement: numberValue(entry, "revision_at_replacement"),
@@ -857,22 +862,43 @@ export async function buildPortableExportModel(
         playback = "unavailable";
         playbackPath = null;
       }
-      const history = (recordingHistoryByRecording.get(recordingId) ?? []).map((entry) => ({
-        ...portableEntity(entry, "RecordingReplacement"),
-        originalMediaId: stringValue(entry, "original_media_id"),
-        originalPath: payloadPathBySource.get(
-          `media_object:${stringValue(entry, "original_media_id")}`,
-        )!,
-        playbackMediaId: stringValue(entry, "playback_media_id", false),
-        playbackPath: stringValue(entry, "playback_media_id", false)
-          ? payloadPathBySource.get(
-            `media_object:${stringValue(entry, "playback_media_id", false)}`,
-          ) ?? null
-          : null,
-        replacedAt: stringValue(entry, "replaced_at"),
-        replacedBy: stringValue(entry, "replaced_by"),
-        revisionAtReplacement: numberValue(entry, "revision_at_replacement"),
-      }));
+      const history = (recordingHistoryByRecording.get(recordingId) ?? []).map((entry) => {
+        const historicalOriginalId = stringValue(entry, "original_media_id")!;
+        const historicalOriginalPath = payloadPathBySource.get(
+          `media_object:${historicalOriginalId}`,
+        )!;
+        const historicalPlaybackId = stringValue(entry, "playback_media_id", false);
+        const distinctPlayback = historicalPlaybackId
+          && historicalPlaybackId !== historicalOriginalId;
+        const historicalPlaybackPath = historicalPlaybackId
+          ? payloadPathBySource.get(`media_object:${historicalPlaybackId}`) ?? null
+          : null;
+        return {
+          ...portableEntity(entry, "RecordingReplacement"),
+          originalMediaId: historicalOriginalId,
+          originalPath: historicalOriginalPath,
+          original: mediaRepresentation(
+            mediaById.get(historicalOriginalId)!,
+            historicalOriginalPath,
+            "recording_historical_original",
+          ) as unknown as JsonValue,
+          playbackMediaId: historicalPlaybackId,
+          playback: historicalPlaybackId
+            ? distinctPlayback ? "optimized" : "original"
+            : "unavailable",
+          playbackPath: historicalPlaybackPath,
+          optimized: distinctPlayback
+            ? mediaRepresentation(
+              mediaById.get(historicalPlaybackId)!,
+              historicalPlaybackPath!,
+              "recording_historical_playback",
+            ) as unknown as JsonValue
+            : null,
+          replacedAt: stringValue(entry, "replaced_at"),
+          replacedBy: stringValue(entry, "replaced_by"),
+          revisionAtReplacement: numberValue(entry, "revision_at_replacement"),
+        };
+      });
       return {
         ...portableEntity(recording, "Recording"),
         songId: id,

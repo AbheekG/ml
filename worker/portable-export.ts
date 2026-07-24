@@ -6,9 +6,9 @@ export const PORTABLE_EXPORT_LIFETIME_MS = 24 * 60 * 60 * 1000;
 export const PORTABLE_EXPORT_CLEANUP_GRACE_MS = 6 * 60 * 60 * 1000;
 export const PORTABLE_EXPORT_PAGE_MAX = 200;
 export const PORTABLE_EXPORT_RECORD_CHUNK_SIZE = 64;
-export const PORTABLE_EXPORT_RECORD_CHUNK_PAGE_MAX = 1;
+export const PORTABLE_EXPORT_RECORD_CHUNK_PAGE_MAX = 4;
 export const PORTABLE_EXPORT_ITEM_CHUNK_SIZE = 64;
-export const PORTABLE_EXPORT_ITEM_CHUNK_PAGE_MAX = 1;
+export const PORTABLE_EXPORT_ITEM_CHUNK_PAGE_MAX = 4;
 
 export type PortableExportState = "preparing" | "ready" | "revoked" | "expired" | "failed";
 
@@ -709,6 +709,22 @@ export async function loadPortableExport(
   return database.prepare(`${SESSION_SELECT} WHERE id = ? AND created_by = ?`)
     .bind(exportId, actor)
     .first<PortableExportSession>();
+}
+
+export async function loadCurrentPortableExport(
+  database: D1Database,
+  actor: string,
+  now = new Date(),
+): Promise<PortableExportSession | null> {
+  return database.prepare(`
+    ${SESSION_SELECT}
+    WHERE created_by = ?
+      AND state = 'ready'
+      AND expires_at > ?
+      AND detail_purged_at IS NULL
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `).bind(actor, now.toISOString()).first<PortableExportSession>();
 }
 
 export async function revokePortableExport(

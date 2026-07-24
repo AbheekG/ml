@@ -6,6 +6,7 @@ import { app } from "./index";
 import {
   cleanupPortableExports,
   createPortableExport,
+  loadCurrentPortableExport,
   loadPortableExport,
   pagePortableExportItems,
   pagePortableExportRecords,
@@ -447,6 +448,15 @@ describe("portable export server", () => {
       FROM portable_export_item_chunks
       WHERE export_id = ?
     `).get(created.id)).toEqual({ count: 3 });
+    const firstPage = await pagePortableExportItems(
+      database as unknown as D1Database,
+      created.id,
+      "local@example.invalid",
+      { limit: 200, offset: 0 },
+      new Date("2026-07-24T01:01:00.000Z"),
+    );
+    expect(firstPage?.items).toHaveLength(created.itemCount);
+    expect(firstPage?.nextOffset).toBeNull();
     const items = await allItemPages(database, created.id);
     expect(items).toHaveLength(created.itemCount);
     expect(new Set(items.map((item) => item.id)).size).toBe(items.length);
@@ -535,6 +545,28 @@ describe("portable export server", () => {
     }, env(database, mediaBucket));
     expect(response.status).toBe(201);
     const exportId = (await json(response)).export.id as string;
+
+    const currentResponse = await app.request(
+      "/api/admin/portable-exports/current",
+      {},
+      env(database, mediaBucket),
+    );
+    expect(currentResponse.status).toBe(200);
+    expect((await json(currentResponse)).export.id).toBe(exportId);
+    expect((await loadCurrentPortableExport(
+      database as unknown as D1Database,
+      "local@example.invalid",
+    ))?.id).toBe(exportId);
+
+    const duplicatePrepare = await app.request("/api/admin/portable-exports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientMutationId: "another-admin-mutation" }),
+    }, env(database, mediaBucket));
+    expect(duplicatePrepare.status).toBe(200);
+    expect((await json(duplicatePrepare)).export.id).toBe(exportId);
+    expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM portable_export_sessions")
+      .get()).toEqual({ count: 1 });
 
     const recordsResponse = await app.request(
       `/api/admin/portable-exports/${exportId}/records?limit=1`,

@@ -369,6 +369,16 @@ describe("portable archive model", () => {
       expect.stringContaining("/History/Recordings/"),
       expect.stringContaining("unassigned-media/"),
     ]));
+    const trashedSong = first.catalog.songs.find((song) => song.id === "song-trashed-0002")!;
+    const historical = (
+      (trashedSong.recordings as Array<Record<string, unknown>>)[0]!
+        .replacementHistory as Array<Record<string, unknown>>
+    )[0]!;
+    expect(historical.original).toMatchObject({
+      type: "MediaRepresentation",
+      mediaId: "audio-history-2",
+      semanticRole: "recording_historical_original",
+    });
     expect(JSON.stringify(first)).not.toContain("object_key");
     expect(JSON.stringify(first)).not.toContain("r2_upload_id");
   });
