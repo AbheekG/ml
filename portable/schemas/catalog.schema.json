@@ -35,7 +35,7 @@
       "required": ["commit", "schemaVersion", "environment", "includedTables", "excludedTables"],
       "properties": {
         "commit": { "type": "string", "pattern": "^(?:[0-9a-f]{7,40}|local-development)$" },
-        "schemaVersion": { "const": "0021" },
+        "schemaVersion": { "const": "0022" },
         "environment": { "type": "string", "minLength": 1, "maxLength": 100 },
         "includedTables": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "excludedTables": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }

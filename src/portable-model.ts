@@ -1,6 +1,6 @@
 export const PORTABLE_PROFILE_ID = "urn:music-library:portable-archive-profile:1";
 export const PORTABLE_PROFILE_VERSION = "1.0.0";
-export const PORTABLE_SCHEMA_VERSION = "0021";
+export const PORTABLE_SCHEMA_VERSION = "0022";
 export const PORTABLE_TOOL_VERSION = "1.0.0";
 export const MAX_PORTABLE_COMPONENT_BYTES = 120;
 export const MAX_PORTABLE_PATH_BYTES = 512;
@@ -150,6 +150,7 @@ const EXCLUDED_SOURCE_TABLES = [
   "portable_export_sessions",
   "portable_export_records",
   "portable_export_items",
+  "portable_export_item_chunks",
 ] as const;
 
 const encoder = new TextEncoder();

@@ -36,7 +36,7 @@ from typing import Any, BinaryIO, Callable, Iterable, Iterator, Mapping, Sequenc
 PROFILE_ID = "urn:music-library:portable-archive-profile:1"
 PROFILE_VERSION = "1.0.0"
 TOOL_VERSION = "1.0.0"
-SOURCE_SCHEMA_VERSION = "0021"
+SOURCE_SCHEMA_VERSION = "0022"
 RO_CRATE_CONTEXT = "https://w3id.org/ro/crate/1.1/context"
 RO_CRATE_VERSION = "1.3"
 DEFAULT_CONCURRENCY = 4
@@ -104,12 +104,13 @@ EXCLUDED_SOURCE_TABLES = {
     "portable_export_sessions",
     "portable_export_records",
     "portable_export_items",
+    "portable_export_item_chunks",
 }
 CONTRACT_SHA256 = {
     "metadata/profile.json":
         "18012b5e2f195ffd6479be2c4a7ee74d3d95dc9d4cd191b4e98a5bd77a457887",
     "metadata/schemas/catalog.schema.json":
-        "5c730868b217469232903a40a840d809260793cd203800f33f068ec2632462a0",
+        "fc5cff9acea21cb1f03a2cc6b35f8da7904a2863a155df3c03584e3f1e8ae6eb",
     "metadata/schemas/export-plan.schema.json":
         "565d9620cebf02f22ffeefe0af0f73ff837f0872cf65050075f13e83b569889e",
     "metadata/schemas/export-report.schema.json":

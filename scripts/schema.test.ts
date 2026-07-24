@@ -25,7 +25,9 @@ const indiaRecordingCalendarMigration = readFileSync(resolve("migrations/0018_in
 const recordingUploadFileIdentityMigration = readFileSync(resolve("migrations/0019_recording_upload_file_identity.sql"), "utf8");
 const canonicalRecordingDatesMigration = readFileSync(resolve("migrations/0020_canonical_recording_dates.sql"), "utf8");
 const portableExportsMigration = readFileSync(resolve("migrations/0021_portable_exports.sql"), "utf8");
-const migration = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}\n${playbackDuplicateDetectionMigration}\n${scanReadabilityDuplicateDetectionMigration}\n${indiaRecordingCalendarMigration}\n${recordingUploadFileIdentityMigration}\n${canonicalRecordingDatesMigration}\n${portableExportsMigration}`;
+const portableExportItemChunksMigration = readFileSync(resolve("migrations/0022_portable_export_item_chunks.sql"), "utf8");
+const migrationThroughPortableExports = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}\n${playbackDuplicateDetectionMigration}\n${scanReadabilityDuplicateDetectionMigration}\n${indiaRecordingCalendarMigration}\n${recordingUploadFileIdentityMigration}\n${canonicalRecordingDatesMigration}\n${portableExportsMigration}`;
+const migration = `${migrationThroughPortableExports}\n${portableExportItemChunksMigration}`;
 const sqliteTestPreamble = "PRAGMA legacy_alter_table = OFF;";
 const timestamp = "2026-07-12T00:00:00.000Z";
 
@@ -33,6 +35,17 @@ function runSql(sql: string): string {
   return execFileSync("sqlite3", [":memory:"], {
     encoding: "utf8",
     input: `${sqliteTestPreamble}\n${migration}\n${sql}`,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
+function migratePortableExportItemChunks(
+  beforeMigration: string,
+  afterMigration: string,
+): string {
+  return execFileSync("sqlite3", [":memory:"], {
+    encoding: "utf8",
+    input: `${sqliteTestPreamble}\n${migrationThroughPortableExports}\n${beforeMigration}\n${portableExportItemChunksMigration}\n${afterMigration}`,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -64,6 +77,83 @@ function migrateScanRotation(beforeMigration: string, afterMigration: string): s
 describe("initial database schema", () => {
   it("loads successfully", () => {
     expect(() => runSql("PRAGMA foreign_key_check;")).not.toThrow();
+  });
+
+  it("preserves legacy portable export rows while adding bounded item chunks", () => {
+    const output = migratePortableExportItemChunks(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'portable-media-1', 'scans/portable-media-1.jpg', 'synthetic.jpg',
+        'image/jpeg', 4, '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO portable_export_sessions (
+        id, profile_version, client_mutation_id, request_fingerprint, state,
+        source_schema_version, source_commit, source_environment,
+        snapshot_at, created_at, created_by, expires_at
+      ) VALUES (
+        '${"1".repeat(32)}', '1.0.0', 'legacy-plan', '${"b".repeat(64)}',
+        'preparing', '0021', 'local-development', 'synthetic',
+        '${timestamp}', '${timestamp}', 'test', '2026-07-13T00:00:00.000Z'
+      );
+      INSERT INTO portable_export_items (
+        id, export_id, source_kind, source_id, representation, object_key,
+        mime_type, byte_size, sha256
+      ) VALUES (
+        '${"2".repeat(32)}', '${"1".repeat(32)}', 'media_object',
+        'portable-media-1', 'scan_original', 'scans/portable-media-1.jpg',
+        'image/jpeg', 4, '${"a".repeat(64)}'
+      );
+      UPDATE portable_export_sessions
+      SET state = 'ready',
+          item_count = 1,
+          planned_bytes = 4,
+          plan_digest = '${"c".repeat(64)}',
+          ready_at = '2026-07-12T00:01:00.000Z'
+      WHERE id = '${"1".repeat(32)}';
+    `, `
+      INSERT INTO portable_export_sessions (
+        id, profile_version, client_mutation_id, request_fingerprint, state,
+        source_schema_version, source_commit, source_environment,
+        snapshot_at, created_at, created_by, expires_at,
+        failed_at, failure_code
+      ) VALUES (
+        '${"3".repeat(32)}', '1.0.0', 'chunk-plan', '${"d".repeat(64)}',
+        'failed', '0022', 'local-development', 'synthetic',
+        '${timestamp}', '${timestamp}', 'test', '2026-07-13T00:00:00.000Z',
+        '${timestamp}', 'snapshot_execution_failed'
+      );
+      SELECT
+        (SELECT source_schema_version FROM portable_export_sessions
+          WHERE id = '${"1".repeat(32)}') || '|' ||
+        (SELECT state FROM portable_export_sessions
+          WHERE id = '${"1".repeat(32)}') || '|' ||
+        (SELECT COUNT(*) FROM portable_export_items) || '|' ||
+        (SELECT COUNT(*) FROM portable_export_item_chunks);
+      SELECT
+        (SELECT COUNT(*) FROM portable_export_sessions) || '|' ||
+        (SELECT COUNT(*) FROM sqlite_master
+          WHERE type = 'trigger' AND name LIKE '%portable_export%');
+      PRAGMA foreign_key_check;
+    `);
+    expect(output).toBe("0021|ready|1|0\n2|10\n");
+  });
+
+  it("rejects unknown portable source-schema versions", () => {
+    expect(() => runSql(`
+      INSERT INTO portable_export_sessions (
+        id, profile_version, client_mutation_id, request_fingerprint, state,
+        source_schema_version, source_commit, source_environment,
+        snapshot_at, created_at, created_by, expires_at,
+        failed_at, failure_code
+      ) VALUES (
+        '${"1".repeat(32)}', '1.0.0', 'future-plan', '${"a".repeat(64)}',
+        'failed', '0023', 'local-development', 'synthetic',
+        '${timestamp}', '${timestamp}', 'test', '2026-07-13T00:00:00.000Z',
+        '${timestamp}', 'snapshot_execution_failed'
+      );
+    `)).toThrow(/CHECK constraint failed/);
   });
 
   it("uses the India calendar boundary for Recording rows and upload intents", () => {

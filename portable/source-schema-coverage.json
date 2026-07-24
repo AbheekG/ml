@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "sourceSchema": "0021",
+  "sourceSchema": "0022",
   "tables": {
     "app_users": {
       "treatment": "included_as_historical_actors",
@@ -46,6 +46,10 @@
     "portable_export_items": {
       "treatment": "excluded_derived_export_state_and_storage_locators",
       "excludedColumns": ["id", "export_id", "source_kind", "source_id", "representation", "object_key", "mime_type", "byte_size", "sha256"]
+    },
+    "portable_export_item_chunks": {
+      "treatment": "excluded_derived_export_state_and_storage_locators",
+      "excludedColumns": ["export_id", "chunk_key", "lookup_id", "item_count", "planned_bytes", "frozen_json"]
     },
     "portable_export_records": {
       "treatment": "excluded_derived_export_state",

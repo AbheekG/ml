@@ -7,10 +7,13 @@ import {
   cleanupPortableExports,
   createPortableExport,
   loadPortableExport,
+  pagePortableExportItems,
   pagePortableExportRecords,
   parsePortableRange,
+  type PortableExportItem,
   type PortableExportRecord,
   PORTABLE_EXPORT_CLEANUP_GRACE_MS,
+  PORTABLE_EXPORT_ITEM_CHUNK_SIZE,
   PORTABLE_EXPORT_RECORD_CHUNK_SIZE,
   PORTABLE_SNAPSHOT_STATEMENT_COUNT,
 } from "./portable-export";
@@ -249,6 +252,28 @@ async function allRecordPages(
   return records;
 }
 
+async function allItemPages(
+  database: TestD1,
+  exportId: string,
+  now = new Date("2026-07-24T01:01:00.000Z"),
+) {
+  const items: PortableExportItem[] = [];
+  let offset: number | null = 0;
+  while (offset !== null) {
+    const page = await pagePortableExportItems(
+      database as unknown as D1Database,
+      exportId,
+      "local@example.invalid",
+      { limit: 200, offset },
+      now,
+    );
+    if (!page) throw new Error("synthetic portable item page unavailable");
+    items.push(...page.items);
+    offset = page.nextOffset;
+  }
+  return items;
+}
+
 describe("portable export server", () => {
   let database: TestD1;
   let mediaBucket: TestR2;
@@ -280,7 +305,16 @@ describe("portable export server", () => {
       FROM portable_export_records
       WHERE export_id = ?
     `).get(first.id) as { count: number };
+    const physicalItemChunks = database.sqlite.prepare(`
+      SELECT COUNT(*) AS count
+      FROM portable_export_item_chunks
+      WHERE export_id = ?
+    `).get(first.id) as { count: number };
     expect(first.recordCount).toBeGreaterThan(physicalRecords.count);
+    expect(first.itemCount).toBeGreaterThan(physicalItemChunks.count);
+    expect(database.sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM portable_export_items WHERE export_id = ?
+    `).get(first.id)).toEqual({ count: 0 });
     expect(first).toMatchObject({
       activeSongs: 1,
       trashedSongs: 0,
@@ -296,7 +330,10 @@ describe("portable export server", () => {
 
     database.sqlite.exec("UPDATE songs SET title_latin = 'Later edit' WHERE id = 'song-1'");
     const records = await allRecordPages(database, first.id);
+    const items = await allItemPages(database, first.id);
     expect(records).toHaveLength(first.recordCount);
+    expect(items).toHaveLength(first.itemCount);
+    expect(new Set(items.map((item) => item.id)).size).toBe(items.length);
     expect(records.find((entry) => entry.kind === "songs")?.data.title_latin)
       .toBe("Synthetic Song");
 
@@ -370,6 +407,58 @@ describe("portable export server", () => {
     )).rejects.toThrow("portable_frozen_record_chunk_invalid");
   });
 
+  it("stores opaque bounded item chunks and rejects malformed private item data", async () => {
+    const insertMedia = database.sqlite.prepare(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (?, ?, ?, 'audio/mpeg', 1, ?, 'original_audio',
+        '2026-07-24T00:00:00.000Z', 'local@example.invalid')
+    `);
+    for (let index = 0; index < PORTABLE_EXPORT_ITEM_CHUNK_SIZE * 2; index += 1) {
+      const suffix = index.toString().padStart(3, "0");
+      insertMedia.run(
+        `unassigned-media-${suffix}`,
+        `recordings/original/unassigned-media-${suffix}`,
+        `synthetic-${suffix}.mp3`,
+        index.toString(16).padStart(64, "0"),
+      );
+    }
+    const created = await createPortableExport(
+      database as unknown as D1Database,
+      "local@example.invalid",
+      "1234567890abcdef1234567890abcdef12345678",
+      "synthetic",
+      "item-chunk-mutation",
+      new Date("2026-07-24T01:00:00.000Z"),
+    );
+    expect(database.sqlite.prepare(`
+      SELECT COUNT(*) AS count
+      FROM portable_export_item_chunks
+      WHERE export_id = ?
+    `).get(created.id)).toEqual({ count: 3 });
+    const items = await allItemPages(database, created.id);
+    expect(items).toHaveLength(created.itemCount);
+    expect(new Set(items.map((item) => item.id)).size).toBe(items.length);
+    expect(items.every((item) => /^[0-9a-f]{32}$/u.test(item.id))).toBe(true);
+
+    database.sqlite.exec("DROP TRIGGER prevent_portable_export_item_chunk_update");
+    database.sqlite.prepare(`
+      UPDATE portable_export_item_chunks
+      SET item_count = 1,
+          planned_bytes = 1,
+          frozen_json = '[{"sourceKind":"media_object"}]'
+      WHERE export_id = ? AND chunk_key = '@chunk:00000000'
+    `).run(created.id);
+    await expect(pagePortableExportItems(
+      database as unknown as D1Database,
+      created.id,
+      "local@example.invalid",
+      { limit: 200, offset: 0 },
+      new Date("2026-07-24T01:01:00.000Z"),
+    )).rejects.toThrow("portable_frozen_item_chunk_invalid");
+  });
+
   it("rolls back an invalid snapshot and retains only a bounded failed replay stub", async () => {
     database.sqlite.exec(`
       INSERT INTO media_objects (
@@ -393,6 +482,8 @@ describe("portable export server", () => {
     expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM portable_export_records")
       .get()).toEqual({ count: 0 });
     expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM portable_export_items")
+      .get()).toEqual({ count: 0 });
+    expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM portable_export_item_chunks")
       .get()).toEqual({ count: 0 });
 
     database.batch = async () => {
@@ -531,10 +622,9 @@ describe("portable export server", () => {
       "synthetic",
       "storage-mutation",
     );
-    const item = database.sqlite.prepare(`
-      SELECT id FROM portable_export_items
-      WHERE export_id = ? AND source_id = 'audio-media-1'
-    `).get(created.id) as { id: string };
+    const item = (await allItemPages(database, created.id))
+      .find((candidate) => candidate.sourceId === "audio-media-1");
+    if (!item) throw new Error("synthetic audio export item unavailable");
     const path = `/api/admin/portable-exports/${created.id}/items/${item.id}/content`;
 
     mediaBucket.objects.delete("recordings/original/audio-media-1");
@@ -586,6 +676,8 @@ describe("portable export server", () => {
     expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM portable_export_records")
       .get()).toEqual({ count: 0 });
     expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM portable_export_items")
+      .get()).toEqual({ count: 0 });
+    expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM portable_export_item_chunks")
       .get()).toEqual({ count: 0 });
     expect(database.sqlite.prepare(`
       SELECT

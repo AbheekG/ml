@@ -58,7 +58,7 @@ const session: FrozenExportSession = {
   expiresAt: "2026-07-25T10:00:00.000Z",
   planDigest: "b".repeat(64),
   sourceCommit: "1234567890abcdef1234567890abcdef12345678",
-  sourceSchemaVersion: "0021",
+  sourceSchemaVersion: "0022",
   sourceEnvironment: "synthetic-test",
   recordCount: 29,
   itemCount: 7,

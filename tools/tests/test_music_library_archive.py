@@ -241,7 +241,7 @@ def catalog() -> dict[str, Any]:
         },
         "source": {
             "commit": "1234567890abcdef1234567890abcdef12345678",
-            "schemaVersion": "0021",
+            "schemaVersion": "0022",
             "environment": "synthetic-test",
             "includedTables": sorted(archive.ALLOWED_SOURCE_TABLES),
             "excludedTables": [

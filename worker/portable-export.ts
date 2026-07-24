@@ -1,12 +1,14 @@
 import type { Context } from "hono";
 
 export const PORTABLE_EXPORT_PROFILE_VERSION = "1.0.0";
-export const PORTABLE_EXPORT_SCHEMA_VERSION = "0021";
+export const PORTABLE_EXPORT_SCHEMA_VERSION = "0022";
 export const PORTABLE_EXPORT_LIFETIME_MS = 24 * 60 * 60 * 1000;
 export const PORTABLE_EXPORT_CLEANUP_GRACE_MS = 6 * 60 * 60 * 1000;
 export const PORTABLE_EXPORT_PAGE_MAX = 200;
 export const PORTABLE_EXPORT_RECORD_CHUNK_SIZE = 64;
 export const PORTABLE_EXPORT_RECORD_CHUNK_PAGE_MAX = 1;
+export const PORTABLE_EXPORT_ITEM_CHUNK_SIZE = 64;
+export const PORTABLE_EXPORT_ITEM_CHUNK_PAGE_MAX = 1;
 
 export type PortableExportState = "preparing" | "ready" | "revoked" | "expired" | "failed";
 
@@ -61,6 +63,14 @@ export type PortableExportItem = {
 
 type PortableExportItemPrivate = PortableExportItem & {
   objectKey: string;
+};
+
+type PortableExportItemChunkRow = {
+  chunkKey: string;
+  lookupId: string;
+  itemCount: number;
+  plannedBytes: number;
+  frozenJson: string;
 };
 
 type PortableExportContext = Context<{
@@ -307,7 +317,7 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
   },
 ];
 
-export const PORTABLE_SNAPSHOT_STATEMENT_COUNT = SNAPSHOT_SPECS.length + 4;
+export const PORTABLE_SNAPSHOT_STATEMENT_COUNT = SNAPSHOT_SPECS.length + 3;
 
 const SESSION_SELECT = `
   SELECT
@@ -430,6 +440,79 @@ function recordStatement(database: D1Database, exportId: string, spec: SnapshotS
   `).bind(exportId);
 }
 
+function itemChunkStatement(database: D1Database, exportId: string): D1PreparedStatement {
+  return database.prepare(`
+    INSERT INTO portable_export_item_chunks (
+      export_id, chunk_key, lookup_id, item_count, planned_bytes, frozen_json
+    )
+    WITH source_items AS (
+      SELECT
+        'media_object' AS source_kind,
+        id AS source_id,
+        CASE kind
+          WHEN 'scan' THEN 'scan_original'
+          WHEN 'original_audio' THEN 'recording_original'
+          ELSE 'recording_playback'
+        END AS representation,
+        object_key,
+        COALESCE(mime_type, 'application/octet-stream') AS mime_type,
+        byte_size,
+        sha256
+      FROM media_objects
+      UNION ALL
+      SELECT
+        'scan_readability' AS source_kind,
+        source_media_id AS source_id,
+        'scan_optimized' AS representation,
+        object_key,
+        mime_type,
+        byte_size,
+        sha256
+      FROM scan_readability_derivatives
+    ),
+    ordered_items AS (
+      SELECT
+        source_kind,
+        source_id,
+        representation,
+        object_key,
+        mime_type,
+        byte_size,
+        sha256,
+        row_number() OVER (
+          ORDER BY source_kind, source_id
+        ) - 1 AS source_position
+      FROM source_items
+    ),
+    chunked_items AS (
+      SELECT
+        CAST(source_position / ${PORTABLE_EXPORT_ITEM_CHUNK_SIZE} AS INTEGER)
+          AS chunk_index,
+        byte_size,
+        json_object(
+          'sourceKind', source_kind,
+          'sourceId', source_id,
+          'representation', representation,
+          'objectKey', object_key,
+          'mimeType', mime_type,
+          'byteSize', byte_size,
+          'sha256', sha256
+        ) AS chunk_entry
+      FROM ordered_items
+    )
+    SELECT
+      ?,
+      printf('@chunk:%08d', chunk_index),
+      lower(hex(randomblob(12))),
+      COUNT(*),
+      SUM(byte_size),
+      json_group_array(json(chunk_entry))
+    FROM chunked_items
+    GROUP BY chunk_index
+    ORDER BY chunk_index
+  `).bind(exportId);
+}
+
 async function sessionByMutation(
   database: D1Database,
   actor: string,
@@ -497,31 +580,7 @@ export async function createPortableExport(
       expiresAt,
     ),
     ...SNAPSHOT_SPECS.map((spec) => recordStatement(database, exportId, spec)),
-    database.prepare(`
-      INSERT INTO portable_export_items (
-        id, export_id, source_kind, source_id, representation,
-        object_key, mime_type, byte_size, sha256
-      )
-      SELECT
-        lower(hex(randomblob(16))), ?, 'media_object', id,
-        CASE kind
-          WHEN 'scan' THEN 'scan_original'
-          WHEN 'original_audio' THEN 'recording_original'
-          ELSE 'recording_playback'
-        END,
-        object_key, COALESCE(mime_type, 'application/octet-stream'), byte_size, sha256
-      FROM media_objects
-    `).bind(exportId),
-    database.prepare(`
-      INSERT INTO portable_export_items (
-        id, export_id, source_kind, source_id, representation,
-        object_key, mime_type, byte_size, sha256
-      )
-      SELECT
-        lower(hex(randomblob(16))), ?, 'scan_readability', source_media_id,
-        'scan_optimized', object_key, mime_type, byte_size, sha256
-      FROM scan_readability_derivatives
-    `).bind(exportId),
+    itemChunkStatement(database, exportId),
     database.prepare(`
       UPDATE portable_export_sessions
       SET state = 'ready',
@@ -529,10 +588,14 @@ export async function createPortableExport(
             SELECT COUNT(*) FROM portable_export_records WHERE export_id = ?
           ),
           item_count = (
-            SELECT COUNT(*) FROM portable_export_items WHERE export_id = ?
+            SELECT COALESCE(SUM(item_count), 0)
+            FROM portable_export_item_chunks
+            WHERE export_id = ?
           ),
           planned_bytes = COALESCE((
-            SELECT SUM(byte_size) FROM portable_export_items WHERE export_id = ?
+            SELECT SUM(planned_bytes)
+            FROM portable_export_item_chunks
+            WHERE export_id = ?
           ), 0),
           summary_json = json_object(
             'logicalRecordCount', (
@@ -767,6 +830,81 @@ export async function pagePortableExportRecords(
   };
 }
 
+function expandPortableItemChunk(row: PortableExportItemChunkRow): PortableExportItemPrivate[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.frozenJson);
+  } catch {
+    throw new Error("portable_frozen_item_chunk_invalid");
+  }
+  if (
+    !/^@chunk:\d{8}$/u.test(row.chunkKey)
+    || !/^[0-9a-f]{24}$/u.test(row.lookupId)
+    || !Array.isArray(parsed)
+    || parsed.length !== row.itemCount
+    || parsed.length < 1
+    || parsed.length > PORTABLE_EXPORT_ITEM_CHUNK_SIZE
+  ) {
+    throw new Error("portable_frozen_item_chunk_invalid");
+  }
+  let plannedBytes = 0;
+  const items = parsed.map((value, index): PortableExportItemPrivate => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("portable_frozen_item_chunk_invalid");
+    }
+    const entry = value as Record<string, unknown>;
+    const sourceKind = entry.sourceKind;
+    const representation = entry.representation;
+    if (
+      Object.keys(entry).length !== 7
+      || (sourceKind !== "media_object" && sourceKind !== "scan_readability")
+      || typeof entry.sourceId !== "string"
+      || entry.sourceId.length < 1
+      || entry.sourceId.length > 200
+      || entry.sourceId.includes("\0")
+      || (
+        representation !== "scan_original"
+        && representation !== "scan_optimized"
+        && representation !== "recording_original"
+        && representation !== "recording_playback"
+      )
+      || typeof entry.objectKey !== "string"
+      || entry.objectKey.length < 1
+      || entry.objectKey.length > 1_024
+      || /[\0\r\n]/u.test(entry.objectKey)
+      || typeof entry.mimeType !== "string"
+      || entry.mimeType.length < 3
+      || entry.mimeType.length > 200
+      || entry.mimeType !== entry.mimeType.trim().toLowerCase()
+      || typeof entry.byteSize !== "number"
+      || !Number.isSafeInteger(entry.byteSize)
+      || entry.byteSize < 1
+      || typeof entry.sha256 !== "string"
+      || !/^[0-9a-f]{64}$/u.test(entry.sha256)
+    ) {
+      throw new Error("portable_frozen_item_chunk_invalid");
+    }
+    plannedBytes += entry.byteSize;
+    if (!Number.isSafeInteger(plannedBytes)) {
+      throw new Error("portable_frozen_item_chunk_invalid");
+    }
+    return {
+      id: `${row.lookupId}${index.toString(16).padStart(8, "0")}`,
+      sourceKind,
+      sourceId: entry.sourceId,
+      representation,
+      objectKey: entry.objectKey,
+      mimeType: entry.mimeType,
+      byteSize: entry.byteSize,
+      sha256: entry.sha256,
+    };
+  });
+  if (plannedBytes !== row.plannedBytes) {
+    throw new Error("portable_frozen_item_chunk_invalid");
+  }
+  return items;
+}
+
 export async function pagePortableExportItems(
   database: D1Database,
   exportId: string,
@@ -776,6 +914,31 @@ export async function pagePortableExportItems(
 ): Promise<{ items: PortableExportItem[]; nextOffset: number | null } | null> {
   const session = await loadPortableExport(database, exportId, actor, now);
   if (!session || session.state !== "ready" || session.detailPurgedAt) return null;
+  const storageLimit = Math.min(page.limit, PORTABLE_EXPORT_ITEM_CHUNK_PAGE_MAX);
+  const chunks = await database.prepare(`
+    SELECT
+      chunk_key AS chunkKey,
+      lookup_id AS lookupId,
+      item_count AS itemCount,
+      planned_bytes AS plannedBytes,
+      frozen_json AS frozenJson
+    FROM portable_export_item_chunks
+    WHERE export_id = ?
+    ORDER BY chunk_key
+    LIMIT ? OFFSET ?
+  `).bind(exportId, storageLimit + 1, page.offset).all<PortableExportItemChunkRow>();
+  if (chunks.results.length > 0) {
+    const hasMore = chunks.results.length > storageLimit;
+    return {
+      items: chunks.results.slice(0, storageLimit)
+        .flatMap((row) => expandPortableItemChunk(row))
+        .map(({ objectKey: _, ...item }) => item),
+      nextOffset: hasMore ? page.offset + storageLimit : null,
+    };
+  }
+
+  // Migration 0022 deliberately keeps the original row format readable until
+  // every earlier ready plan has expired or been revoked.
   const result = await database.prepare(`
     SELECT
       id,
@@ -834,6 +997,38 @@ async function privatePortableItem(
   now = new Date(),
 ): Promise<PortableExportItemPrivate | null> {
   await expirePortableExport(database, exportId, actor, now);
+  const lookupId = itemId.slice(0, 24);
+  const itemPosition = Number.parseInt(itemId.slice(24), 16);
+  if (Number.isSafeInteger(itemPosition) && itemPosition < PORTABLE_EXPORT_ITEM_CHUNK_SIZE) {
+    const chunk = await database.prepare(`
+      SELECT
+        portable_export_item_chunks.chunk_key AS chunkKey,
+        portable_export_item_chunks.lookup_id AS lookupId,
+        portable_export_item_chunks.item_count AS itemCount,
+        portable_export_item_chunks.planned_bytes AS plannedBytes,
+        portable_export_item_chunks.frozen_json AS frozenJson
+      FROM portable_export_item_chunks
+      JOIN portable_export_sessions
+        ON portable_export_sessions.id = portable_export_item_chunks.export_id
+      WHERE portable_export_item_chunks.export_id = ?
+        AND portable_export_item_chunks.lookup_id = ?
+        AND portable_export_sessions.created_by = ?
+        AND portable_export_sessions.state = 'ready'
+        AND portable_export_sessions.expires_at > ?
+        AND portable_export_sessions.detail_purged_at IS NULL
+    `).bind(
+      exportId,
+      lookupId,
+      actor,
+      now.toISOString(),
+    ).first<PortableExportItemChunkRow>();
+    if (chunk) {
+      const item = expandPortableItemChunk(chunk)[itemPosition];
+      return item?.id === itemId ? item : null;
+    }
+  }
+
+  // Preserve content access for an earlier row-format plan during rollout.
   return database.prepare(`
     SELECT
       portable_export_items.id,
@@ -953,6 +1148,14 @@ export async function cleanupPortableExports(
       `).bind(candidate.id, candidate.id),
       database.prepare(`
         DELETE FROM portable_export_items
+        WHERE export_id = ?
+          AND EXISTS (
+            SELECT 1 FROM portable_export_sessions
+            WHERE id = ? AND state IN ('revoked', 'expired', 'failed')
+          )
+      `).bind(candidate.id, candidate.id),
+      database.prepare(`
+        DELETE FROM portable_export_item_chunks
         WHERE export_id = ?
           AND EXISTS (
             SELECT 1 FROM portable_export_sessions

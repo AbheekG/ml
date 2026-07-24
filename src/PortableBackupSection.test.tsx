@@ -16,7 +16,7 @@ const prepared: PortableExportSession = {
   id: "a".repeat(32),
   profileVersion: "1.0.0",
   state: "ready",
-  sourceSchemaVersion: "0021",
+  sourceSchemaVersion: "0022",
   sourceCommit: "1234567",
   sourceEnvironment: "synthetic",
   snapshotAt: "2026-07-24T10:00:00.000Z",
