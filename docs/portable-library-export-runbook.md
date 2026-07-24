@@ -1,9 +1,9 @@
 # Portable preservation export operator runbook
 
-Status: implementation and protected-staging rollout are complete, including
-the compact atomic-snapshot correction after the first authenticated plan
-exceeded D1's practical execution boundary. The owner's post-fix authenticated
-plan/sample and full local archive acceptance remain manual.
+Status: implementation and protected-staging rollout are complete. A real
+authenticated plan, private kit download, bounded content/range reads,
+revocation, and cleanup passed. The complete local archive build remains the
+owner's manual acceptance.
 
 This runbook is for the admin-only portable export defined in
 [portable-library-export.md](portable-library-export.md). It does not authorize
@@ -12,35 +12,30 @@ changes, or a cloud import.
 
 ## Protected-staging status
 
-Migration `0021_portable_exports.sql` is applied with no migration pending.
-Worker `0bc3591d-a7f7-4c90-9491-b7612e65049e` serves implementation commit
-`cfcc926` and client/service-worker build `a2c8581e769d` at 100%. Pre/post
-catalog and media reconciliation is unchanged, Access still returns the
-expected unauthenticated redirect, and R2 remains 2,933 objects / 8.1 GB.
+Migrations through `0022_portable_export_item_chunks.sql` are applied with none
+pending. Worker `0707aac7-ad77-4866-a5b6-63e25d5d2f64` serves final source
+commit `07beba0ae052f03653d9b8209908cbcd91010754` and client/service-worker
+build `77af32a4d6e3` at 100%. Pre/post catalog and media reconciliation is
+unchanged, Access still returns the expected unauthenticated redirect, and the
+final R2 aggregate check remains 2,933 objects / 8.1 GB.
 
-The owner's first authenticated create request against the preceding Worker
-rolled back cleanly and retained one bounded failed audit stub. Aggregate D1
-evidence showed that the original per-source-row representation executed
-40,231 indexed row writes before the single transaction exceeded its execution
-boundary. Every source/plan precondition was valid, and a separately bounded
-export-table-only diagnostic proved the migration's ready guard. That
-diagnostic was revoked and its detail purged.
+The owner's two earlier authenticated create requests rolled back cleanly and
+retained bounded aggregate-only failure stubs. The second failure was not the
+previously inferred D1 transaction execution boundary. An exact read-only
+reproduction showed D1 rejecting the final six-term compound query with `too
+many terms in compound SELECT`. That query computed the `unassignedMedia`
+summary after all snapshot writes. The accepted implementation uses two
+independent three-term sets and preserves the same coherent, all-or-nothing
+snapshot.
 
-The corrected Worker preserves the same one-transaction snapshot but stores
-8,532 logical source records in 148 bounded metadata chunks. It still stores
-all 2,925 media plan items individually. The largest measured chunk from the
-widest current source table is 101,158 bytes against the 1 MiB database guard,
-and the index-aware transaction estimate is now about 15,100 row writes.
-
-This execution environment still has no usable authenticated browser backend
-and no installed `cloudflared`, so it did not perform a post-fix authenticated
-create, kit download, R2 payload read, or full archive build. The export tables
-currently contain no detail rows: only the failed owner audit stub and the
-revoked/purged diagnostic audit stub remain. Do not interpret the deployment as
-an authenticated smoke pass. Preparing/revoking one post-fix plan, checking one
-bounded original/derivative/range sample, recording request CPU and exact
-snapshot D1 metrics, and building the full archive are the manual acceptance
-below.
+Migration `0022` also stores 2,925 logical media-plan items in 46 chunks of at
+most 64 while retaining 8,532 logical source records in 148 metadata chunks.
+The accepted plan reported exactly those logical counts and
+7,955,140,423 payload bytes. The private kit downloaded successfully, one
+16,674-byte payload and one 64-byte range were read, and the plan was revoked.
+All 148 record chunks and 46 item chunks were then purged, leaving its
+aggregate audit stub. The temporary admin-only range probe was removed before
+the final Worker deployment. No complete archive was built.
 
 ## Prepare and download the private kit
 
@@ -136,8 +131,8 @@ Official limits and prices were rechecked on 2026-07-24:
   through one R2 read per request rather than buffered.
 - D1 Free permits 50 queries per Worker invocation, 5 million rows read/day,
   100,000 rows written/day, and a 500 MB database. Snapshot creation currently
-  uses 26 statements in one transactional `batch()`. Metadata is stored in
-  chunks of at most 64 logical rows and returned one chunk per API page.
+  uses 26 statements in one transactional `batch()`. Metadata and payload-plan
+  items are stored in chunks of at most 64 logical rows and expanded on read.
 - R2 Standard includes 10 million Class B reads/month and has no Internet
   egress charge. A full build normally uses one Class B `GetObject` per object;
   Range resumption or retry adds reads. At 50% catalog growth, budget at least
@@ -150,25 +145,29 @@ acceptance.
 
 Rollout measurements and estimates:
 
-- the migration completed 17 D1 commands in 2.89 ms; across the bounded
-  migration/deployment window the 24-hour counters moved from 508 to 528 read
-  queries, 1 to 10 write queries, 189,038 to 222,219 rows read, and 5 to 32
-  rows written. Every explicit pre/post aggregate query reported
-  `changed_db=false` and zero rows written;
-- deployment reported 17 ms Worker startup time. Per-request export CPU is not
-  available because no authenticated export request ran;
-- the first authenticated snapshot attempt measured 40,231 rolled-back D1 row
-  writes with the original one-storage-row-per-record representation. The
-  corrected current snapshot source has the same 8,532 logical records and
-  2,925 payload items but only 148 internal record chunks. Its index-aware
-  structural estimate is about 15,100 D1 row writes; capture the actual D1
-  billing metric during the post-fix manual plan rather than treating that
-  estimate as measured usage;
-- a current full build is approximately 2,925 Worker content requests, 2,925
-  R2 Class B reads, and 7,955,140,423 payload bytes before retries. The 50%
+- migration `0022` completed 41 D1 commands in 39.61 ms. It touched only
+  portable-export tables, triggers, indexes, and migration bookkeeping;
+- the first item-chunk deployment still rolled back because of the compound
+  query limit. Its observable D1 rows-written delta was 451, with no detail
+  surviving. A bounded item insert proved 46 chunks / 2,925 logical items /
+  7,955,140,423 bytes and was purged;
+- the visible 24-hour D1 rows-written counter moved from 72,903 before this
+  correction window to 75,059 at final reconciliation: +2,156, leaving 24,941
+  under the daily 100,000 allowance at that observation. The window containing
+  the successful snapshot and its postflight moved from 74,468 to 75,059:
+  +591. Cloudflare metrics are asynchronous, so these are bounded observed
+  deltas rather than a claim of per-statement billing attribution;
+- final D1 metrics showed 3,043 read queries, 149 write queries,
+  1,800,602 rows read, and 75,059 rows written in the rolling window. The
+  database was 5.14 MB and foreign-key errors were zero;
+- this acceptance used exactly two known R2 content reads: one complete
+  16,674-byte object and one 64-byte range. It performed no R2 write, delete, or
+  copy. The metadata kit itself reads only D1;
+- a complete build is approximately 2,925 Worker content requests, 2,925 R2
+  Class B reads, and 7,955,140,423 payload bytes before retries. The 50%
   scenario is approximately 4,388 requests/reads and 11.93 GB; and
-- this rollout performed zero authenticated export requests and zero R2 payload
-  reads. The bucket-information control query did not read an object.
+- the complete builder was deliberately not run, so those projected R2 reads
+  and payload bytes were not incurred.
 
 Official references:
 

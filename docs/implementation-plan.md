@@ -11,31 +11,38 @@ audit/cleanup, and production readiness remain separately prioritized and
 approved.
 
 Portable-export implementation checkpoint (2026-07-24): profile 1.0.0,
-migration `0021_portable_exports.sql`, the admin-only frozen API and Account
-workflow, Access-authenticated resumable local downloads, and the
+migrations through `0022_portable_export_item_chunks.sql`, the admin-only frozen
+API and Account workflow, Access-authenticated resumable local downloads, and the
 standard-library Python BagIt + attached RO-Crate + stored ZIP64 builder,
 verifier, privacy-conscious inspector, and idempotent local reference restore
 are complete and deployed to protected staging. The schema-coverage guard maps
-every table/column through 0021, and synthetic cross-language plus adversarial
+every table/column through 0022, and synthetic cross-language plus adversarial
 gates cover the complete source-to-restored-reference boundary. No normal import
-UI or cloud import adapter was added. The authenticated owner plan/sample and
-full archive remain manual acceptance because the execution environment exposed
-neither a browser backend nor `cloudflared`.
+UI or cloud import adapter was added. A genuine authenticated snapshot, private
+kit download, bounded media/range verification, revocation, and derived-detail
+cleanup passed. Only the complete local archive build remains manual acceptance.
 
 Current application/deployment checkpoint (2026-07-24): protected staging runs
-Worker `e9e87132-e8d4-46be-b7d9-ed1a70ddd9f4` at 100%, client/service-worker
-build `a2c8581e769d`, and the unchanged accepted converter image
+Worker `0707aac7-ad77-4866-a5b6-63e25d5d2f64` at 100%, client/service-worker
+build `77af32a4d6e3`, and the unchanged accepted converter image
 `sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
-Migration `0021_portable_exports.sql` is applied with all three empty
-export-only tables, eight guards, and no pending migration. Pre/post aggregate
+Migration `0022_portable_export_item_chunks.sql` is applied with all derived
+export rows purged, ten export guards, and no pending migration. Pre/post aggregate
 reconciliation is unchanged at 581 Songs / 335 lyric rows / 499 Scans / 835
 Recordings / 1,979 media rows, 2,925 registered payload objects /
 7,955,140,423 bytes, and 2,933 private R2 objects / 8.1 GB, with zero invalid
 payload hashes or foreign-key errors.
 
-The gate passed 69 Vitest files / 469 tests, 12 Python archive tests, all 91
+The accepted snapshot contains exactly 8,532 logical records in 148 record
+chunks and 2,925 logical payload items in 46 item chunks, totaling
+7,955,140,423 bytes. The actual failure was D1 rejecting the six-term compound
+`unassignedMedia` summary query; two bounded three-term sets preserve the same
+coherent transaction and avoid that runtime limit. Item chunking remains as the
+validated write-budget reduction.
+
+The gate passed 69 Vitest files / 473 tests, 12 Python archive tests, all 91
 Python converter tests, all three TypeScript projects, fresh replay through
-0021, production/service-worker build, whitespace/privacy checks, exact
+0022, production/service-worker build, whitespace/privacy checks, exact
 dependency-tree review, and offline advisory audit with zero findings. The
 enforced processor snapshot remains at zero critical/warning alerts, Scheduler
 enabled, latest execution successful, and all nine jobs succeeded. Access still

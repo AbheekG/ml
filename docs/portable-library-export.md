@@ -2,9 +2,11 @@
 
 Status: profile 1.0.0, the frozen admin API, private browser kit,
 standard-library Python builder/verifier/inspector/local restore, and
-synthetic/adversarial/round-trip coverage are implemented. Migration `0021` and
-the Worker/client are deployed to protected staging; the authenticated owner
-plan/sample and full local archive remain manual acceptance. This record does
+synthetic/adversarial/round-trip coverage are implemented. Migrations through
+`0022`, the Worker/client, a real authenticated plan, private kit download,
+bounded media/range verification, revocation, and derived-detail cleanup are
+accepted in protected staging; only the full local archive remains manual
+acceptance. This record does
 not authorize a production/DNS change, a catalog or media mutation, an R2 write
 or deletion, a legacy change, or a full-cloud import feature.
 
@@ -949,25 +951,36 @@ At minimum, cover:
 
 ### Protected-staging rollout, 2026-07-24
 
-The reviewed migration applied as 17 D1 commands and created only three empty
-export tables, four indexes, eight guards, and migration bookkeeping. The
-pre/post Time Travel bookmarks are recorded in the private handoff. Worker
-`e9e87132-e8d4-46be-b7d9-ed1a70ddd9f4` serves implementation commit `be9ee1f`
-at 100% with client/service-worker build `a2c8581e769d`.
+The original migration `0021` created the export-only tables. Corrective
+migration `0022_portable_export_item_chunks.sql` preserves the audit/detail
+history, adds bounded item chunks, and leaves ten export guards. Worker
+`0707aac7-ad77-4866-a5b6-63e25d5d2f64` serves final source commit `07beba0` at
+100% with client/service-worker build `77af32a4d6e3`; no migration is pending.
+
+Two failed owner attempts rolled back every detail row. Exact D1 diagnostics
+showed that the second failure was not the previously inferred transaction
+execution boundary: the final summary query contained six compound `UNION`
+terms, and D1 rejected it with `too many terms in compound SELECT`. Splitting
+the six inputs into two independent three-term sets preserves the same
+all-or-nothing snapshot while respecting the runtime limit. Migration `0022`
+also reduces the 2,925 logical payload items to 46 bounded physical chunks;
+the 8,532 logical records remain 148 physical chunks.
 
 Aggregate postflight matched preflight: 581 Songs, 335 lyric rows, 499 Scans,
 835 Recordings, 1,979 media objects, 946 Scan derivatives, 196 audio
 derivatives, 2,925 registered payload objects / 7,955,140,423 bytes, and 2,933
-R2 objects / 8.1 GB. All export tables are empty; invalid registered hashes and
-foreign-key errors are zero. Access returns the expected unauthenticated 302,
-no migration is pending, and the enforced processor/Scheduler snapshot has zero
+R2 objects / 8.1 GB at final aggregate reconciliation. Invalid registered hashes
+and foreign-key errors are zero. Access returns the expected
+unauthenticated 302, and the enforced processor/Scheduler snapshot has zero
 critical or warning alerts. No catalog/media row or R2 object changed.
 
-The environment had no usable browser backend and no installed `cloudflared`,
-so it did not create a real plan or perform an R2 payload read. Consequently
-authenticated role behavior, real snapshot metrics, request CPU, the bounded
-original/derivative/range sample, revoke/expiry, and the full archive remain
-owner acceptance rather than claimed evidence.
+One authenticated plan passed with exactly 8,532 logical records, 2,925 items,
+and 7,955,140,423 bytes. The browser downloaded its private metadata kit. One
+16,674-byte private payload and a 64-byte range were read successfully; the
+temporary aggregate-only range probe was removed before the final deployment.
+The plan was revoked and all 148 record chunks and 46 item chunks were purged,
+leaving only its aggregate audit stub. The complete multi-gigabyte archive was
+deliberately not built and remains the owner's manual acceptance.
 
 Before protected-staging deployment:
 

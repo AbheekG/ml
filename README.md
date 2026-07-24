@@ -19,10 +19,13 @@ The application is being rebuilt from private legacy attempts (grouped inside th
 
 See [the product plan](docs/product-plan.md) and [the implementation plan](docs/implementation-plan.md).
 
-The admin-only portable preservation export is implemented and deployed to
-protected staging; the owner's authenticated kit/sample and full local archive
-acceptance remain manual. Its final archive is assembled and fully verified on
-the administrator's computer from a frozen Access-protected metadata/media plan,
+The admin-only portable preservation export is implemented, deployed, and
+authenticated-smoke-tested in protected staging. A real frozen plan produced
+the expected 8,532 logical records and 2,925 payload items /
+7,955,140,423 bytes; its private kit and a bounded media/range sample were
+downloaded before the plan was revoked and its derived rows purged. Building
+and verifying the complete multi-gigabyte archive remains the owner's manual
+acceptance step. The final archive is assembled on the administrator's computer
 using a versioned BagIt + RO-Crate + ZIP64 profile. The scope includes active
 and trashed catalog data, retained originals/derivatives, replacement history,
 and provenance, plus a tested local reference restore; it deliberately does not
@@ -72,8 +75,8 @@ and separately authorized cutover work:
 - the deployed audit follow-up gives focus and interactive controls at least 3:1 non-text contrast, completes keyboard/ARIA behavior for the Lists tabs, protects dirty editor state across navigation and reconnect, and classifies terminal pre-intent upload history as informational; the owner accepted its keyboard, unsaved-work, offline/reconnect, and date-input behavior on macOS;
 - the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
 - the protected Access/session boundary uses a Worker-compatible, bounded rotating JWKS cache; protected catalog refresh waits for a validated session and turns a definitive 401/403 into one explicit renewal screen instead of a false empty catalog. Logout keeps its durable privacy barrier through a matched Cloudflare return, treats the bounded HTTP-cache-clear request as defense in depth, and has only one automatic top-level Access navigation. The owner accepted the repaired Chrome sign-in/catalog and single-cycle logout flow;
-- the current protected-staging deployment is Worker `e9e87132-e8d4-46be-b7d9-ed1a70ddd9f4` with client/service-worker build `a2c8581e769d`; migration `0021_portable_exports.sql` is applied with no migration pending, while the Account page shows the existing identity plus the admin-only Portable backup workflow;
-- the current application checkpoint passes 69 Vitest files / 469 tests, 12 Python archive tests, all 91 Python audio tests, all three TypeScript projects, fresh migration replay, the production/service-worker build with seven precache entries, whitespace/privacy checks, and a protected-staging reconciliation with unchanged catalog/media/R2 aggregates and zero foreign-key errors. The authenticated plan/sample and full owner archive remain explicit manual acceptance because this environment has neither a browser backend nor `cloudflared`.
+- the current protected-staging deployment is Worker `0707aac7-ad77-4866-a5b6-63e25d5d2f64` with client/service-worker build `77af32a4d6e3`; migrations through `0022_portable_export_item_chunks.sql` are applied with none pending, while the Account page shows the existing identity plus the admin-only Portable backup workflow;
+- the current application checkpoint passes 69 Vitest files / 473 tests, 12 Python archive tests, all 91 Python audio tests, all three TypeScript projects, fresh migration replay, the production/service-worker build with seven precache entries, whitespace/privacy checks, and protected-staging reconciliation with unchanged catalog/media aggregates and zero foreign-key errors. A real plan, kit, bounded media/range reads, revocation, and cleanup passed; only the complete local archive build remains manual acceptance.
 
 The bounded improvements selected from the 2026-07-18 whole-application audit are
 implemented, deployed, and accepted. No further implementation slice is implied
@@ -179,15 +182,16 @@ Migration `0020_canonical_recording_dates.sql` replaces only two validation
 triggers; it does not rewrite application data.
 
 Current protected-staging deployment: Worker
-`9d69c4fa-a61c-45fe-b977-f3b082ff7443`, client/service-worker build
-`1eb9c1f2e950`, and audio converter image
+`0707aac7-ad77-4866-a5b6-63e25d5d2f64`, client/service-worker build
+`77af32a4d6e3`, and audio converter image
 `sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
-Migrations through `0020_canonical_recording_dates.sql` are fully applied with
-none pending. The enforced read-only processor snapshot confirms the Scheduler
-and immutable image match the reviewed configuration, its latest execution
-succeeded, no job is pending or running, and there are no critical or warning
-alerts. This Worker/schema deployment did not change the converter or Scheduler.
-Production resources and DNS/cutover remain separately approval-gated.
+Migrations through `0022_portable_export_item_chunks.sql` are fully applied
+with none pending. The enforced read-only processor snapshot confirms the
+Scheduler and immutable image match the reviewed configuration, its latest
+execution succeeded, all nine jobs succeeded, no job is pending or running,
+and there are no critical or warning alerts. This Worker/schema deployment did
+not change the converter or Scheduler. Production resources and DNS/cutover
+remain separately approval-gated.
 
 Staging is protected by Cloudflare Access using an exact-email allowlist and email one-time PIN. The Worker validates Access JWT signatures, issuer, and audience on every API request using a bounded rotating-key cache, rechecks the active application role, and requires exact same-origin evidence plus the route's expected media type for browser mutations. Generic private-media reads require both an active child and active parent Song. Access audience/JWKS identifiers are deployment configuration, not secret credentials; local development overrides `AUTH_MODE` through ignored `.dev.vars`.
 
