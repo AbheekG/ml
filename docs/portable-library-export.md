@@ -1,11 +1,12 @@
 # Portable library export and tested recovery
 
-Status: profile 1.0.0 is implemented locally with the frozen admin API, private
-browser kit, standard-library Python builder/verifier/inspector/local restore,
-and synthetic/adversarial/round-trip coverage. Protected-staging rollout and
-authenticated owner acceptance are recorded separately. This record does not
-authorize a production/DNS change, a catalog or media mutation, an R2 write or
-deletion, a legacy change, or a full-cloud import feature.
+Status: profile 1.0.0, the frozen admin API, private browser kit,
+standard-library Python builder/verifier/inspector/local restore, and
+synthetic/adversarial/round-trip coverage are implemented. Migration `0021` and
+the Worker/client are deployed to protected staging; the authenticated owner
+plan/sample and full local archive remain manual acceptance. This record does
+not authorize a production/DNS change, a catalog or media mutation, an R2 write
+or deletion, a legacy change, or a full-cloud import feature.
 
 This decision defines an admin-only export that produces a complete, private,
 human-readable preservation archive of the durable library. The archive is
@@ -937,6 +938,28 @@ At minimum, cover:
   failure.
 
 ## Deployment and acceptance gates
+
+### Protected-staging rollout, 2026-07-24
+
+The reviewed migration applied as 17 D1 commands and created only three empty
+export tables, four indexes, eight guards, and migration bookkeeping. The
+pre/post Time Travel bookmarks are recorded in the private handoff. Worker
+`e9e87132-e8d4-46be-b7d9-ed1a70ddd9f4` serves implementation commit `be9ee1f`
+at 100% with client/service-worker build `a2c8581e769d`.
+
+Aggregate postflight matched preflight: 581 Songs, 335 lyric rows, 499 Scans,
+835 Recordings, 1,979 media objects, 946 Scan derivatives, 196 audio
+derivatives, 2,925 registered payload objects / 7,955,140,423 bytes, and 2,933
+R2 objects / 8.1 GB. All export tables are empty; invalid registered hashes and
+foreign-key errors are zero. Access returns the expected unauthenticated 302,
+no migration is pending, and the enforced processor/Scheduler snapshot has zero
+critical or warning alerts. No catalog/media row or R2 object changed.
+
+The environment had no usable browser backend and no installed `cloudflared`,
+so it did not create a real plan or perform an R2 payload read. Consequently
+authenticated role behavior, real snapshot metrics, request CPU, the bounded
+original/derivative/range sample, revoke/expiry, and the full archive remain
+owner acceptance rather than claimed evidence.
 
 Before protected-staging deployment:
 

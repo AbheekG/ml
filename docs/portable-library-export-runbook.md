@@ -1,12 +1,27 @@
 # Portable preservation export operator runbook
 
-Status: implementation complete locally; protected-staging rollout and the
-owner's authenticated archive acceptance are recorded separately.
+Status: implementation and protected-staging rollout are complete. The owner's
+authenticated plan/sample and full local archive acceptance remain manual.
 
 This runbook is for the admin-only portable export defined in
 [portable-library-export.md](portable-library-export.md). It does not authorize
 production changes, catalog/media writes, R2 writes or deletion, Access-policy
 changes, or a cloud import.
+
+## Protected-staging status
+
+Migration `0021_portable_exports.sql` is applied with no migration pending.
+Worker `e9e87132-e8d4-46be-b7d9-ed1a70ddd9f4` serves implementation commit
+`be9ee1f` and build `a2c8581e769d` at 100%. Pre/post catalog and media
+reconciliation is unchanged, all export tables are empty, Access still returns
+the expected unauthenticated redirect, and R2 remains 2,933 objects / 8.1 GB.
+
+This execution environment had no browser backend and no installed
+`cloudflared`. It therefore performed zero authenticated export requests and
+zero R2 payload reads. Do not interpret that as an authenticated smoke pass:
+preparing/revoking one real plan, checking one bounded original/derivative/range
+sample, recording request CPU and exact snapshot D1 metrics, and building the
+full archive are the manual acceptance below.
 
 ## Prepare and download the private kit
 
@@ -112,6 +127,27 @@ These are capacity boundaries, not a claim that a particular build costs zero.
 Record the actual snapshot D1 `rows_read`/`rows_written`, Worker request/CPU
 metrics available, and R2 Class B operations after protected-staging
 acceptance.
+
+Rollout measurements and estimates:
+
+- the migration completed 17 D1 commands in 2.89 ms; across the bounded
+  migration/deployment window the 24-hour counters moved from 508 to 528 read
+  queries, 1 to 10 write queries, 189,038 to 222,219 rows read, and 5 to 32
+  rows written. Every explicit pre/post aggregate query reported
+  `changed_db=false` and zero rows written;
+- deployment reported 17 ms Worker startup time. Per-request export CPU is not
+  available because no authenticated export request ran;
+- the current snapshot source has 8,532 portable records and 2,925 payload
+  items. One plan therefore performs 11,459 base-table row mutations including
+  the final ready transition. A conservative index-aware structural estimate
+  is about 40,228 D1 row writes; the corresponding 50%-growth estimate is about
+  60,341. Capture the actual D1 billing metric during the manual plan rather
+  than treating this estimate as measured usage;
+- a current full build is approximately 2,925 Worker content requests, 2,925
+  R2 Class B reads, and 7,955,140,423 payload bytes before retries. The 50%
+  scenario is approximately 4,388 requests/reads and 11.93 GB; and
+- this rollout performed zero authenticated export requests and zero R2 payload
+  reads. The bucket-information control query did not read an object.
 
 Official references:
 

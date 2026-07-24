@@ -15,35 +15,33 @@ migration `0021_portable_exports.sql`, the admin-only frozen API and Account
 workflow, Access-authenticated resumable local downloads, and the
 standard-library Python BagIt + attached RO-Crate + stored ZIP64 builder,
 verifier, privacy-conscious inspector, and idempotent local reference restore
-are complete locally. The schema-coverage guard maps every table/column through
-0021, and synthetic cross-language plus adversarial gates cover the complete
-source-to-restored-reference boundary. No normal import UI or cloud import
-adapter was added. Protected-staging migration/deployment and authenticated
-owner archive acceptance are recorded separately in the portable export
-runbook and current handoff.
+are complete and deployed to protected staging. The schema-coverage guard maps
+every table/column through 0021, and synthetic cross-language plus adversarial
+gates cover the complete source-to-restored-reference boundary. No normal import
+UI or cloud import adapter was added. The authenticated owner plan/sample and
+full archive remain manual acceptance because the execution environment exposed
+neither a browser backend nor `cloudflared`.
 
-Current application/deployment checkpoint (2026-07-23): protected staging runs
-Worker `9d69c4fa-a61c-45fe-b977-f3b082ff7443`, client/service-worker build
-`1eb9c1f2e950`, and the unchanged accepted converter image
+Current application/deployment checkpoint (2026-07-24): protected staging runs
+Worker `e9e87132-e8d4-46be-b7d9-ed1a70ddd9f4` at 100%, client/service-worker
+build `a2c8581e769d`, and the unchanged accepted converter image
 `sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
-The audit follow-up now truncates retained upload basenames by Unicode code point,
-normalizes malformed UTF-16 before storage/header encoding, and uses RFC 5987
-for authenticated media response filenames. Migration
-`0020_canonical_recording_dates.sql` adds canonical `YYYY-MM-DD` equality to the
-existing Recording insert/update triggers without rewriting data. The read-only
-processor gate now treats drift in Scheduler state, cadence, deadline, retries,
-target, OAuth identity/scope, Scheduler-job count, or immutable image as
-critical.
+Migration `0021_portable_exports.sql` is applied with all three empty
+export-only tables, eight guards, and no pending migration. Pre/post aggregate
+reconciliation is unchanged at 581 Songs / 335 lyric rows / 499 Scans / 835
+Recordings / 1,979 media rows, 2,925 registered payload objects /
+7,955,140,423 bytes, and 2,933 private R2 objects / 8.1 GB, with zero invalid
+payload hashes or foreign-key errors.
 
-The gate passed 63 Vitest files / 449 tests, all 91 Python converter tests, all
-three TypeScript projects, production/service-worker builds, and whitespace
-checks. Read-only postflight found the new Worker at 100%, the expected Access
-redirect, no pending migration, both canonical-date triggers, unchanged 581
-Songs / 335 lyric rows / 499 Scans / 835 Recordings / 1,979 media rows, zero
-noncanonical Recording dates, zero foreign-key errors, and zero query writes.
-The enforced processor snapshot has zero critical/warning alerts. No R2 object,
-converter/Scheduler resource, legacy file, production/DNS setting, or Git remote
-was changed.
+The gate passed 69 Vitest files / 469 tests, 12 Python archive tests, all 91
+Python converter tests, all three TypeScript projects, fresh replay through
+0021, production/service-worker build, whitespace/privacy checks, exact
+dependency-tree review, and offline advisory audit with zero findings. The
+enforced processor snapshot remains at zero critical/warning alerts, Scheduler
+enabled, latest execution successful, and all nine jobs succeeded. Access still
+returns the expected unauthenticated 302. No catalog/media row, R2 object,
+converter/Scheduler resource, Access policy, legacy file, production/DNS
+setting, or Git remote was changed.
 
 At the historical application/deployment checkpoint from the 2026-07-21 second
 audit, protected staging ran Worker `e6f1ddc7-4706-4b8b-8b01-0090850b8a23`,

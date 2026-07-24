@@ -19,12 +19,14 @@ The application is being rebuilt from private legacy attempts (grouped inside th
 
 See [the product plan](docs/product-plan.md) and [the implementation plan](docs/implementation-plan.md).
 
-The admin-only portable preservation export is implemented locally. Its final
-archive is assembled and fully verified on the administrator's computer from a
-frozen Access-protected metadata/media plan, using a versioned BagIt + RO-Crate
-+ ZIP64 profile. The scope includes active and trashed catalog data, retained
-originals/derivatives, replacement history, and provenance, plus a tested local
-reference restore; it deliberately does not add a normal cloud-import UI. See
+The admin-only portable preservation export is implemented and deployed to
+protected staging; the owner's authenticated kit/sample and full local archive
+acceptance remain manual. Its final archive is assembled and fully verified on
+the administrator's computer from a frozen Access-protected metadata/media plan,
+using a versioned BagIt + RO-Crate + ZIP64 profile. The scope includes active
+and trashed catalog data, retained originals/derivatives, replacement history,
+and provenance, plus a tested local reference restore; it deliberately does not
+add a normal cloud-import UI. See
 [the export/recovery design](docs/portable-library-export.md) and
 [the normative archive profile](docs/portable-library-archive-profile.md).
 Operator commands are in
@@ -70,8 +72,8 @@ and separately authorized cutover work:
 - the deployed audit follow-up gives focus and interactive controls at least 3:1 non-text contrast, completes keyboard/ARIA behavior for the Lists tabs, protects dirty editor state across navigation and reconnect, and classifies terminal pre-intent upload history as informational; the owner accepted its keyboard, unsaved-work, offline/reconnect, and date-input behavior on macOS;
 - the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
 - the protected Access/session boundary uses a Worker-compatible, bounded rotating JWKS cache; protected catalog refresh waits for a validated session and turns a definitive 401/403 into one explicit renewal screen instead of a false empty catalog. Logout keeps its durable privacy barrier through a matched Cloudflare return, treats the bounded HTTP-cache-clear request as defense in depth, and has only one automatic top-level Access navigation. The owner accepted the repaired Chrome sign-in/catalog and single-cycle logout flow;
-- the current protected-staging deployment is Worker `44168581-3e07-443b-b7b9-0690596fd87b` with client/service-worker build `1eb9c1f2e950`; the Account page shows the exact authenticated email and role rather than an inconsistent display name or generic fallback;
-- the current application checkpoint passes 63 Vitest files / 446 tests, all 91 Python audio tests, all three TypeScript projects, the production/service-worker build with seven precache entries, whitespace checks, and a clean zero-write staging D1 postflight.
+- the current protected-staging deployment is Worker `e9e87132-e8d4-46be-b7d9-ed1a70ddd9f4` with client/service-worker build `a2c8581e769d`; migration `0021_portable_exports.sql` is applied with no migration pending, while the Account page shows the existing identity plus the admin-only Portable backup workflow;
+- the current application checkpoint passes 69 Vitest files / 469 tests, 12 Python archive tests, all 91 Python audio tests, all three TypeScript projects, fresh migration replay, the production/service-worker build with seven precache entries, whitespace/privacy checks, and a protected-staging reconciliation with unchanged catalog/media/R2 aggregates and zero foreign-key errors. The authenticated plan/sample and full owner archive remain explicit manual acceptance because this environment has neither a browser backend nor `cloudflared`.
 
 The bounded improvements selected from the 2026-07-18 whole-application audit are
 implemented, deployed, and accepted. No further implementation slice is implied
