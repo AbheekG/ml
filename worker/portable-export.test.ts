@@ -55,6 +55,7 @@ class TestD1Statement {
 
 class TestD1 {
   readonly sqlite = new DatabaseSync(":memory:");
+  enforceD1CompoundSelectLimit = false;
 
   prepare(sql: string): TestD1Statement {
     return new TestD1Statement(this.sqlite, sql);
@@ -64,7 +65,15 @@ class TestD1 {
     this.sqlite.exec("BEGIN IMMEDIATE");
     try {
       const results = [];
-      for (const statement of statements) results.push(await statement.run());
+      for (const statement of statements) {
+        if (
+          this.enforceD1CompoundSelectLimit
+          && (statement.sql.match(/\bUNION(?:\s+ALL)?\b/giu)?.length ?? 0) >= 5
+        ) {
+          throw new Error("too many terms in compound SELECT: SQLITE_ERROR [code: 7500]");
+        }
+        results.push(await statement.run());
+      }
       this.sqlite.exec("COMMIT");
       return results;
     } catch (error) {
@@ -288,6 +297,7 @@ describe("portable export server", () => {
   afterEach(() => database.close());
 
   it("uses one bounded transactional batch, freezes later source edits, and replays exactly", async () => {
+    database.enforceD1CompoundSelectLimit = true;
     expect(PORTABLE_SNAPSHOT_STATEMENT_COUNT).toBeLessThan(50);
     const first = await createPortableExport(
       database as unknown as D1Database,

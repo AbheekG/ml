@@ -622,8 +622,11 @@ export async function createPortableExport(
               WHERE id NOT IN (
                 SELECT media_id FROM scans
                 UNION SELECT original_media_id FROM recordings
-                UNION SELECT playback_media_id FROM recordings WHERE playback_media_id IS NOT NULL
-                UNION SELECT media_id FROM scan_media_history
+                UNION SELECT playback_media_id FROM recordings
+                  WHERE playback_media_id IS NOT NULL
+              )
+              AND id NOT IN (
+                SELECT media_id FROM scan_media_history
                 UNION SELECT original_media_id FROM recording_media_history
                 UNION SELECT playback_media_id FROM recording_media_history
                   WHERE playback_media_id IS NOT NULL
