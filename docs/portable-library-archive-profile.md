@@ -381,6 +381,11 @@ Scan and Recording replacement events preserve:
 - revision at replacement; and
 - exact original/playback representation links.
 
+Each replacement entry embeds the corresponding `MediaRepresentation`
+object(s), not only media IDs and friendly paths. This makes a payload used
+exclusively by history discoverable by an independent verifier while retaining
+one canonical payload path per durable object.
+
 If a historical and current relationship refer to one durable media row, both
 edges use the same payload path. If two durable media rows have equal SHA-256,
 they retain separate media identities and history entries. The profile records

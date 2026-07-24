@@ -2,8 +2,9 @@
 
 Status: implementation and protected-staging rollout are complete. A real
 authenticated plan, private kit download, bounded content/range reads,
-revocation, and cleanup passed. The complete local archive build remains the
-owner's manual acceptance.
+revocation, and cleanup passed. A later real kit exposed and received a
+history-only representation correction. Re-downloading that corrected kit and
+the complete local archive build remain the owner's manual acceptance.
 
 This runbook is for the admin-only portable export defined in
 [portable-library-export.md](portable-library-export.md). It does not authorize
@@ -13,9 +14,9 @@ changes, or a cloud import.
 ## Protected-staging status
 
 Migrations through `0022_portable_export_item_chunks.sql` are applied with none
-pending. Worker `0707aac7-ad77-4866-a5b6-63e25d5d2f64` serves final source
-commit `07beba0ae052f03653d9b8209908cbcd91010754` and client/service-worker
-build `77af32a4d6e3` at 100%. Pre/post catalog and media reconciliation is
+pending. Worker `8f058f23-d97d-4b67-a4f8-62d9336ebcf3` serves final source
+commit `02e9fd304062a538042fead0ccb846c524bdbafb` and client/service-worker
+build `af5cd83f3e41` at 100%. Pre/post catalog and media reconciliation is
 unchanged, Access still returns the expected unauthenticated redirect, and the
 final R2 aggregate check remains 2,933 objects / 8.1 GB.
 
@@ -37,10 +38,24 @@ All 148 record chunks and 46 item chunks were then purged, leaving its
 aggregate audit stub. The temporary admin-only range probe was removed before
 the final Worker deployment. No complete archive was built.
 
+The owner's next kit reached the Python builder but failed before downloading
+media with `export_item_representation_mismatch`. History-only durable media
+had a correct plan item/path but no embedded catalog representation. The
+deployed correction embeds those exact representations and adds a
+browser-to-Python history-only round trip.
+
+That owner-created plan is still ready and survived deployment. The Account
+page now recovers it across refresh/tabs, so do **not** prepare another plan.
+Hard-refresh once, download the kit again, and use only the newly extracted
+copy. The old extracted kit contains the faulty catalog. Frozen paging now uses
+up to four chunks per response, reducing this plan's metadata requests from 194
+to at most 49.
+
 ## Prepare and download the private kit
 
 1. Sign in to the protected application as an active administrator while
-   online. Reload **Account** once if it is still showing the pre-fix failure.
+   online. Reload **Account** once; an existing unexpired plan is recovered
+   automatically.
 2. Open **Account → Portable backup**.
 3. Select **Prepare export kit** and review the snapshot time, 24-hour expiry,
    active/Trash/history counts, planned object count, bytes, and disk estimate.
@@ -157,9 +172,11 @@ Rollout measurements and estimates:
   the successful snapshot and its postflight moved from 74,468 to 75,059:
   +591. Cloudflare metrics are asynchronous, so these are bounded observed
   deltas rather than a claim of per-statement billing attribution;
-- final D1 metrics showed 3,043 read queries, 149 write queries,
-  1,800,602 rows read, and 75,059 rows written in the rolling window. The
-  database was 5.14 MB and foreign-key errors were zero;
+- after the owner-created active plan and the no-write correction deployment,
+  D1 showed 4,322 read queries, 177 write queries, 1,968,076 rows read, and
+  75,844 rows written in the rolling window. The active snapshot raises the
+  database to 10.3 MB; foreign-key errors remain zero. The deployment/postflight
+  itself reported zero rows written;
 - this acceptance used exactly two known R2 content reads: one complete
   16,674-byte object and one 64-byte range. It performed no R2 write, delete, or
   copy. The metadata kit itself reads only D1;

@@ -953,9 +953,10 @@ At minimum, cover:
 
 The original migration `0021` created the export-only tables. Corrective
 migration `0022_portable_export_item_chunks.sql` preserves the audit/detail
-history, adds bounded item chunks, and leaves ten export guards. Worker
-`0707aac7-ad77-4866-a5b6-63e25d5d2f64` serves final source commit `07beba0` at
-100% with client/service-worker build `77af32a4d6e3`; no migration is pending.
+history, adds bounded item chunks, and leaves ten export guards. At this
+preceding checkpoint, Worker `0707aac7-ad77-4866-a5b6-63e25d5d2f64` served
+source commit `07beba0` at 100% with client/service-worker build
+`77af32a4d6e3`; no migration was pending.
 
 Two failed owner attempts rolled back every detail row. Exact D1 diagnostics
 showed that the second failure was not the previously inferred transaction
@@ -981,6 +982,36 @@ temporary aggregate-only range probe was removed before the final deployment.
 The plan was revoked and all 148 record chunks and 46 item chunks were purged,
 leaving only its aggregate audit stub. The complete multi-gigabyte archive was
 deliberately not built and remains the owner's manual acceptance.
+
+### Active-plan and history-kit correction, 2026-07-24
+
+The owner later prepared another real plan and downloaded its kit. The Python
+builder rejected that kit before any media request with
+`export_item_representation_mismatch`. The payload plan and source fixity were
+correct; the consolidated catalog represented replacement-history media only
+by ID/path strings. A durable object used exclusively by history therefore had
+no traversable `MediaRepresentation` declaration for the builder to reconcile.
+
+Commit `02e9fd3` embeds exact original/optimized representation objects in Scan
+and Recording replacement entries. A browser-produced synthetic kit with a
+history-only payload now builds, verifies, inspects, and dry-run restores
+through the bundled Python tool. The same correction is applied client-side
+when re-downloading an existing frozen plan; no new snapshot or migration is
+required.
+
+The Account page now discovers the creator's latest unexpired ready plan from
+the server on mount and return-to-tab, preserves its non-sensitive downloaded
+stage across same-origin tabs, and treats a repeated Prepare request as recovery
+instead of creating a second plan. Four bounded physical chunks may be returned
+per records/items page. At current size, private kit construction falls from
+148 + 46 = 194 page requests to at most 37 + 12 = 49.
+
+Worker `8f058f23-d97d-4b67-a4f8-62d9336ebcf3` serves exact source
+`02e9fd304062a538042fead0ccb846c524bdbafb` with client/service-worker build
+`af5cd83f3e41`. The owner's ready schema-0022 plan survived deployment with 148
+record chunks, 46 item chunks, 2,925 logical items, and 7,955,140,423 bytes.
+Deployment and postflight wrote zero D1 rows. Owner confirmation of the
+re-downloaded corrected real kit and complete archive remains pending.
 
 Before protected-staging deployment:
 

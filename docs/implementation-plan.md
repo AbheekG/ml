@@ -20,14 +20,19 @@ every table/column through 0022, and synthetic cross-language plus adversarial
 gates cover the complete source-to-restored-reference boundary. No normal import
 UI or cloud import adapter was added. A genuine authenticated snapshot, private
 kit download, bounded media/range verification, revocation, and derived-detail
-cleanup passed. Only the complete local archive build remains manual acceptance.
+cleanup passed. A later owner-created kit exposed a missing catalog
+`MediaRepresentation` for history-only media before any payload download. The
+corrected browser-to-Python round trip now covers that case; owner verification
+of the corrected real kit and complete local archive remains manual acceptance.
 
 Current application/deployment checkpoint (2026-07-24): protected staging runs
-Worker `0707aac7-ad77-4866-a5b6-63e25d5d2f64` at 100%, client/service-worker
-build `77af32a4d6e3`, and the unchanged accepted converter image
+Worker `8f058f23-d97d-4b67-a4f8-62d9336ebcf3` at 100%, client/service-worker
+build `af5cd83f3e41`, and the unchanged accepted converter image
 `sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
-Migration `0022_portable_export_item_chunks.sql` is applied with all derived
-export rows purged, ten export guards, and no pending migration. Pre/post aggregate
+Migration `0022_portable_export_item_chunks.sql` is applied with ten export
+guards and no pending migration. The owner's current ready plan remains at 148
+record chunks / 46 item chunks; this no-schema deployment changed zero D1 rows.
+Pre/post aggregate
 reconciliation is unchanged at 581 Songs / 335 lyric rows / 499 Scans / 835
 Recordings / 1,979 media rows, 2,925 registered payload objects /
 7,955,140,423 bytes, and 2,933 private R2 objects / 8.1 GB, with zero invalid
@@ -40,7 +45,19 @@ chunks and 2,925 logical payload items in 46 item chunks, totaling
 coherent transaction and avoid that runtime limit. Item chunking remains as the
 validated write-budget reduction.
 
-The gate passed 69 Vitest files / 473 tests, 12 Python archive tests, all 91
+The Account workflow now loads the creator-bound current ready plan on mount,
+focus, visibility change, and cross-tab storage change; a repeated Prepare
+request returns that plan without another snapshot. Download state is retained
+locally only after the server confirms the same plan. Frozen record/item paging
+now returns up to four bounded chunks per response, reducing the current kit
+from 194 page requests to at most 49.
+
+History-only Scan and Recording replacement media now embed exact
+`MediaRepresentation` entries in the consolidated catalog. This fixes the
+Python builder's pre-download `export_item_representation_mismatch` while
+preserving one payload per durable object and exact history links.
+
+The gate passed 69 Vitest files / 474 tests, 12 Python archive tests, all 91
 Python converter tests, all three TypeScript projects, fresh replay through
 0022, production/service-worker build, whitespace/privacy checks, exact
 dependency-tree review, and offline advisory audit with zero findings. The
