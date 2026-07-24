@@ -1115,48 +1115,6 @@ export async function portableExportContentResponse(
   return new Response(object.body, { headers });
 }
 
-export async function portableExportRangeSmokeResponse(
-  context: PortableExportContext,
-): Promise<Response> {
-  const exportId = context.req.param("exportId") ?? "";
-  const itemId = context.req.param("itemId") ?? "";
-  if (!/^[0-9a-f]{32}$/u.test(exportId) || !/^[0-9a-f]{32}$/u.test(itemId)) {
-    return context.json({ error: "portable_export_item_not_found" }, 404);
-  }
-  const item = await privatePortableItem(
-    context.env.DB,
-    exportId,
-    itemId,
-    context.get("appUser").identity,
-  );
-  if (!item) return context.json({ error: "portable_export_item_not_found" }, 404);
-
-  const length = Math.min(64, item.byteSize);
-  let object: R2ObjectBody | null;
-  try {
-    object = await context.env.MEDIA.get(item.objectKey, {
-      range: { offset: 0, length },
-    });
-  } catch {
-    return context.json({ error: "portable_export_storage_unavailable" }, 503);
-  }
-  if (!object || object.size !== item.byteSize) {
-    return context.json({ error: "portable_export_item_invalid" }, 409);
-  }
-  const bytes = await object.arrayBuffer();
-  if (bytes.byteLength !== length) {
-    return context.json({ error: "portable_export_item_invalid" }, 409);
-  }
-  return context.json({
-    status: "ok",
-    byteLength: bytes.byteLength,
-    rangeStart: 0,
-    rangeEnd: bytes.byteLength - 1,
-    totalBytes: item.byteSize,
-    representation: item.representation,
-  });
-}
-
 export async function cleanupPortableExports(
   database: D1Database,
   now = new Date(),
