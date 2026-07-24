@@ -983,7 +983,7 @@ and 7,955,140,423 bytes. The browser downloaded its private metadata kit. One
 temporary aggregate-only range probe was removed before the final deployment.
 The plan was revoked and all 148 record chunks and 46 item chunks were purged,
 leaving only its aggregate audit stub. The complete multi-gigabyte archive was
-deliberately not built and remains the owner's manual acceptance.
+deliberately not built from that preceding smoke plan.
 
 ### Active-plan and history-kit correction, 2026-07-24
 
@@ -1012,8 +1012,8 @@ Worker `8f058f23-d97d-4b67-a4f8-62d9336ebcf3` serves exact source
 `02e9fd304062a538042fead0ccb846c524bdbafb` with client/service-worker build
 `af5cd83f3e41`. The owner's ready schema-0022 plan survived deployment with 148
 record chunks, 46 item chunks, 2,925 logical items, and 7,955,140,423 bytes.
-Deployment and postflight wrote zero D1 rows. Owner confirmation of the
-re-downloaded corrected real kit and complete archive remains pending.
+Deployment and postflight wrote zero D1 rows. At this correction checkpoint,
+owner confirmation of the re-downloaded corrected real kit remained pending.
 
 ### Local path-safety guidance correction, 2026-07-24
 
@@ -1029,6 +1029,33 @@ home-directory root, and legacy folders. Worker
 `39a615da-a23b-4931-b0fc-d0d7612fc39c` serves exact source
 `95e771537bbcc7cbf5036228ab25fba0ec8cbff5` with client/service-worker build
 `a21da884e66a`. The no-schema deployment did not access D1 or R2.
+
+### Complete archive acceptance and cleanup, 2026-07-24
+
+Using the already frozen plan and corrected kit, the local builder completed a
+7,972,873,832-byte stored ZIP64 archive. Build-integrated verification and the
+independent `verify` command both reported `VERIFIED`; privacy-safe `inspect`
+reported the same archive size/digest, profile 1.0.0, schema 0022, 2,925 planned
+objects, 7,955,140,423 planned payload bytes, and exact aggregate catalog
+counts. The private archive digest is deliberately not copied into tracked
+documentation.
+
+The exact plan was then precondition-checked, revoked, and purged only in the
+`portable_export_*` tables. D1 reported 198 rows written for the cleanup:
+one state transition and its index, 148 record chunks, 46 item chunks, and one
+purge timestamp plus its index. The retained audit stub is revoked/purged with
+zero record, legacy-item, or item-chunk detail. All export-detail tables are
+empty.
+
+Final reconciliation remains 581 Songs, 335 lyric rows, 499 Scans, 835
+Recordings, 1,979 media objects, 946 Scan derivatives, and 196 audio
+derivatives, with zero foreign-key errors and no pending migration. D1 returned
+to 5.14 MB; its rolling view showed 75,839 rows written. R2 remains unchanged
+at 2,933 objects / 8.1 GB. The enforced processor snapshot has Scheduler
+enabled, latest execution successful, all nine D1 jobs successful, zero
+critical/warning alerts, and only the expected historical informational alert.
+No catalog/media row, R2 object, Access policy, processor resource, DNS,
+production resource, legacy file, or Git remote changed.
 
 Before protected-staging deployment:
 
@@ -1069,7 +1096,7 @@ Postflight must prove:
 - measured request CPU, D1 rows read/written, and R2 operations remain within
   the documented cost boundary.
 
-The owner then performs the separate full manual acceptance:
+For each future export, the owner performs the separate full manual acceptance:
 
 1. sign in as admin;
 2. prepare and download a kit;

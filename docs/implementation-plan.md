@@ -22,8 +22,9 @@ UI or cloud import adapter was added. A genuine authenticated snapshot, private
 kit download, bounded media/range verification, revocation, and derived-detail
 cleanup passed. A later owner-created kit exposed a missing catalog
 `MediaRepresentation` for history-only media before any payload download. The
-corrected browser-to-Python round trip now covers that case; owner verification
-of the corrected real kit and complete local archive remains manual acceptance.
+corrected browser-to-Python round trip now covers that case. The owner's
+complete archive then passed build-integrated and independent verification,
+after which its plan was revoked and all derived export detail was purged.
 
 Current application/deployment checkpoint (2026-07-24): protected staging runs
 Worker `39a615da-a23b-4931-b0fc-d0d7612fc39c` at 100%,
@@ -31,10 +32,9 @@ client/service-worker build `a21da884e66a`, and the unchanged accepted
 converter image
 `sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
 Migration `0022_portable_export_item_chunks.sql` is applied with ten export
-guards and no pending migration. The owner's current ready plan remains at 148
-record chunks / 46 item chunks; this no-schema deployment changed zero D1 rows.
-Pre/post aggregate
-reconciliation is unchanged at 581 Songs / 335 lyric rows / 499 Scans / 835
+guards and no pending migration. The accepted plan retained its aggregate audit
+stub as revoked/purged with zero remaining record/item chunks. Pre/post
+aggregate reconciliation is unchanged at 581 Songs / 335 lyric rows / 499 Scans / 835
 Recordings / 1,979 media rows, 2,925 registered payload objects /
 7,955,140,423 bytes, and 2,933 private R2 objects / 8.1 GB, with zero invalid
 payload hashes or foreign-key errors.
@@ -63,6 +63,14 @@ repository, the home-directory root, or legacy folders. Account, embedded-kit,
 and runbook instructions now make that privacy boundary explicit, and the
 bounded error identifies the safe alternatives without printing a private
 path.
+
+The real archive is 7,972,873,832 bytes and independently reconciles all 2,925
+planned objects / 7,955,140,423 payload bytes, schema 0022, profile 1.0.0, and
+the frozen aggregate catalog. Build, `verify`, and privacy-safe `inspect`
+reported the same archive digest without that private digest entering tracked
+documentation. Final export-only cleanup wrote 198 rows as reported by D1,
+removed 148 + 46 chunks, and retained the aggregate audit stub. R2 remains
+2,933 objects / 8.1 GB.
 
 The gate passed 69 Vitest files / 474 tests, 12 Python archive tests, all 91
 Python converter tests, all three TypeScript projects, fresh replay through

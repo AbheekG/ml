@@ -3,8 +3,9 @@
 Status: implementation and protected-staging rollout are complete. A real
 authenticated plan, private kit download, bounded content/range reads,
 revocation, and cleanup passed. A later real kit exposed and received a
-history-only representation correction. Re-downloading that corrected kit and
-the complete local archive build remain the owner's manual acceptance.
+history-only representation correction. The corrected complete local archive
+passed build-integrated and independent verification, and its plan was revoked
+and purged.
 
 This runbook is for the admin-only portable export defined in
 [portable-library-export.md](portable-library-export.md). It does not authorize
@@ -36,20 +37,23 @@ The accepted plan reported exactly those logical counts and
 16,674-byte payload and one 64-byte range were read, and the plan was revoked.
 All 148 record chunks and 46 item chunks were then purged, leaving its
 aggregate audit stub. The temporary admin-only range probe was removed before
-the final Worker deployment. No complete archive was built.
+the final Worker deployment. No complete archive was built from that earlier
+smoke plan.
 
-The owner's next kit reached the Python builder but failed before downloading
+The owner's next kit first reached the Python builder but failed before downloading
 media with `export_item_representation_mismatch`. History-only durable media
 had a correct plan item/path but no embedded catalog representation. The
 deployed correction embeds those exact representations and adds a
 browser-to-Python history-only round trip.
 
-That owner-created plan is still ready and survived deployment. The Account
-page now recovers it across refresh/tabs, so do **not** prepare another plan.
-Hard-refresh once, download the kit again, and use only the newly extracted
-copy. The old extracted kit contains the faulty catalog. Frozen paging now uses
-up to four chunks per response, reducing this plan's metadata requests from 194
-to at most 49.
+That owner-created plan survived deployment and the Account page recovered it
+across refresh/tabs. A newly downloaded kit fixed the representation mismatch.
+After moving the output/work paths outside the Git repository, the complete
+7,972,873,832-byte archive passed build-integrated verification, independent
+`verify`, and privacy-safe `inspect`. All three reconciled 2,925 objects /
+7,955,140,423 payload bytes and the same archive digest. The plan is now
+revoked, its 148 record chunks and 46 item chunks are purged, and only its
+aggregate audit stub remains.
 
 ## Prepare and download the private kit
 
@@ -185,19 +189,22 @@ Rollout measurements and estimates:
   the successful snapshot and its postflight moved from 74,468 to 75,059:
   +591. Cloudflare metrics are asynchronous, so these are bounded observed
   deltas rather than a claim of per-statement billing attribution;
-- after the owner-created active plan and the no-write correction deployment,
-  D1 showed 4,322 read queries, 177 write queries, 1,968,076 rows read, and
-  75,844 rows written in the rolling window. The active snapshot raises the
-  database to 10.3 MB; foreign-key errors remain zero. The deployment/postflight
-  itself reported zero rows written;
-- this acceptance used exactly two known R2 content reads: one complete
+- after complete verification, export-only revocation/cleanup reported exactly
+  198 D1 rows written and removed 148 + 46 chunks. The final rolling view
+  showed 13,518 read queries, 176 write queries, 2,003,670 rows read, and
+  75,839 rows written; the counter can decrease as its 24-hour window advances.
+  The database returned from 10.3 MB with active detail to 5.14 MB, and
+  foreign-key errors remain zero;
+- the earlier bounded smoke acceptance used exactly two known R2 content reads: one complete
   16,674-byte object and one 64-byte range. It performed no R2 write, delete, or
   copy. The metadata kit itself reads only D1;
-- a complete build is approximately 2,925 Worker content requests, 2,925 R2
-  Class B reads, and 7,955,140,423 payload bytes before retries. The 50%
-  scenario is approximately 4,388 requests/reads and 11.93 GB; and
-- the complete builder was deliberately not run, so those projected R2 reads
-  and payload bytes were not incurred.
+- the accepted complete build verified all 2,925 objects /
+  7,955,140,423 payload bytes in a 7,972,873,832-byte archive. A clean run
+  normally uses 2,925 Worker requests / R2 Class B reads; the aggregate bucket
+  view does not attribute retries to one build. The 50% scenario is
+  approximately 4,388 requests/reads and 11.93 GB; and
+- final R2 reconciliation remains 2,933 objects / 8.1 GB, proving no object
+  write, delete, or copy.
 
 Official references:
 

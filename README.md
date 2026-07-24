@@ -20,16 +20,15 @@ The application is being rebuilt from private legacy attempts (grouped inside th
 See [the product plan](docs/product-plan.md) and [the implementation plan](docs/implementation-plan.md).
 
 The admin-only portable preservation export is implemented, deployed, and
-authenticated-smoke-tested in protected staging. A real frozen plan produced
-the expected 8,532 logical records and 2,925 payload items /
-7,955,140,423 bytes; its private kit and a bounded media/range sample were
-downloaded before the plan was revoked and its derived rows purged. Building
-and verifying the complete multi-gigabyte archive remains the owner's manual
-acceptance step. The final archive is assembled on the administrator's computer
-using a versioned BagIt + RO-Crate + ZIP64 profile. The scope includes active
-and trashed catalog data, retained originals/derivatives, replacement history,
-and provenance, plus a tested local reference restore; it deliberately does not
-add a normal cloud-import UI. See
+owner-accepted in protected staging. A real frozen plan produced the expected
+8,532 logical records and 2,925 payload items / 7,955,140,423 bytes. Its
+complete 7,972,873,832-byte archive passed build-integrated and independent
+verification before the plan was revoked and its derived rows purged. The
+archive is assembled on the administrator's computer using a versioned BagIt +
+RO-Crate + ZIP64 profile. The scope includes active and trashed catalog data,
+retained originals/derivatives, replacement history, and provenance, plus a
+tested local reference restore; it deliberately does not add a normal
+cloud-import UI. See
 [the export/recovery design](docs/portable-library-export.md) and
 [the normative archive profile](docs/portable-library-archive-profile.md).
 Operator commands are in
@@ -76,7 +75,7 @@ and separately authorized cutover work:
 - the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
 - the protected Access/session boundary uses a Worker-compatible, bounded rotating JWKS cache; protected catalog refresh waits for a validated session and turns a definitive 401/403 into one explicit renewal screen instead of a false empty catalog. Logout keeps its durable privacy barrier through a matched Cloudflare return, treats the bounded HTTP-cache-clear request as defense in depth, and has only one automatic top-level Access navigation. The owner accepted the repaired Chrome sign-in/catalog and single-cycle logout flow;
 - the current protected-staging deployment is Worker `39a615da-a23b-4931-b0fc-d0d7612fc39c` with client/service-worker build `a21da884e66a`; migrations through `0022_portable_export_item_chunks.sql` are applied with none pending. The Account page recovers the creator's current ready plan across refresh/tabs, reuses it instead of creating a duplicate, preserves local kit-download state, and reads up to four bounded chunks per page. Account and kit instructions explicitly keep the private archive/work cache outside Git repositories, and the local tool explains that safety boundary when rejecting a path;
-- the current application checkpoint passes 69 Vitest files / 474 tests, 12 Python archive tests, all 91 Python audio tests, all three TypeScript projects, fresh migration replay, the production/service-worker build with seven precache entries, whitespace/privacy checks, and protected-staging reconciliation with unchanged catalog/media aggregates and zero foreign-key errors. The browser-to-Python round trip now includes history-only media representations; owner verification of a newly downloaded corrected real kit and the complete local archive remains pending.
+- the current application checkpoint passes 69 Vitest files / 474 tests, 12 Python archive tests, all 91 Python audio tests, all three TypeScript projects, fresh migration replay, the production/service-worker build with seven precache entries, whitespace/privacy checks, and protected-staging reconciliation with unchanged catalog/media aggregates and zero foreign-key errors. The browser-to-Python round trip includes history-only media representations. The owner's complete 7,972,873,832-byte archive passed both build-integrated and independent verification; its plan was revoked and all derived export detail was purged.
 
 The bounded improvements selected from the 2026-07-18 whole-application audit are
 implemented, deployed, and accepted. No further implementation slice is implied
