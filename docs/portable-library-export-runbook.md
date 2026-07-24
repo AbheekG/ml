@@ -14,9 +14,9 @@ changes, or a cloud import.
 ## Protected-staging status
 
 Migrations through `0022_portable_export_item_chunks.sql` are applied with none
-pending. Worker `8f058f23-d97d-4b67-a4f8-62d9336ebcf3` serves final source
-commit `02e9fd304062a538042fead0ccb846c524bdbafb` and client/service-worker
-build `af5cd83f3e41` at 100%. Pre/post catalog and media reconciliation is
+pending. Worker `39a615da-a23b-4931-b0fc-d0d7612fc39c` serves final source
+commit `95e771537bbcc7cbf5036228ab25fba0ec8cbff5` and client/service-worker
+build `a21da884e66a` at 100%. Pre/post catalog and media reconciliation is
 unchanged, Access still returns the expected unauthenticated redirect, and the
 final R2 aggregate check remains 2,933 objects / 8.1 GB.
 

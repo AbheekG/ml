@@ -1015,6 +1015,21 @@ record chunks, 46 item chunks, 2,925 logical items, and 7,955,140,423 bytes.
 Deployment and postflight wrote zero D1 rows. Owner confirmation of the
 re-downloaded corrected real kit and complete archive remains pending.
 
+### Local path-safety guidance correction, 2026-07-24
+
+The corrected real kit next reached the builder's intended path preflight and
+reported `unsafe_output_or_work_path` because the relative output and automatic
+work cache resolved inside a Git repository. No authentication, media request,
+D1 query, or filesystem mutation occurred.
+
+Commit `95e7715` preserves the privacy guard while giving a bounded actionable
+error and aligning the Account page, embedded kit README, and runbook: keep the
+private output/work paths outside the kit, Git repositories, the
+home-directory root, and legacy folders. Worker
+`39a615da-a23b-4931-b0fc-d0d7612fc39c` serves exact source
+`95e771537bbcc7cbf5036228ab25fba0ec8cbff5` with client/service-worker build
+`a21da884e66a`. The no-schema deployment did not access D1 or R2.
+
 Before protected-staging deployment:
 
 - all Vitest files pass;

@@ -26,8 +26,9 @@ corrected browser-to-Python round trip now covers that case; owner verification
 of the corrected real kit and complete local archive remains manual acceptance.
 
 Current application/deployment checkpoint (2026-07-24): protected staging runs
-Worker `8f058f23-d97d-4b67-a4f8-62d9336ebcf3` at 100%, client/service-worker
-build `af5cd83f3e41`, and the unchanged accepted converter image
+Worker `39a615da-a23b-4931-b0fc-d0d7612fc39c` at 100%,
+client/service-worker build `a21da884e66a`, and the unchanged accepted
+converter image
 `sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
 Migration `0022_portable_export_item_chunks.sql` is applied with ten export
 guards and no pending migration. The owner's current ready plan remains at 148
@@ -56,6 +57,12 @@ History-only Scan and Recording replacement media now embed exact
 `MediaRepresentation` entries in the consolidated catalog. This fixes the
 Python builder's pre-download `export_item_representation_mismatch` while
 preserving one payload per durable object and exact history links.
+
+The builder intentionally refuses output/work paths inside the kit, any Git
+repository, the home-directory root, or legacy folders. Account, embedded-kit,
+and runbook instructions now make that privacy boundary explicit, and the
+bounded error identifies the safe alternatives without printing a private
+path.
 
 The gate passed 69 Vitest files / 474 tests, 12 Python archive tests, all 91
 Python converter tests, all three TypeScript projects, fresh replay through
