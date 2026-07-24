@@ -208,6 +208,9 @@ describe("browser kit and Python archive interoperability", () => {
       const paths = extractStoredKit(kit.bytes, kitDirectory);
       expect(paths).toContain("KIT-MANIFEST.sha256");
       expect(paths).toContain("tools/music_library_archive.py");
+      expect(readFileSync(join(kitDirectory, "README.html"), "utf8")).toContain(
+        "outside any Git",
+      );
 
       const archive = join(root, "preservation.zip");
       const pythonBuild = String.raw`

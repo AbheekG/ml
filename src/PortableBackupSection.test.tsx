@@ -85,6 +85,7 @@ describe("PortableBackupSection", () => {
     expect(api.buildKit).toHaveBeenCalled();
     expect(api.downloadKit).toHaveBeenCalled();
     expect(await screen.findByText(/Kit downloaded\. Extract it/)).toBeTruthy();
+    expect(screen.getByText(/outside any Git or source-code repository/)).toBeTruthy();
     expect(screen.getByText(/Wait for/).textContent).toContain("VERIFIED");
 
     await user.click(screen.getByRole("button", { name: "Revoke this kit" }));

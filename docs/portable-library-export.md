@@ -492,13 +492,15 @@ not generate Python source dynamically. The browser places that exact versioned
 program, its SHA-256, schemas, profile files, and the frozen private plan into the
 kit.
 
-The kit is a normal ZIP containing private metadata. After extracting it, the
+The kit is a normal ZIP containing private metadata. Extract it on a private
+disk outside any Git/source-code repository, change into the extracted kit
+directory, and keep the output and automatic work folder outside the kit. The
 main command is intentionally ordinary:
 
 ```bash
-python3 export-kit/tools/music_library_archive.py build \
-  --kit export-kit \
-  --output music-library-preservation.zip
+python3 tools/music_library_archive.py build \
+  --kit . \
+  --output ../music-library-preservation.zip
 ```
 
 The program should use the Python standard library unless a dependency is
@@ -509,14 +511,14 @@ authentication.
 The tool also provides:
 
 ```bash
-python3 export-kit/tools/music_library_archive.py verify \
-  music-library-preservation.zip
+python3 tools/music_library_archive.py verify \
+  ../music-library-preservation.zip
 
-python3 export-kit/tools/music_library_archive.py inspect \
-  music-library-preservation.zip
+python3 tools/music_library_archive.py inspect \
+  ../music-library-preservation.zip
 
-python3 export-kit/tools/music_library_archive.py restore-local \
-  music-library-preservation.zip --destination restored-library
+python3 tools/music_library_archive.py restore-local \
+  ../music-library-preservation.zip --destination ../restored-library
 ```
 
 The repository-trusted copy, not a script taken from an untrusted archive, must

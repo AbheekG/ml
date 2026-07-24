@@ -72,18 +72,31 @@ four bounded downloads by default, keeps the Access token only in memory, and
 retains an aggregate-only resumable work directory next to the requested
 archive.
 
-From the directory containing the extracted `export-kit`:
+Keep the extracted kit, output ZIP, and resumable work folder on a private disk
+outside any Git/source-code repository, the kit itself, the home-directory
+root, and any legacy folder. This prevents private export data from entering
+source control. Change into the extracted `export-kit` directory, then run:
+
+```bash
+python3 tools/music_library_archive.py build \
+  --kit . \
+  --output ../music-library-preservation.zip
+
+python3 tools/music_library_archive.py verify \
+  ../music-library-preservation.zip
+
+python3 tools/music_library_archive.py inspect \
+  ../music-library-preservation.zip
+```
+
+If the kit remains inside a Git repository temporarily, use an explicit output
+path outside that repository; the automatic resumable work folder is created
+beside the output:
 
 ```bash
 python3 export-kit/tools/music_library_archive.py build \
   --kit export-kit \
-  --output music-library-preservation.zip
-
-python3 export-kit/tools/music_library_archive.py verify \
-  music-library-preservation.zip
-
-python3 export-kit/tools/music_library_archive.py inspect \
-  music-library-preservation.zip
+  --output /path/to/private-disk/music-library-preservation.zip
 ```
 
 `cloudflared` may open the ordinary Access login in a browser. If it cannot open
@@ -108,14 +121,14 @@ playback, distinct optimized, and unassigned-media cases. Then test the
 constrained local reference restore:
 
 ```bash
-python3 export-kit/tools/music_library_archive.py restore-local \
-  music-library-preservation.zip \
-  --destination restored-library \
+python3 tools/music_library_archive.py restore-local \
+  ../music-library-preservation.zip \
+  --destination ../restored-library \
   --dry-run
 
-python3 export-kit/tools/music_library_archive.py restore-local \
-  music-library-preservation.zip \
-  --destination restored-library
+python3 tools/music_library_archive.py restore-local \
+  ../music-library-preservation.zip \
+  --destination ../restored-library
 ```
 
 The restore writes only to a new explicit destination, verifies first, restores

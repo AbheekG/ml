@@ -273,7 +273,10 @@ export function PortableBackupSection({
           </p>
           {stage === "kit-downloaded" && (
             <div className="portable-command" role="status">
-              <p>Kit downloaded. Extract it on the chosen private disk, then run:</p>
+              <p>
+                Kit downloaded. Extract it on the chosen private disk outside any Git or
+                source-code repository. Open Terminal in the extracted kit directory, then run:
+              </p>
               <code>python3 tools/music_library_archive.py build --kit . --output ../music-library-preservation.zip</code>
               <p>Wait for <strong>VERIFIED</strong>, then run the independent <code>verify</code> command.</p>
             </div>

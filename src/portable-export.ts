@@ -304,6 +304,8 @@ function kitReadme(): Uint8Array {
 <p><strong>Private and incomplete:</strong> this kit contains frozen metadata, but it is not a backup
 until the local builder downloads every media object and reports <code>VERIFIED</code>.</p>
 <p>Requirements: Python 3.11 or newer, <code>cloudflared</code>, and conservative free disk space.</p>
+<p>Keep the extracted kit, archive, and resumable work folder on a private disk outside any Git
+or source-code repository. In Terminal, change into the extracted kit directory before running:</p>
 <pre>python3 tools/music_library_archive.py build --kit . --output ../music-library-preservation.zip
 python3 tools/music_library_archive.py verify ../music-library-preservation.zip
 python3 tools/music_library_archive.py inspect ../music-library-preservation.zip</pre>

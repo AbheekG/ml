@@ -1685,7 +1685,11 @@ def build_archive(
         if partial.exists():
             raise ArchiveError("partial_archive_already_exists")
     if _unsafe_broad_path(output, kit.root) or _unsafe_broad_path(work, kit.root):
-        raise ArchiveError("unsafe_output_or_work_path")
+        raise ArchiveError(
+            "unsafe_output_or_work_path: place the archive and work directory "
+            "outside the export kit, Git repositories, the home-directory root, "
+            "and legacy folders"
+        )
     _preflight_disk(kit, work, output)
     output.parent.mkdir(parents=True, exist_ok=True)
     work.mkdir(parents=True, exist_ok=True, mode=0o700)

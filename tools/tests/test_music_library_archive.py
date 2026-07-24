@@ -737,7 +737,9 @@ class ArchiveToolTests(unittest.TestCase):
     def test_unsafe_output_and_insufficient_disk_fail_before_network(self) -> None:
         kit = archive.load_kit(self.kit)
         with self.assertRaisesRegex(
-            archive.ArchiveError, "unsafe_output_or_work_path"
+            archive.ArchiveError,
+            "unsafe_output_or_work_path: place the archive and work directory "
+            "outside the export kit, Git repositories",
         ):
             archive.build_archive(
                 self.kit,
