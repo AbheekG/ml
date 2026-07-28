@@ -108,8 +108,11 @@ repeats the full live inventory, and runs one guarded transaction. It
 temporarily removes and recreates the history-retention trigger inside that
 transaction. The generated SQL deliberately omits nested `BEGIN`/`COMMIT`
 statements because Wrangler's remote file importer owns the rollback-safe
-transaction; local replay wraps the same statements explicitly and proves a
-late provenance failure rolls every earlier delete back. R2 deletion is a
+transaction. Derivative and selection inserts are split into guarded groups of
+at most 50 rows so every statement stays below D1's import limit; the real plan
+contains 54 statements with a maximum statement size of 28,475 bytes. Local
+replay wraps the same statements explicitly and proves a late provenance
+failure rolls every earlier delete back. R2 deletion is a
 separate idempotent phase that cannot start until
 the exact D1 post-state is confirmed. Failure after D1 can therefore leak
 unreferenced private objects but cannot leave D1 pointing to a deleted object.

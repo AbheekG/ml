@@ -887,6 +887,14 @@ function inList(values: string[]): string {
   return `(${values.map(sqlString).join(",")})`;
 }
 
+function chunks<T>(values: readonly T[], size: number): T[][] {
+  const output: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    output.push(values.slice(index, index + size));
+  }
+  return output;
+}
+
 export function buildReconciliationSql(plan: ReconciliationPlan): string {
   const keptDecisions = plan.decisions.filter(
     (row) => row.representationKind === "derivative",
@@ -976,21 +984,7 @@ export function buildReconciliationSql(plan: ReconciliationPlan): string {
     ...recoveryMediaIds,
     ...plan.decisions.map((row) => row.sourceMediaId),
   ];
-  const derivativeValues = keptDecisions.map((row) => `(
-    ${sqlString(row.sourceMediaId)},
-    ${sqlString(row.sourceSha256)},
-    ${row.sourceByteSize},
-    ${sqlString(row.candidateObjectKey)},
-    'image/jpeg',
-    ${row.candidateByteSize},
-    ${sqlString(row.candidateSha256)},
-    ${row.candidateWidth},
-    ${row.candidateHeight},
-    ${sqlString(DERIVATIVE_POLICY)},
-    ${sqlString(plan.createdAt)},
-    ${sqlString(RECONCILIATION_ACTOR)}
-  )`).join(",\n");
-  const derivativeInsert = keptDecisions.length === 0 ? "" : `
+  const derivativeInsert = chunks(keptDecisions, 50).map((chunk) => `
 INSERT INTO scan_readability_derivatives (
   source_media_id,
   source_sha256,
@@ -1005,11 +999,38 @@ INSERT INTO scan_readability_derivatives (
   created_at,
   created_by
 ) VALUES
-${derivativeValues};
+${chunk.map((row) => `(
+    ${sqlString(row.sourceMediaId)},
+    ${sqlString(row.sourceSha256)},
+    ${row.sourceByteSize},
+    ${sqlString(row.candidateObjectKey)},
+    'image/jpeg',
+    ${row.candidateByteSize},
+    ${sqlString(row.candidateSha256)},
+    ${row.candidateWidth},
+    ${row.candidateHeight},
+    ${sqlString(DERIVATIVE_POLICY)},
+    ${sqlString(plan.createdAt)},
+    ${sqlString(RECONCILIATION_ACTOR)}
+  )`).join(",\n")};
 INSERT INTO scan_readability_reconciliation_guard
-SELECT CASE WHEN changes() = ${keptDecisions.length} THEN 1 ELSE 0 END;
-`;
-  const selectionValues = plan.decisions.map((row) => `(
+SELECT CASE WHEN changes() = ${chunk.length} THEN 1 ELSE 0 END;
+`).join("");
+  const selectionInsert = chunks(plan.decisions, 50).map((chunk) => `
+INSERT INTO scan_readability_selections (
+  source_media_id,
+  source_sha256,
+  source_byte_size,
+  source_width,
+  source_height,
+  representation_kind,
+  selection_basis,
+  candidate_byte_size,
+  policy_id,
+  created_at,
+  created_by
+) VALUES
+${chunk.map((row) => `(
     ${sqlString(row.sourceMediaId)},
     ${sqlString(row.sourceSha256)},
     ${row.sourceByteSize},
@@ -1021,7 +1042,10 @@ SELECT CASE WHEN changes() = ${keptDecisions.length} THEN 1 ELSE 0 END;
     ${sqlString(SELECTION_POLICY)},
     ${sqlString(plan.createdAt)},
     ${sqlString(RECONCILIATION_ACTOR)}
-  )`).join(",\n");
+  )`).join(",\n")};
+INSERT INTO scan_readability_reconciliation_guard
+SELECT CASE WHEN changes() = ${chunk.length} THEN 1 ELSE 0 END;
+`).join("");
   return `PRAGMA foreign_keys = ON;
 
 CREATE TABLE scan_readability_reconciliation_guard (
@@ -1064,22 +1088,7 @@ INSERT INTO scan_readability_reconciliation_guard
 SELECT CASE WHEN changes() = ${EXPECTED_RECOVERY_HISTORIES} THEN 1 ELSE 0 END;
 
 ${derivativeInsert}
-INSERT INTO scan_readability_selections (
-  source_media_id,
-  source_sha256,
-  source_byte_size,
-  source_width,
-  source_height,
-  representation_kind,
-  selection_basis,
-  candidate_byte_size,
-  policy_id,
-  created_at,
-  created_by
-) VALUES
-${selectionValues};
-INSERT INTO scan_readability_reconciliation_guard
-SELECT CASE WHEN changes() = ${EXPECTED_CURRENT_SCANS} THEN 1 ELSE 0 END;
+${selectionInsert}
 
 CREATE TRIGGER prevent_scan_media_history_delete
 BEFORE DELETE ON scan_media_history

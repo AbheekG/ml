@@ -265,7 +265,8 @@ describe("Scan readability reconciliation", () => {
     expect(sql).toContain("DROP TRIGGER prevent_scan_media_history_delete;");
     expect(sql).toContain("CREATE TRIGGER prevent_scan_media_history_delete");
     expect(sql).toContain("changes() = 446");
-    expect(sql).toContain("changes() = 499");
+    expect(sql).toContain("changes() = 50");
+    expect(sql).toContain("changes() = 49");
     expect(sql).toContain("'recovery-history-445'");
     expect(sql).toContain("'current-media-498'");
     expect(sql).not.toContain("synthetic-history-to-preserve");
@@ -274,6 +275,8 @@ describe("Scan readability reconciliation", () => {
     expect(sql.indexOf("DELETE FROM media_objects"))
       .toBeLessThan(sql.indexOf("INSERT INTO scan_readability_selections"));
     expect(sql).not.toContain("r2 object delete");
+    expect(Math.max(...sql.split(";").map((statement) => statement.length)))
+      .toBeLessThan(100_000);
     expect(sql.trimEnd()).toMatch(/DROP TABLE scan_readability_reconciliation_guard;$/u);
   });
 
