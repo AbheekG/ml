@@ -258,9 +258,10 @@ describe("Scan readability reconciliation", () => {
     )).toThrow(ScanReconciliationError);
   });
 
-  it("generates one guarded D1 transaction before any separately planned R2 deletion", () => {
+  it("generates one importer-transaction batch before any separately planned R2 deletion", () => {
     const sql = buildReconciliationSql(plan());
-    expect(sql).toContain("BEGIN TRANSACTION;");
+    expect(sql).not.toContain("BEGIN TRANSACTION;");
+    expect(sql).not.toContain("COMMIT;");
     expect(sql).toContain("DROP TRIGGER prevent_scan_media_history_delete;");
     expect(sql).toContain("CREATE TRIGGER prevent_scan_media_history_delete");
     expect(sql).toContain("changes() = 446");
@@ -273,7 +274,7 @@ describe("Scan readability reconciliation", () => {
     expect(sql.indexOf("DELETE FROM media_objects"))
       .toBeLessThan(sql.indexOf("INSERT INTO scan_readability_selections"));
     expect(sql).not.toContain("r2 object delete");
-    expect(sql.trimEnd()).toMatch(/COMMIT;$/u);
+    expect(sql.trimEnd()).toMatch(/DROP TABLE scan_readability_reconciliation_guard;$/u);
   });
 
   it("replays the exact guarded cleanup atomically while preserving one test history", () => {
@@ -443,7 +444,31 @@ describe("Scan readability reconciliation", () => {
       completePlan.aggregate.d1DerivativeRowsDeleted = 945;
       completePlan.aggregate.d1DerivativeRowsInserted = 1;
       completePlan.aggregate.r2ObjectsUploaded = 1;
-      database.exec(buildReconciliationSql(completePlan));
+      const rejectedPlan = structuredClone(completePlan);
+      rejectedPlan.decisions[0]!.sourceSha256 = "f".repeat(64);
+      expect(() => database.exec(`
+        BEGIN TRANSACTION;
+        ${buildReconciliationSql(rejectedPlan)}
+        COMMIT;
+      `)).toThrow();
+      database.exec("ROLLBACK");
+      expect(database.prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM media_objects WHERE kind = 'scan') AS media,
+          (SELECT COUNT(*) FROM scan_media_history) AS histories,
+          (SELECT COUNT(*) FROM scan_readability_derivatives) AS derivatives,
+          (SELECT COUNT(*) FROM scan_readability_selections) AS selections
+      `).get()).toEqual({
+        media: 946,
+        histories: 447,
+        derivatives: 946,
+        selections: 0,
+      });
+      database.exec(`
+        BEGIN TRANSACTION;
+        ${buildReconciliationSql(completePlan)}
+        COMMIT;
+      `);
       expect(database.prepare(`
         SELECT
           (SELECT COUNT(*) FROM scans) AS scans,

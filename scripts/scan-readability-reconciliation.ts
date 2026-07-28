@@ -1023,7 +1023,6 @@ SELECT CASE WHEN changes() = ${keptDecisions.length} THEN 1 ELSE 0 END;
     ${sqlString(RECONCILIATION_ACTOR)}
   )`).join(",\n");
   return `PRAGMA foreign_keys = ON;
-BEGIN TRANSACTION;
 
 CREATE TABLE scan_readability_reconciliation_guard (
   value INTEGER NOT NULL CHECK (value = 1)
@@ -1131,7 +1130,6 @@ SELECT CASE WHEN
 THEN 1 ELSE 0 END;
 
 DROP TABLE scan_readability_reconciliation_guard;
-COMMIT;
 `;
 }
 

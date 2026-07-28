@@ -106,7 +106,11 @@ size and SHA-256, and checkpoints the exact set. D1 application requires that
 plan's SHA-256 and complete upload checkpoint, re-verifies the v2 objects,
 repeats the full live inventory, and runs one guarded transaction. It
 temporarily removes and recreates the history-retention trigger inside that
-transaction. R2 deletion is a separate idempotent phase that cannot start until
+transaction. The generated SQL deliberately omits nested `BEGIN`/`COMMIT`
+statements because Wrangler's remote file importer owns the rollback-safe
+transaction; local replay wraps the same statements explicitly and proves a
+late provenance failure rolls every earlier delete back. R2 deletion is a
+separate idempotent phase that cannot start until
 the exact D1 post-state is confirmed. Failure after D1 can therefore leak
 unreferenced private objects but cannot leave D1 pointing to a deleted object.
 
