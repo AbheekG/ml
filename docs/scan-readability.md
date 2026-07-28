@@ -1,104 +1,127 @@
 # Scan integrity and readability
 
-Status: implemented in protected staging. The audit-remediated path is deployed
-as Worker version `7a397fed-1c47-4fb1-9a37-81d4643c4624`,
-client/service-worker build `1979c0380e2b`. The owner previously accepted the
-ten highest-risk local visual candidates and reports that optimized sharing and
-responsive actions work well. The specific device/browser was not recorded, and
-broader iPadOS compatibility remains a later non-blocking gate. The narrow exact
-readability-reupload extension is automatically verified but was not manually
-re-exercised with another retained Scan upload; revisit it if natural use
-exposes a problem. The semantic export-filename follow-up is deployed as Worker
-`44168581-3e07-443b-b7b9-0690596fd87b`, client/service-worker build
-`1eb9c1f2e950`; retained originals and derivatives are unchanged, and the owner
-accepted the semantic JPEG filename after a successful real-device check.
+Status: the selective representation policy is implemented and covered locally
+by migration `0023_scan_readability_selection.sql`. Protected-staging rollout
+and the one-time AppSheet reconciliation are deliberately recorded only after
+their guarded postflight succeeds. O-1 material is outside this operation.
 
-## Policy
+## Retained source and selected representation
 
-Every new or replacement Scan keeps the exact private original. The Worker
-accepts JPEG, PNG, and WebP inputs up to 20,000,000 bytes, verifies the byte
-signature, fully decodes the image, applies encoded orientation, and prepares a
-JPEG derivative using policy `scan-jpeg-v1-2400-q85`:
+Every interactive create or replacement keeps the exact private JPEG, PNG, or
+WebP upload as the Scan original. D1 records one immutable readability selection
+for that source using policy `scan-readability-selection-v2`:
 
-- longest edge at most 2400 pixels, without enlargement;
-- quality 85 with a white background for transparency;
-- animation disabled and metadata omitted; and
-- output dimensions, byte size, MIME type, and SHA-256 independently verified.
+- `source / direct_safe_source` means the authenticated viewer serves the exact
+  original and no readability object exists;
+- `derivative / required_normalization` means a distinct JPEG is necessary for
+  safe, predictable viewing; or
+- `derivative / optional_material_savings` means an already safe source had a
+  distinct candidate that met both storage-saving thresholds.
 
-The derivative and original stay in private R2. The authenticated Scan viewer
-uses the derivative when provenance exists and otherwise falls back to the
-original. “Open original” deliberately continues to request the retained source.
-No public bucket, delivery URL, or unauthenticated cache is introduced.
+A direct source must be a genuinely decoded JPEG with at most 2400 pixels on
+each edge and at most 100 million decoded pixels. The encoded file must be
+conventional 8-bit baseline or progressive grayscale/RGB, with no EXIF, XMP,
+IPTC, ICC, Adobe, comment, embedded thumbnail, orientation, or unknown
+application segment. A minimal thumbnail-free JFIF header is allowed. This
+deliberately narrow lane makes the exact source a browser-portable, metadata-free
+readability representation.
 
-Manual quarter-turn correction is deliberately separate from derivative
-provenance: the browser applies one constrained Scan-level display value and
-creates any rotated native-share file only in temporary browser memory. It does
-not rewrite either stored representation. See
+Safe sources smaller than 1 MiB are selected directly without invoking the
+lossy encoder. For a safe source of at least 1 MiB, the Worker may generate the
+normal JPEG candidate, but retains it only when it saves both at least 20% and
+at least 256 KiB. A larger or immaterial candidate is discarded and never
+uploaded. Failure of this optional attempt does not fail the Scan.
+
+PNG, WebP, an over-2400 source, or a JPEG outside the direct-safe encoding rules
+requires normalization. The required candidate uses the existing immutable
+`scan-jpeg-v1-2400-q85` contract: applied source orientation, longest edge at
+most 2400 without enlargement, quality 85, white transparency background,
+animation disabled, and metadata omitted. Its type, dimensions, exact byte
+size, SHA-256, and conventional JPEG structure are reverified. Required
+generation failure fails safely before a Scan record is committed.
+
+The source object and any distinct derivative remain private. The normal image
+route resolves the recorded selection transparently; `Open original` always
+returns the exact retained source. Manual quarter-turn correction remains
+presentation metadata and never rewrites either representation. See
 [the Scan orientation policy](scan-orientation.md).
 
-## Optimized-Scan sharing
+## Storage, duplicates, and failures
 
-On capable online browsers, the Song row or viewer can fetch the authenticated
-readability route and pass its exact bytes to the native system share sheet as a
-semantic JPEG file. Its name starts with `Song title — Scanned Lyrics` and adds
-Notebook/Page metadata when present. Multi-Scan Songs always add list position
-so their exported filenames remain distinct. The client accepts only a
-successful private response explicitly marked `readability`, with JPEG type, a
-positive exact length, and a 20 MiB maximum. An original fallback is rejected
-rather than shared.
+A direct Scan stores one R2 object plus its small D1 selection row. A required
+or materially smaller Scan stores the original and one distinct derivative.
+There is no placeholder or same-bytes derivative.
 
-The share payload contains only the file: apart from its semantic filename, it
-adds no title, catalog text, original upload filename, or public URL. The bytes
-are held only for the immediate action. If the fetch makes the browser's user-
-activation window expire, the prepared file remains in viewer memory and a
-second tap completes the share without another download. Canceling the native
-sheet is quiet; unsupported browsers do not show the action, and the action is
-disabled while offline.
+D1 owns the race-safe original fingerprint registry. Exact duplicate detection
+covers every retained Scan original and every derivative that was actually
+kept. Discarding a derivative removes its hash from the duplicate surface; no
+retired-hash tombstone is kept for the pre-user test catalog.
 
-An upload of the exact stored readability JPEG is rejected as a duplicate and
-resolves through immutable derivative provenance to the existing Scan, including
-its normal Trash recovery option. Rotation applied for current-view sharing is
-rendered and JPEG-encoded in the browser, so those bytes differ from the stored
-readability object; the narrow exact-content rule does not attempt perceptual
-matching of that rotated or otherwise re-encoded file.
+Create and replacement upload their necessary objects before one atomic D1
+batch records media, optional derivative, selection, Scan/history, and audit
+state. Cleanup deletes D1 rows only after a failed commit is disproved, then
+removes the unreferenced R2 objects. An ambiguous database response retains
+objects until exact D1 reconciliation shows whether the batch committed.
+Required normalization errors never replace or delete an existing Scan.
 
-## Integrity and replacement
+Historical maintenance uses the same selector after independently hashing and
+fully decoding the retained source. Leases, bounded retry records, and
+privacy-safe error codes remain unchanged. Operational monitoring reports a
+missing selection only for a current Scan, so the one preserved synthetic
+legacy replacement history is not misreported as unfinished current work.
 
-D1 owns a global SHA-256 registry. New media insertion requires a valid hash and
-rejects an existing original fingerprint or exact stored readability hash/size
-inside the database, closing the race left by a preflight-only duplicate check.
-Existing imported equal-content files remain separate historical members and
-are never silently merged. Provenance binds each derivative immutably to the
-exact source media ID, source hash/size, output hash/size/dimensions, policy,
-time, and actor.
+## One-time AppSheet reconciliation
 
-Replacement first prepares and stores both new objects, then atomically records
-the previous current media in immutable history and advances the Scan revision.
-Any storage, conflict, or database failure removes only the uncommitted new
-objects/rows. Originals and historical media have no automatic deletion policy.
+The cleanup is intentionally narrower than a general test-data purge:
 
-## Historical repair
+- preserve all 499 current Scan source objects and all Scan rows;
+- classify every current source with the same policy and record 499 selections;
+- delete only a current derivative whose source qualifies for direct use and
+  whose candidate is not materially smaller;
+- preserve required/material current derivatives;
+- delete exactly the 446 accepted
+  `migration:scan-original-recovery-v1` superseded history rows, their former
+  media/provenance/fingerprint rows, and—only after D1 commits—their former
+  source and derivative R2 objects;
+- preserve the one unrelated synthetic replacement history and all other
+  synthetic staging entities; and
+- preserve without substitution all unresolved current AppSheet-derived
+  sources, applying only the representation-selection policy to them.
 
-The daily Worker schedule processes a small bounded batch. For each source it:
+`scripts/scan-readability-reconciliation.ts` defaults to no mode and exposes
+four explicit phases: `plan`, `apply-d1`, `delete-r2`, and `postflight`. Planning
+freshly reads and hashes every current source/derivative and every object
+proposed for recovery-history deletion, binds the accepted private recovery
+plan, and writes only an ignored private plan. D1 application requires that
+plan's SHA-256, repeats the full live inventory, and runs one guarded
+transaction. It temporarily removes and recreates the history-retention trigger
+inside that transaction. R2 deletion is a separate idempotent phase that cannot
+start until the exact D1 post-state is confirmed. Failure after D1 can therefore
+leak unreferenced private objects but cannot leave D1 pointing to a deleted
+object.
 
-1. acquires an expiring D1 lease so overlapping invocations cannot race;
-2. reads the retained R2 object and verifies type, byte size, and any existing
-   hash;
-3. commits the source fingerprint independently of derivative success;
-4. creates, stores, and verifies derivative provenance; and
-5. clears the lease/failure record on success.
+The expected post-state is 499 current Scans, 500 retained Scan media rows and
+fingerprint members (499 current plus the one preserved synthetic history), one
+history row, 499 selections, and zero foreign-key errors. The derivative count
+and R2 object count depend on the freshly measured number of direct selections.
+Any count, ID, hash, byte-size, policy, or object mismatch aborts before a
+destructive phase.
 
-Failures use bounded codes and a one-day retry delay; catalog identifiers and
-filenames are not logged. A crash leaves the work eligible after lease expiry.
-Once the deterministic derivative object has been stored, an ambiguous D1 batch
-failure deliberately retains it. If the provenance batch committed, the object
-remains available to the committed row; if it did not, the next leased attempt
-overwrites the same private key. Maintenance never deletes that object merely
-because a post-write database response or verification request failed.
-The operational snapshot reports missing hashes/derivatives, failures, and
-expired leases. The repair never writes to `legacy/` or replaces an original.
+## Portable archives and acceptance
 
-Before production cutover, inspect representative portrait/landscape pages,
-small handwriting, high-contrast ink, color annotations, transparency, and
-phone-camera orientation on real Safari/iOS and Chrome/Android. Any policy change
-creates a new policy/version; it must not rewrite immutable provenance in place.
+Source schema `0023` snapshots selection provenance. A direct current Scan has
+one original payload with readability mode `direct` and the same original/read
+path. A selected derivative has distinct original and optimized payloads.
+Replacement history records its own selection when present; the preserved
+pre-policy synthetic history remains explicitly `optimized_legacy` rather than
+being rewritten. Preparing a new archive fails if any current Scan lacks a
+selection.
+
+Automated coverage includes strict JPEG marker handling, no-encoder safe inputs,
+both savings thresholds, required-versus-optional failure, create/replacement
+atomicity, maintenance ambiguity, authenticated view/share behavior, schema
+constraints, guarded reconciliation ordering/scope, duplicate behavior, and
+portable TypeScript/Python round trips. Real-device review should still sample
+portrait/landscape pages, fine handwriting, contrast, color annotation,
+transparency, and phone-camera orientation on Safari/iOS and Chrome/Android
+before production cutover.

@@ -102,11 +102,16 @@ export async function loadOfflineLibrary(database: D1Database) {
         scans.page_label AS pageLabel,
         scans.revision,
         scans.rotation_quarter_turns AS rotationQuarterTurns,
-        CASE WHEN scan_readability_derivatives.source_media_id IS NULL THEN 0 ELSE 1 END
-          AS hasReadabilityDerivative,
+        CASE
+          WHEN scan_readability_selections.source_media_id IS NOT NULL
+            OR scan_readability_derivatives.source_media_id IS NOT NULL
+          THEN 1 ELSE 0
+        END AS hasReadabilityRepresentation,
         media_objects.original_filename AS filename
       FROM scans
       JOIN media_objects ON media_objects.id = scans.media_id
+      LEFT JOIN scan_readability_selections
+        ON scan_readability_selections.source_media_id = media_objects.id
       LEFT JOIN scan_readability_derivatives
         ON scan_readability_derivatives.source_media_id = media_objects.id
       LEFT JOIN notebooks ON notebooks.id = scans.notebook_id
@@ -127,7 +132,7 @@ export async function loadOfflineLibrary(database: D1Database) {
       pageLabel: string | null;
       revision: number;
       rotationQuarterTurns: 0 | 1 | 2 | 3;
-      hasReadabilityDerivative: number;
+      hasReadabilityRepresentation: number;
       filename: string;
     }>(),
     database.prepare(`
@@ -196,7 +201,7 @@ export async function loadOfflineLibrary(database: D1Database) {
     lyricTexts: (lyricsBySong.get(song.id) ?? []).map(withoutSongId),
     scans: (scansBySong.get(song.id) ?? []).map((row) => ({
       ...withoutSongId(row),
-      hasReadabilityDerivative: row.hasReadabilityDerivative === 1,
+      hasReadabilityRepresentation: row.hasReadabilityRepresentation === 1,
     })),
     recordings: (recordingsBySong.get(song.id) ?? []).map((row) => ({
       ...withoutSongId(row),

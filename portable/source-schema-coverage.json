@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "sourceSchema": "0022",
+  "sourceSchema": "0023",
   "tables": {
     "app_users": {
       "treatment": "included_as_historical_actors",
@@ -111,6 +111,10 @@
       "treatment": "included_as_derivative_provenance",
       "includedColumns": ["source_media_id", "source_sha256", "source_byte_size", "mime_type", "byte_size", "sha256", "width", "height", "policy_id", "created_at", "created_by"],
       "serverOnlyColumns": { "object_key": "storage locator used only by authenticated content routing" }
+    },
+    "scan_readability_selections": {
+      "treatment": "included_as_readability_selection_provenance",
+      "includedColumns": ["source_media_id", "source_sha256", "source_byte_size", "source_width", "source_height", "representation_kind", "selection_basis", "candidate_byte_size", "policy_id", "created_at", "created_by"]
     },
     "scans": {
       "treatment": "included_as_song_children",

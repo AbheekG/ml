@@ -26,8 +26,11 @@ const recordingUploadFileIdentityMigration = readFileSync(resolve("migrations/00
 const canonicalRecordingDatesMigration = readFileSync(resolve("migrations/0020_canonical_recording_dates.sql"), "utf8");
 const portableExportsMigration = readFileSync(resolve("migrations/0021_portable_exports.sql"), "utf8");
 const portableExportItemChunksMigration = readFileSync(resolve("migrations/0022_portable_export_item_chunks.sql"), "utf8");
+const scanReadabilitySelectionMigration = readFileSync(resolve("migrations/0023_scan_readability_selection.sql"), "utf8");
 const migrationThroughPortableExports = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}\n${playbackDuplicateDetectionMigration}\n${scanReadabilityDuplicateDetectionMigration}\n${indiaRecordingCalendarMigration}\n${recordingUploadFileIdentityMigration}\n${canonicalRecordingDatesMigration}\n${portableExportsMigration}`;
-const migration = `${migrationThroughPortableExports}\n${portableExportItemChunksMigration}`;
+const migrationBeforeReadabilitySelection =
+  `${migrationThroughPortableExports}\n${portableExportItemChunksMigration}`;
+const migration = `${migrationBeforeReadabilitySelection}\n${scanReadabilitySelectionMigration}`;
 const sqliteTestPreamble = "PRAGMA legacy_alter_table = OFF;";
 const timestamp = "2026-07-12T00:00:00.000Z";
 
@@ -46,6 +49,14 @@ function migratePortableExportItemChunks(
   return execFileSync("sqlite3", [":memory:"], {
     encoding: "utf8",
     input: `${sqliteTestPreamble}\n${migrationThroughPortableExports}\n${beforeMigration}\n${portableExportItemChunksMigration}\n${afterMigration}`,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
+function migrateReadabilitySelection(beforeMigration: string, afterMigration: string): string {
+  return execFileSync("sqlite3", [":memory:"], {
+    encoding: "utf8",
+    input: `${sqliteTestPreamble}\n${migrationBeforeReadabilitySelection}\n${beforeMigration}\n${scanReadabilitySelectionMigration}\n${afterMigration}`,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -140,7 +151,20 @@ describe("initial database schema", () => {
     expect(output).toBe("0021|ready|1|0\n2|10\n");
   });
 
-  it("rejects unknown portable source-schema versions", () => {
+  it("accepts schema 0023 and rejects unknown portable source-schema versions", () => {
+    expect(() => runSql(`
+      INSERT INTO portable_export_sessions (
+        id, profile_version, client_mutation_id, request_fingerprint, state,
+        source_schema_version, source_commit, source_environment,
+        snapshot_at, created_at, created_by, expires_at,
+        failed_at, failure_code
+      ) VALUES (
+        '${"2".repeat(32)}', '1.0.0', 'current-plan', '${"b".repeat(64)}',
+        'failed', '0023', 'local-development', 'synthetic',
+        '${timestamp}', '${timestamp}', 'test', '2026-07-13T00:00:00.000Z',
+        '${timestamp}', 'snapshot_execution_failed'
+      );
+    `)).not.toThrow();
     expect(() => runSql(`
       INSERT INTO portable_export_sessions (
         id, profile_version, client_mutation_id, request_fingerprint, state,
@@ -149,7 +173,7 @@ describe("initial database schema", () => {
         failed_at, failure_code
       ) VALUES (
         '${"1".repeat(32)}', '1.0.0', 'future-plan', '${"a".repeat(64)}',
-        'failed', '0023', 'local-development', 'synthetic',
+        'failed', '0024', 'local-development', 'synthetic',
         '${timestamp}', '${timestamp}', 'test', '2026-07-13T00:00:00.000Z',
         '${timestamp}', 'snapshot_execution_failed'
       );
@@ -1702,5 +1726,195 @@ describe("initial database schema", () => {
       );
       UPDATE scan_readability_derivatives SET width = 1199 WHERE source_media_id = 'scan-media-1';
     `)).toThrow(/scan_readability_provenance_is_immutable/);
+  });
+
+  it("records a direct readability source without a duplicate derivative payload", () => {
+    const output = runSql(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', 'scans/scan-media-1.jpg', 'one.jpg', 'image/jpeg', 400,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO scan_readability_selections (
+        source_media_id, source_sha256, source_byte_size,
+        source_width, source_height, representation_kind, selection_basis,
+        candidate_byte_size, policy_id, created_at, created_by
+      ) VALUES (
+        'scan-media-1', '${"a".repeat(64)}', 400, 1200, 900,
+        'source', 'direct_safe_source', NULL, 'scan-readability-selection-v2',
+        '${timestamp}', 'test'
+      );
+      SELECT
+        (SELECT count(*) FROM scan_readability_selections) || '|' ||
+        (SELECT count(*) FROM scan_readability_derivatives);
+    `);
+    expect(output).toBe("1|0\n");
+  });
+
+  it("requires exact immutable derivative provenance for a derivative selection", () => {
+    expect(() => runSql(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', 'scans/scan-media-1.png', 'one.png', 'image/png', 400,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO scan_readability_selections (
+        source_media_id, source_sha256, source_byte_size,
+        source_width, source_height, representation_kind, selection_basis,
+        candidate_byte_size, policy_id, created_at, created_by
+      ) VALUES (
+        'scan-media-1', '${"a".repeat(64)}', 400, 1200, 900,
+        'derivative', 'required_normalization', 300, 'scan-readability-selection-v2',
+        '${timestamp}', 'test'
+      );
+    `)).toThrow(/invalid_scan_readability_selection/);
+
+    expect(() => runSql(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', 'scans/scan-media-1.jpg', 'one.jpg', 'image/jpeg', 400,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO scan_readability_selections (
+        source_media_id, source_sha256, source_byte_size,
+        source_width, source_height, representation_kind, selection_basis,
+        candidate_byte_size, policy_id, created_at, created_by
+      ) VALUES (
+        'scan-media-1', '${"a".repeat(64)}', 400, 1200, 900,
+        'source', 'direct_safe_source', NULL, 'scan-readability-selection-v2',
+        '${timestamp}', 'test'
+      );
+      UPDATE scan_readability_selections
+      SET source_width = 1199 WHERE source_media_id = 'scan-media-1';
+    `)).toThrow(/scan_readability_selection_is_immutable/);
+  });
+
+  it("enforces optional savings and retains a selected derivative row", () => {
+    expect(() => runSql(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', 'scans/scan-media-1.jpg', 'one.jpg', 'image/jpeg',
+        1500000, '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO scan_readability_derivatives (
+        source_media_id, source_sha256, source_byte_size, object_key,
+        mime_type, byte_size, sha256, width, height, policy_id,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', '${"a".repeat(64)}', 1500000,
+        'scans/readability/scan-media-1.jpg', 'image/jpeg', 1300000,
+        '${"b".repeat(64)}', 1200, 900, 'scan-jpeg-v1-2400-q85',
+        '${timestamp}', 'test'
+      );
+      INSERT INTO scan_readability_selections (
+        source_media_id, source_sha256, source_byte_size,
+        source_width, source_height, representation_kind, selection_basis,
+        candidate_byte_size, policy_id, created_at, created_by
+      ) VALUES (
+        'scan-media-1', '${"a".repeat(64)}', 1500000, 1200, 900,
+        'derivative', 'optional_material_savings', 1300000,
+        'scan-readability-selection-v2', '${timestamp}', 'test'
+      );
+    `)).toThrow(/CHECK constraint failed/);
+
+    expect(() => runSql(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', 'scans/scan-media-1.png', 'one.png', 'image/png',
+        400, '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO scan_readability_derivatives (
+        source_media_id, source_sha256, source_byte_size, object_key,
+        mime_type, byte_size, sha256, width, height, policy_id,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', '${"a".repeat(64)}', 400,
+        'scans/readability/scan-media-1.jpg', 'image/jpeg', 300,
+        '${"b".repeat(64)}', 1200, 900, 'scan-jpeg-v1-2400-q85',
+        '${timestamp}', 'test'
+      );
+      INSERT INTO scan_readability_selections (
+        source_media_id, source_sha256, source_byte_size,
+        source_width, source_height, representation_kind, selection_basis,
+        candidate_byte_size, policy_id, created_at, created_by
+      ) VALUES (
+        'scan-media-1', '${"a".repeat(64)}', 400, 1200, 900,
+        'derivative', 'required_normalization', 300,
+        'scan-readability-selection-v2', '${timestamp}', 'test'
+      );
+      DELETE FROM scan_readability_derivatives
+      WHERE source_media_id = 'scan-media-1';
+    `)).toThrow(/selected_scan_readability_derivative_is_retained/);
+  });
+
+  it("keeps historical derivative provenance valid without rewriting or backfilling it", () => {
+    const output = migrateReadabilitySelection(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', 'scans/scan-media-1.png', 'one.png', 'image/png', 400,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO scan_readability_derivatives (
+        source_media_id, source_sha256, source_byte_size, object_key,
+        mime_type, byte_size, sha256, width, height, policy_id,
+        created_at, created_by
+      ) VALUES (
+        'scan-media-1', '${"a".repeat(64)}', 400,
+        'scans/readability/scan-media-1.jpg', 'image/jpeg', 300,
+        '${"b".repeat(64)}', 1200, 900, 'scan-jpeg-v1-2400-q85',
+        '${timestamp}', 'test'
+      );
+    `, `
+      SELECT
+        (SELECT count(*) FROM scan_readability_derivatives) || '|' ||
+        (SELECT count(*) FROM scan_readability_selections);
+    `);
+    expect(output).toBe("1|0\n");
+  });
+
+  it("preserves schema-0022 export audit/detail while enabling schema 0023 records", () => {
+    const output = migrateReadabilitySelection(`
+      INSERT INTO portable_export_sessions (
+        id, profile_version, client_mutation_id, request_fingerprint, state,
+        source_schema_version, source_commit, source_environment,
+        snapshot_at, created_at, created_by, expires_at,
+        failed_at, failure_code
+      ) VALUES (
+        '${"1".repeat(32)}', '1.0.0', 'old-plan', '${"a".repeat(64)}',
+        'failed', '0022', 'local-development', 'synthetic',
+        '${timestamp}', '${timestamp}', 'test', '2026-07-13T00:00:00.000Z',
+        '${timestamp}', 'snapshot_execution_failed'
+      );
+    `, `
+      INSERT INTO portable_export_sessions (
+        id, profile_version, client_mutation_id, request_fingerprint, state,
+        source_schema_version, source_commit, source_environment,
+        snapshot_at, created_at, created_by, expires_at,
+        failed_at, failure_code
+      ) VALUES (
+        '${"2".repeat(32)}', '1.0.0', 'new-plan', '${"b".repeat(64)}',
+        'failed', '0023', 'local-development', 'synthetic',
+        '${timestamp}', '${timestamp}', 'test', '2026-07-13T00:00:00.000Z',
+        '${timestamp}', 'snapshot_execution_failed'
+      );
+      SELECT
+        (SELECT COUNT(*) FROM portable_export_sessions) || '|' ||
+        (SELECT COUNT(*) FROM sqlite_master
+          WHERE type = 'trigger' AND name LIKE '%portable_export%') || '|' ||
+        (SELECT COUNT(*) FROM pragma_foreign_key_check);
+    `);
+    expect(output).toBe("2|10|0\n");
   });
 });

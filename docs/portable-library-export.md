@@ -5,8 +5,10 @@ standard-library Python builder/verifier/inspector/local restore, and
 synthetic/adversarial/round-trip coverage are implemented. Migrations through
 `0022`, the Worker/client, a real authenticated plan, private kit download,
 bounded media/range verification, revocation, and derived-detail cleanup are
-accepted in protected staging; only the full local archive remains manual
-acceptance. This record does
+accepted in protected staging, and the complete local archive was subsequently
+accepted. Source schema `0023` adds Scan readability-selection provenance and
+direct-source export semantics; its protected-staging rollout is recorded only
+after the separate guarded Scan reconciliation succeeds. This record does
 not authorize a production/DNS change, a catalog or media mutation, an R2 write
 or deletion, a legacy change, or a full-cloud import feature.
 
@@ -71,8 +73,8 @@ The major choices are:
   provenance, replacement history, media fingerprints, and derivative
   provenance;
 - include every durable `media_objects` object and every registered Scan
-  readability derivative, even when a durable media row is not currently
-  attached to a Song;
+  readability derivative that is actually retained, even when a durable media
+  row is not currently attached to a Song;
 - do not include abandoned multipart-upload bytes or other unregistered R2
   objects merely because they remain in the bucket;
 - never duplicate a Recording's bytes merely to label one relationship
@@ -168,7 +170,8 @@ check, not permission to expose raw SQL rows or internal storage identifiers:
 | `scans`, `recordings`, `recording_credits` | nested children, Trash/state/audit fields, and representation relationships |
 | `media_objects` | one durable representation record and one verified payload object per durable stored identity |
 | `audio_derivatives` | immutable optimized-audio provenance and source/output relationship |
-| `scan_readability_derivatives` | immutable optimized-Scan provenance and source/output relationship |
+| `scan_readability_derivatives` | immutable provenance for a distinct optimized Scan representation that is actually retained |
+| `scan_readability_selections` | immutable direct-versus-derivative choice, source dimensions, basis, policy, and audit provenance |
 | `scan_media_history`, `recording_media_history` | immutable replacement history |
 | `scan_fingerprints`, `scan_fingerprint_members` | portable canonical/member/historical-duplicate annotations; derived index structure need not be copied literally |
 | `media_parent_moves` | immutable relationship history |
@@ -644,10 +647,13 @@ metadata, never infer it from the word `optimized`.
 
 ### Scans
 
-A Scan original is always included. A registered readability JPEG is included
-once as `optimized` and linked to its exact source and policy. If a Scan has no
-registered readability derivative, no optimized placeholder is created; the
-metadata says the readable representation falls back to the original.
+A Scan original is always included. A `direct` selection points readability to
+that one original payload and creates no optimized item or placeholder. An
+`optimized` selection includes the distinct registered readability JPEG once
+and links it to its exact source and policy. A pre-policy historical
+relationship may explicitly say `optimized_legacy` or `original_fallback`;
+schema `0023` does not invent or rewrite its provenance. Every current Scan must
+have a selection before a new export plan can become ready.
 
 Browser-only quarter-turn display state is metadata. The builder does not rotate
 or re-encode either representation.

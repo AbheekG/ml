@@ -49,10 +49,11 @@ import {
 } from "./media-upload";
 import { encodeRfc5987Filename } from "./filename-safety";
 import {
-  createScanReadabilityDerivative,
   scanReadabilityObjectKey,
+  selectScanReadabilityRepresentation,
   ScanReadabilityError,
   type ScanReadabilityDerivative,
+  type ScanReadabilitySelection,
 } from "./scan-readability";
 import {
   parseScanCreate,
@@ -575,10 +576,12 @@ async function reuseHistoricalScanMedia(
 async function removeUncommittedScanObjects(
   media: R2Bucket,
   originalObjectKey: string,
-  readabilityObjectKey: string,
+  readabilityObjectKey: string | null,
 ): Promise<void> {
   try {
-    await media.delete([originalObjectKey, readabilityObjectKey]);
+    await media.delete(readabilityObjectKey
+      ? [originalObjectKey, readabilityObjectKey]
+      : originalObjectKey);
   } catch {
     console.error("Failed to remove uncommitted Scan objects");
   }
@@ -587,6 +590,9 @@ async function removeUncommittedScanObjects(
 async function removeUncommittedScanRows(database: D1Database, mediaId: string): Promise<boolean> {
   try {
     await database.batch([
+      database.prepare(`
+        DELETE FROM scan_readability_selections WHERE source_media_id = ?
+      `).bind(mediaId),
       database.prepare(`
         DELETE FROM scan_readability_derivatives WHERE source_media_id = ?
       `).bind(mediaId),
@@ -603,9 +609,19 @@ async function removeUncommittedScanRows(database: D1Database, mediaId: string):
         EXISTS (
           SELECT 1 FROM scan_readability_derivatives
           WHERE source_media_id = ?
-        ) AS derivativeExists
-    `).bind(mediaId, mediaId).first<{ mediaExists: number; derivativeExists: number }>();
-    return retained?.mediaExists === 0 && retained.derivativeExists === 0;
+        ) AS derivativeExists,
+        EXISTS (
+          SELECT 1 FROM scan_readability_selections
+          WHERE source_media_id = ?
+        ) AS selectionExists
+    `).bind(mediaId, mediaId, mediaId).first<{
+      mediaExists: number;
+      derivativeExists: number;
+      selectionExists: number;
+    }>();
+    return retained?.mediaExists === 0
+      && retained.derivativeExists === 0
+      && retained.selectionExists === 0;
   } catch {
     console.error("Retaining Scan objects because D1 cleanup could not be verified");
     return false;
@@ -617,10 +633,40 @@ async function removeUncommittedScanResources(
   media: R2Bucket,
   mediaId: string,
   originalObjectKey: string,
-  readabilityObjectKey: string,
+  readabilityObjectKey: string | null,
 ): Promise<void> {
   if (!await removeUncommittedScanRows(database, mediaId)) return;
   await removeUncommittedScanObjects(media, originalObjectKey, readabilityObjectKey);
+}
+
+function scanReadabilitySelectionInsert(
+  database: D1Database,
+  mediaId: string,
+  sourceSha256: string,
+  sourceByteSize: number,
+  selection: ScanReadabilitySelection,
+  timestamp: string,
+  actor: string,
+): D1PreparedStatement {
+  return database.prepare(`
+    INSERT INTO scan_readability_selections (
+      source_media_id, source_sha256, source_byte_size,
+      source_width, source_height, representation_kind, selection_basis,
+      candidate_byte_size, policy_id, created_at, created_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    mediaId,
+    sourceSha256,
+    sourceByteSize,
+    selection.sourceWidth,
+    selection.sourceHeight,
+    selection.representationKind,
+    selection.selectionBasis,
+    selection.candidateByteSize,
+    selection.policyId,
+    timestamp,
+    actor,
+  );
 }
 
 function scanReadabilityInsert(
@@ -4555,9 +4601,13 @@ app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
     }, 409);
   }
 
-  let readability: ScanReadabilityDerivative;
+  let readability: ScanReadabilitySelection;
   try {
-    readability = await createScanReadabilityDerivative(context.env.IMAGES, bytes);
+    readability = await selectScanReadabilityRepresentation(
+      context.env.IMAGES,
+      bytes,
+      imageType.mimeType,
+    );
   } catch (error) {
     const mapped = scanReadabilityError(error);
     return context.json({ error: mapped.error }, mapped.status);
@@ -4566,33 +4616,38 @@ app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
   const scanId = crypto.randomUUID();
   const mediaId = crypto.randomUUID();
   const objectKey = `scans/${mediaId}.${imageType.extension}`;
-  const readabilityObjectKey = scanReadabilityObjectKey(mediaId);
+  const readabilityObjectKey = readability.derivative
+    ? scanReadabilityObjectKey(mediaId)
+    : null;
   const filename = safeUploadFilename(fileValue.name, imageType.extension);
   const timestamp = new Date().toISOString();
   const actor = context.get("appUser").identity;
 
   try {
-    await Promise.all([
+    const writes = [
       context.env.MEDIA.put(objectKey, bytes, {
         httpMetadata: {
           contentType: imageType.mimeType,
           contentDisposition: "inline",
         },
       }),
-      context.env.MEDIA.put(readabilityObjectKey, readability.bytes, {
+    ];
+    if (readability.derivative && readabilityObjectKey) {
+      writes.push(context.env.MEDIA.put(readabilityObjectKey, readability.derivative.bytes, {
         httpMetadata: {
-          contentType: readability.mimeType,
+          contentType: readability.derivative.mimeType,
           contentDisposition: "inline",
         },
-      }),
-    ]);
+      }));
+    }
+    await Promise.all(writes);
   } catch {
     await removeUncommittedScanObjects(context.env.MEDIA, objectKey, readabilityObjectKey);
     return context.json({ error: "scan_storage_failed" }, 503);
   }
 
   try {
-    const results = await context.env.DB.batch([
+    const statements: D1PreparedStatement[] = [
       context.env.DB.prepare(`
         INSERT INTO media_objects (
           id, object_key, original_filename, mime_type, byte_size, sha256,
@@ -4602,17 +4657,30 @@ app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
         mediaId, objectKey, filename, imageType.mimeType, bytes.byteLength, fingerprint,
         timestamp, actor,
       ),
-      scanReadabilityInsert(
+    ];
+    if (readability.derivative && readabilityObjectKey) {
+      statements.push(scanReadabilityInsert(
         context.env.DB,
         mediaId,
         fingerprint,
         bytes.byteLength,
         readabilityObjectKey,
-        readability,
+        readability.derivative,
         timestamp,
         actor,
-      ),
-      context.env.DB.prepare(`
+      ));
+    }
+    statements.push(scanReadabilitySelectionInsert(
+      context.env.DB,
+      mediaId,
+      fingerprint,
+      bytes.byteLength,
+      readability,
+      timestamp,
+      actor,
+    ));
+    const scanInsertIndex = statements.length;
+    statements.push(context.env.DB.prepare(`
         INSERT INTO scans (
           id, song_id, media_id, notebook_id, page_label, revision,
           created_at, created_by, updated_at, updated_by
@@ -4623,15 +4691,16 @@ app.post("/api/songs/:songId/scans", requireRole("editor"), async (context) => {
       `).bind(
         scanId, mediaId, parsed.data.notebookId, parsed.data.pageLabel,
         timestamp, actor, timestamp, actor, songId,
-      ),
-      context.env.DB.prepare(`
+      ));
+    statements.push(context.env.DB.prepare(`
         UPDATE songs
         SET updated_at = ?, updated_by = ?
         WHERE id = ? AND trashed_at IS NULL
           AND EXISTS (SELECT 1 FROM scans WHERE id = ? AND song_id = songs.id)
       `).bind(timestamp, actor, songId, scanId),
-    ]);
-    if (results[2].meta.changes === 0) {
+    );
+    const results = await context.env.DB.batch(statements);
+    if (results[scanInsertIndex]?.meta.changes === 0) {
       await removeUncommittedScanResources(
         context.env.DB, context.env.MEDIA, mediaId, objectKey, readabilityObjectKey,
       );
@@ -5167,9 +5236,13 @@ app.post("/api/songs/:songId/scans/:scanId/media", requireRole("editor"), async 
     }, 409);
   }
 
-  let readability: ScanReadabilityDerivative;
+  let readability: ScanReadabilitySelection;
   try {
-    readability = await createScanReadabilityDerivative(context.env.IMAGES, bytes);
+    readability = await selectScanReadabilityRepresentation(
+      context.env.IMAGES,
+      bytes,
+      imageType.mimeType,
+    );
   } catch (error) {
     const mapped = scanReadabilityError(error);
     return context.json({ error: mapped.error }, mapped.status);
@@ -5178,32 +5251,37 @@ app.post("/api/songs/:songId/scans/:scanId/media", requireRole("editor"), async 
   const mediaId = crypto.randomUUID();
   const historyId = crypto.randomUUID();
   const objectKey = `scans/${mediaId}.${imageType.extension}`;
-  const readabilityObjectKey = scanReadabilityObjectKey(mediaId);
+  const readabilityObjectKey = readability.derivative
+    ? scanReadabilityObjectKey(mediaId)
+    : null;
   const filename = safeUploadFilename(fileValue.name, imageType.extension);
   const timestamp = new Date().toISOString();
 
   try {
-    await Promise.all([
+    const writes = [
       context.env.MEDIA.put(objectKey, bytes, {
         httpMetadata: {
           contentType: imageType.mimeType,
           contentDisposition: "inline",
         },
       }),
-      context.env.MEDIA.put(readabilityObjectKey, readability.bytes, {
+    ];
+    if (readability.derivative && readabilityObjectKey) {
+      writes.push(context.env.MEDIA.put(readabilityObjectKey, readability.derivative.bytes, {
         httpMetadata: {
-          contentType: readability.mimeType,
+          contentType: readability.derivative.mimeType,
           contentDisposition: "inline",
         },
-      }),
-    ]);
+      }));
+    }
+    await Promise.all(writes);
   } catch {
     await removeUncommittedScanObjects(context.env.MEDIA, objectKey, readabilityObjectKey);
     return context.json({ error: "scan_storage_failed" }, 503);
   }
 
   try {
-    const results = await context.env.DB.batch([
+    const statements: D1PreparedStatement[] = [
       context.env.DB.prepare(`
         INSERT INTO media_objects (
           id, object_key, original_filename, mime_type, byte_size, sha256,
@@ -5213,39 +5291,53 @@ app.post("/api/songs/:songId/scans/:scanId/media", requireRole("editor"), async 
         mediaId, objectKey, filename, imageType.mimeType, bytes.byteLength, fingerprint,
         timestamp, actor,
       ),
-      scanReadabilityInsert(
+    ];
+    if (readability.derivative && readabilityObjectKey) {
+      statements.push(scanReadabilityInsert(
         context.env.DB,
         mediaId,
         fingerprint,
         bytes.byteLength,
         readabilityObjectKey,
-        readability,
+        readability.derivative,
         timestamp,
         actor,
-      ),
-      context.env.DB.prepare(`
+      ));
+    }
+    statements.push(scanReadabilitySelectionInsert(
+      context.env.DB,
+      mediaId,
+      fingerprint,
+      bytes.byteLength,
+      readability,
+      timestamp,
+      actor,
+    ));
+    statements.push(context.env.DB.prepare(`
         INSERT INTO scan_media_history (
           id, scan_id, media_id, replaced_at, replaced_by, revision_at_replacement
         )
         SELECT ?, id, media_id, ?, ?, revision
         FROM scans
         WHERE id = ? AND song_id = ? AND revision = ? AND trashed_at IS NULL
-      `).bind(historyId, timestamp, actor, scanId, songId, parsed.data.revision),
-      context.env.DB.prepare(`
+      `).bind(historyId, timestamp, actor, scanId, songId, parsed.data.revision));
+    const scanUpdateIndex = statements.length;
+    statements.push(context.env.DB.prepare(`
         UPDATE scans
         SET media_id = ?, rotation_quarter_turns = 0,
             revision = revision + 1, updated_at = ?, updated_by = ?
         WHERE id = ? AND song_id = ? AND revision = ? AND trashed_at IS NULL
           AND EXISTS (SELECT 1 FROM songs WHERE id = ? AND trashed_at IS NULL)
-      `).bind(mediaId, timestamp, actor, scanId, songId, parsed.data.revision, songId),
-      context.env.DB.prepare(`
+      `).bind(mediaId, timestamp, actor, scanId, songId, parsed.data.revision, songId));
+    statements.push(context.env.DB.prepare(`
         UPDATE songs
         SET updated_at = ?, updated_by = ?
         WHERE id = ? AND trashed_at IS NULL
           AND EXISTS (SELECT 1 FROM scans WHERE id = ? AND song_id = songs.id)
       `).bind(timestamp, actor, songId, scanId),
-    ]);
-    if (results[3].meta.changes === 0) {
+    );
+    const results = await context.env.DB.batch(statements);
+    if (results[scanUpdateIndex]?.meta.changes === 0) {
       await removeUncommittedScanResources(
         context.env.DB, context.env.MEDIA, mediaId, objectKey, readabilityObjectKey,
       );
@@ -6258,11 +6350,16 @@ app.get("/api/songs/:songId", async (context) => {
         scans.page_label AS pageLabel,
         scans.revision,
         scans.rotation_quarter_turns AS rotationQuarterTurns,
-        CASE WHEN scan_readability_derivatives.source_media_id IS NULL THEN 0 ELSE 1 END
-          AS hasReadabilityDerivative,
+        CASE
+          WHEN scan_readability_selections.source_media_id IS NOT NULL
+            OR scan_readability_derivatives.source_media_id IS NOT NULL
+          THEN 1 ELSE 0
+        END AS hasReadabilityRepresentation,
         media_objects.original_filename AS filename
       FROM scans
       JOIN media_objects ON media_objects.id = scans.media_id
+      LEFT JOIN scan_readability_selections
+        ON scan_readability_selections.source_media_id = media_objects.id
       LEFT JOIN scan_readability_derivatives
         ON scan_readability_derivatives.source_media_id = media_objects.id
       LEFT JOIN notebooks ON notebooks.id = scans.notebook_id
@@ -6282,7 +6379,7 @@ app.get("/api/songs/:songId", async (context) => {
       pageLabel: string | null;
       revision: number;
       rotationQuarterTurns: 0 | 1 | 2 | 3;
-      hasReadabilityDerivative: number;
+      hasReadabilityRepresentation: number;
       filename: string;
     }>(),
     context.env.DB.prepare(`
@@ -6349,7 +6446,7 @@ app.get("/api/songs/:songId", async (context) => {
       lyricTexts: lyricTexts.results,
       scans: scans.results.map((scan) => ({
         ...scan,
-        hasReadabilityDerivative: scan.hasReadabilityDerivative === 1,
+        hasReadabilityRepresentation: scan.hasReadabilityRepresentation === 1,
       })),
       recordings: recordings.results.map((recording) => ({
         ...recording,
@@ -6363,16 +6460,31 @@ app.get("/api/songs/:songId", async (context) => {
 app.get("/api/scans/:scanId/image", async (context) => {
   const scan = await context.env.DB.prepare(`
     SELECT
-      COALESCE(scan_readability_derivatives.object_key, media_objects.object_key) AS objectKey,
       CASE
-        WHEN scan_readability_derivatives.source_media_id IS NULL THEN media_objects.mime_type
-        ELSE scan_readability_derivatives.mime_type
+        WHEN scan_readability_selections.representation_kind = 'source'
+          THEN media_objects.object_key
+        WHEN scan_readability_derivatives.source_media_id IS NOT NULL
+          THEN scan_readability_derivatives.object_key
+        ELSE media_objects.object_key
+      END AS objectKey,
+      CASE
+        WHEN scan_readability_selections.representation_kind = 'source'
+          THEN media_objects.mime_type
+        WHEN scan_readability_derivatives.source_media_id IS NOT NULL
+          THEN scan_readability_derivatives.mime_type
+        ELSE media_objects.mime_type
       END AS mimeType,
       media_objects.original_filename AS filename,
-      CASE WHEN scan_readability_derivatives.source_media_id IS NULL THEN 0 ELSE 1 END AS isDerivative
+      CASE
+        WHEN scan_readability_selections.representation_kind = 'source' THEN 'direct'
+        WHEN scan_readability_derivatives.source_media_id IS NOT NULL THEN 'derivative'
+        ELSE 'fallback'
+      END AS representationKind
     FROM scans
     JOIN songs ON songs.id = scans.song_id
     JOIN media_objects ON media_objects.id = scans.media_id
+    LEFT JOIN scan_readability_selections
+      ON scan_readability_selections.source_media_id = media_objects.id
     LEFT JOIN scan_readability_derivatives
       ON scan_readability_derivatives.source_media_id = media_objects.id
     WHERE scans.id = ?
@@ -6383,7 +6495,7 @@ app.get("/api/scans/:scanId/image", async (context) => {
     objectKey: string;
     mimeType: string | null;
     filename: string;
-    isDerivative: number;
+    representationKind: "direct" | "derivative" | "fallback";
   }>();
   if (!scan) return context.json({ error: "scan_not_found" }, 404);
 
@@ -6400,7 +6512,11 @@ app.get("/api/scans/:scanId/image", async (context) => {
   headers.set("Content-Length", String(object.size));
   headers.set("Cache-Control", "private, no-store");
   headers.set("ETag", object.httpEtag);
-  headers.set("X-Scan-Representation", scan.isDerivative === 1 ? "readability" : "original");
+  headers.set(
+    "X-Scan-Representation",
+    scan.representationKind === "fallback" ? "original" : "readability",
+  );
+  headers.set("X-Scan-Readability-Source", scan.representationKind);
   return new Response(object.body, { headers });
 });
 
@@ -6547,6 +6663,7 @@ type PendingScanMaintenanceRow = {
   objectKey: string;
   byteSize: number;
   sha256: string | null;
+  readabilityComplete: number;
 };
 
 type ScanMaintenanceStage = "source_read" | "source_verify" | "derivative" | "commit";
@@ -6580,8 +6697,15 @@ async function pendingScanMaintenance(database: D1Database): Promise<PendingScan
       media_objects.id AS mediaId,
       media_objects.object_key AS objectKey,
       media_objects.byte_size AS byteSize,
-      media_objects.sha256
+      media_objects.sha256,
+      CASE
+        WHEN scan_readability_selections.source_media_id IS NOT NULL
+          OR scan_readability_derivatives.source_media_id IS NOT NULL
+        THEN 1 ELSE 0
+      END AS readabilityComplete
     FROM media_objects
+    LEFT JOIN scan_readability_selections
+      ON scan_readability_selections.source_media_id = media_objects.id
     LEFT JOIN scan_readability_derivatives
       ON scan_readability_derivatives.source_media_id = media_objects.id
     LEFT JOIN scan_maintenance_failures
@@ -6592,7 +6716,10 @@ async function pendingScanMaintenance(database: D1Database): Promise<PendingScan
     WHERE media_objects.kind = 'scan'
       AND (
         media_objects.sha256 IS NULL
-        OR scan_readability_derivatives.source_media_id IS NULL
+        OR (
+          scan_readability_selections.source_media_id IS NULL
+          AND scan_readability_derivatives.source_media_id IS NULL
+        )
       )
       AND (
         scan_maintenance_failures.media_id IS NULL
@@ -6706,7 +6833,8 @@ async function processClaimedScan(
     await recordScanMaintenanceFailure(env.DB, pending.mediaId, "source_read", "source_read_failed");
     return "failed";
   }
-  if (sourceBytes.byteLength !== pending.byteSize || !inspectScanImage(sourceBytes)) {
+  const imageType = inspectScanImage(sourceBytes);
+  if (sourceBytes.byteLength !== pending.byteSize || !imageType) {
     await recordScanMaintenanceFailure(env.DB, pending.mediaId, "source_verify", "source_precondition_failed");
     return "failed";
   }
@@ -6720,10 +6848,20 @@ async function processClaimedScan(
     await recordScanMaintenanceFailure(env.DB, pending.mediaId, "commit", "scan_fingerprint_commit_failed");
     return "failed";
   }
+  if (pending.readabilityComplete === 1) {
+    await env.DB.prepare(`
+      DELETE FROM scan_maintenance_failures WHERE media_id = ?
+    `).bind(pending.mediaId).run().catch(() => undefined);
+    return "processed";
+  }
 
-  let readability: ScanReadabilityDerivative;
+  let readability: ScanReadabilitySelection;
   try {
-    readability = await createScanReadabilityDerivative(env.IMAGES, sourceBytes);
+    readability = await selectScanReadabilityRepresentation(
+      env.IMAGES,
+      sourceBytes,
+      imageType.mimeType,
+    );
   } catch (error) {
     const code = error instanceof ScanReadabilityError
       ? error.code
@@ -6732,34 +6870,51 @@ async function processClaimedScan(
     return "failed";
   }
 
-  const readabilityObjectKey = scanReadabilityObjectKey(pending.mediaId);
-  try {
-    await env.MEDIA.put(readabilityObjectKey, readability.bytes, {
-      httpMetadata: {
-        contentType: readability.mimeType,
-        contentDisposition: "inline",
-      },
-    });
-  } catch {
-    await recordScanMaintenanceFailure(env.DB, pending.mediaId, "derivative", "derivative_storage_failed");
-    return "failed";
+  const readabilityObjectKey = readability.derivative
+    ? scanReadabilityObjectKey(pending.mediaId)
+    : null;
+  if (readability.derivative && readabilityObjectKey) {
+    try {
+      await env.MEDIA.put(readabilityObjectKey, readability.derivative.bytes, {
+        httpMetadata: {
+          contentType: readability.derivative.mimeType,
+          contentDisposition: "inline",
+        },
+      });
+    } catch {
+      await recordScanMaintenanceFailure(env.DB, pending.mediaId, "derivative", "derivative_storage_failed");
+      return "failed";
+    }
   }
 
   const timestamp = new Date().toISOString();
   try {
-    await env.DB.batch([
-      scanReadabilityInsert(
+    const statements: D1PreparedStatement[] = [];
+    if (readability.derivative && readabilityObjectKey) {
+      statements.push(scanReadabilityInsert(
         env.DB,
         pending.mediaId,
         sourceSha256,
         pending.byteSize,
         readabilityObjectKey,
+        readability.derivative,
+        timestamp,
+        "system:scan-maintenance",
+      ));
+    }
+    statements.push(
+      scanReadabilitySelectionInsert(
+        env.DB,
+        pending.mediaId,
+        sourceSha256,
+        pending.byteSize,
         readability,
         timestamp,
         "system:scan-maintenance",
       ),
       env.DB.prepare(`DELETE FROM scan_maintenance_failures WHERE media_id = ?`).bind(pending.mediaId),
-    ]);
+    );
+    await env.DB.batch(statements);
   } catch {
     // A D1 failure can be an ambiguous response after the batch committed. Keep
     // the deterministic private object: deleting it here could remove a
@@ -6767,28 +6922,53 @@ async function processClaimedScan(
     // not commit, the next maintenance attempt safely overwrites the same key.
     const committed = await env.DB.prepare(`
       SELECT 1 AS valid
-      FROM scan_readability_derivatives
-      WHERE source_media_id = ?
-        AND source_sha256 = ?
-        AND source_byte_size = ?
-        AND object_key = ?
-        AND mime_type = ?
-        AND byte_size = ?
-        AND sha256 = ?
-        AND width = ?
-        AND height = ?
-        AND policy_id = ?
+      FROM scan_readability_selections
+      LEFT JOIN scan_readability_derivatives
+        ON scan_readability_derivatives.source_media_id =
+          scan_readability_selections.source_media_id
+      WHERE scan_readability_selections.source_media_id = ?
+        AND scan_readability_selections.source_sha256 = ?
+        AND scan_readability_selections.source_byte_size = ?
+        AND scan_readability_selections.source_width = ?
+        AND scan_readability_selections.source_height = ?
+        AND scan_readability_selections.representation_kind = ?
+        AND scan_readability_selections.selection_basis = ?
+        AND scan_readability_selections.candidate_byte_size IS ?
+        AND scan_readability_selections.policy_id = ?
+        AND (
+          (
+            scan_readability_selections.representation_kind = 'source'
+            AND scan_readability_derivatives.source_media_id IS NULL
+          )
+          OR
+          (
+            scan_readability_selections.representation_kind = 'derivative'
+            AND scan_readability_derivatives.object_key = ?
+            AND scan_readability_derivatives.mime_type = ?
+            AND scan_readability_derivatives.byte_size = ?
+            AND scan_readability_derivatives.sha256 = ?
+            AND scan_readability_derivatives.width = ?
+            AND scan_readability_derivatives.height = ?
+            AND scan_readability_derivatives.policy_id = ?
+          )
+        )
     `).bind(
       pending.mediaId,
       sourceSha256,
       pending.byteSize,
-      readabilityObjectKey,
-      readability.mimeType,
-      readability.bytes.byteLength,
-      readability.sha256,
-      readability.width,
-      readability.height,
+      readability.sourceWidth,
+      readability.sourceHeight,
+      readability.representationKind,
+      readability.selectionBasis,
+      readability.candidateByteSize,
       readability.policyId,
+      readabilityObjectKey,
+      readability.derivative?.mimeType ?? null,
+      readability.derivative?.bytes.byteLength ?? null,
+      readability.derivative?.sha256 ?? null,
+      readability.derivative?.width ?? null,
+      readability.derivative?.height ?? null,
+      readability.derivative?.policyId ?? null,
     ).first<{ valid: number }>().catch(() => null);
     if (committed) return "processed";
     await recordScanMaintenanceFailure(env.DB, pending.mediaId, "commit", "scan_maintenance_commit_failed");

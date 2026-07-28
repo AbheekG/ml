@@ -315,8 +315,8 @@ Each Scan contains:
 - creation/update/Trash attribution;
 - hidden legacy Source/Version/Date/ScanText/Notes fields;
 - current original representation;
+- immutable readability selection and its direct/optimized state;
 - optional registered optimized/readability representation;
-- readability fallback state;
 - ordered replacement history; and
 - relevant parent-move history references.
 
@@ -329,10 +329,18 @@ Each representation contains:
 - original filename provenance when it comes from `media_objects`;
 - exact byte size and SHA-256;
 - media state and attribution;
-- and, for an optimized Scan, exact source media/hash/size, policy, dimensions,
-  created time, and actor.
+- and a selection provenance record with exact source media/hash/size,
+  dimensions, basis, policy, created time, and actor. An optimized Scan also
+  carries its exact derivative provenance.
 
 Saved display rotation does not change either file's hash.
+
+`readability` is `direct` or `optimized` for a current Scan. `direct` requires
+`readabilityPath == original.path`, no optimized representation, and no second
+payload. `optimized` requires a distinct optimized representation and its path.
+Replacement history may additionally use `optimized_legacy` or
+`original_fallback` when it predates the selection policy; those states are
+preserved explicitly rather than inferred or upgraded.
 
 ### Recordings
 

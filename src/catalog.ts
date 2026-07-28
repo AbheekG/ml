@@ -43,7 +43,7 @@ export type SongScan = {
   pageLabel: string | null;
   revision: number;
   rotationQuarterTurns: ScanRotationQuarterTurns;
-  hasReadabilityDerivative: boolean;
+  hasReadabilityRepresentation: boolean;
   filename: string;
 };
 

@@ -534,7 +534,7 @@ export function ScanViewer({
       : null;
     try {
       if (!file) {
-        if (!currentScan.hasReadabilityDerivative || !imageRef.current) {
+        if (!currentScan.hasReadabilityRepresentation || !imageRef.current) {
           throw new ScanSharingError("optimized_unavailable");
         }
         setShareBusy("preparing");
@@ -555,7 +555,7 @@ export function ScanViewer({
       if (outcome === "retry_required") {
         setPreparedShare({ scanId, rotationQuarterTurns, file });
         setShareFeedback({
-          message: "The optimized scan is ready. Tap Share again.",
+          message: "The readable scan is ready. Tap Share again.",
           isError: false,
         });
       } else {
@@ -570,12 +570,12 @@ export function ScanViewer({
       const code = error instanceof ScanSharingError ? error.code : "share_failed";
       setShareFeedback({
         message: code === "optimized_unavailable"
-          ? "An optimized copy is not available for sharing."
+          ? "A validated readable scan is not available for sharing."
           : code === "file_too_large"
-            ? "This optimized scan is too large to share."
+            ? "This readable scan is too large to share."
             : code === "share_unavailable"
               ? "File sharing is not available in this browser."
-              : "The optimized scan could not be shared right now.",
+              : "The readable scan could not be shared right now.",
         isError: true,
       });
     } finally {
@@ -657,10 +657,10 @@ export function ScanViewer({
                 <button
                   className="compact-action"
                   type="button"
-                  disabled={!isOnline || !currentScan.hasReadabilityDerivative
+                  disabled={!isOnline || !currentScan.hasReadabilityRepresentation
                     || naturalSize.width === 0 || shareBusy !== null}
                   aria-describedby={shareFeedback ? "scan-share-status" : undefined}
-                  title={isOnline ? "Share the optimized scan image" : "Scan sharing requires an internet connection"}
+                  title={isOnline ? "Share the readable scan image" : "Scan sharing requires an internet connection"}
                   onClick={() => { void shareCurrentScan(); }}
                 ><ActionContent
                     kind="share"

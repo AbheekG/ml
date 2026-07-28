@@ -19,7 +19,7 @@ Recording upload session ── immutable create/replace intent
                          └── pending Recording credit[]
 Recording ── Audio processing job[] ── dispatch attempt[]
 Scan ── optional Notebook
-  └── fingerprint member / readability derivative
+  └── fingerprint member / readability selection / optional derivative
 Trashed Scan/Recording ── immutable parent-move audit ── source/target Song
 ```
 
@@ -43,7 +43,18 @@ Trashed Scan/Recording ── immutable parent-move audit ── source/target S
 - `audio_processing_jobs` durably binds a processing Recording to the exact original media ID/hash/size and conversion policy. Attempt counts, expiring leases, results, and privacy-safe failure codes follow a database-enforced retry state machine. Uniqueness is not enforced per recording (removed in migration `0010` to allow historical jobs from audio replacements). Migration `0007` rejects already-expired running leases and rejects expired-lease recovery or editor retry unless the exact active source Recording is back in `processing` state. Migration `0008` permits only one global `running` row, rejects recovery before lease expiry, and rejects automatic recovery after the third expired attempt so the Worker must checkpoint a durable `processing_lease_expired` failure before an editor can retry.
 - `audio_processing_dispatch_attempts` is the immutable audit trail for immediate Cloud Run invocation. A pending job creates a `started` attempt, which transitions once to `accepted` or a bounded failure code; failed dispatch never changes the pending job, so Scheduler can recover it.
 - `scan_fingerprints` and `scan_fingerprint_members` form the global race-safe original-content registry. New Scan originals are rejected when their exact hash and size match either a registered original or a stored readability derivative; duplicate imported history is preserved and marked instead of merged.
-- `scan_readability_derivatives` immutably binds a private bounded JPEG derivative to the exact source hash/size and policy. Its indexed derivative hash/size resolves an exact optimized-Scan reupload back to the source Scan without creating another row. Browser-rotated or otherwise re-encoded files are intentionally not inferred to match. `scan_maintenance_failures` records bounded retry state and `scan_maintenance_leases` prevents overlapping repair runs from racing on one object.
+- `scan_readability_selections` immutably binds each processed Scan source to
+  either that exact source or a distinct derivative, including decoded source
+  dimensions, source hash/size, selection basis, policy, actor, and time.
+  `scan_readability_derivatives` exists only when normalization is required or
+  a safe source of at least 1 MiB produced a candidate saving both 20% and
+  256 KiB. It binds the private bounded JPEG to the exact source hash/size and
+  policy. Its indexed derivative hash/size resolves an exact retained
+  optimized-Scan reupload without creating another row. Direct sources have no
+  derivative object or derivative hash. Browser-rotated or otherwise re-encoded
+  files are intentionally not inferred to match. `scan_maintenance_failures`
+  records bounded retry state and `scan_maintenance_leases` prevents
+  overlapping repair runs from racing on one object.
 - `media_parent_moves` is an immutable audit of the exceptional cross-Song
   recovery of an already-trashed Scan or Recording. Database triggers permit a
   parent change only when the same revision-guarded update restores the child to
@@ -95,10 +106,14 @@ Trashed Scan/Recording ── immutable parent-move audit ── source/target S
 - New Scan creation/replacement accepts verified JPEG, PNG, or WebP files up to
   20,000,000 bytes, rejects an oversized declared multipart envelope before
   parsing, fully decodes accepted images through the Cloudflare Images binding,
-  stores the private original, and creates a correctly oriented JPEG derivative
-  with longest edge at most 2400 pixels at quality 85. Exact content is rejected
-  globally before upload and again by D1 to close races. Interactive create and
-  replacement retain their existing atomic D1 finalization and cleanup path.
+  and always stores the exact private original. A strict metadata-free bounded
+  JPEG can be its own readability representation. A safe source under 1 MiB is
+  never encoded; a safe larger source keeps a distinct candidate only when it
+  saves at least 20% and 256 KiB. Other inputs require a correctly oriented
+  metadata-free JPEG derivative with longest edge at most 2400 pixels at
+  quality 85. Exact content is rejected globally against retained originals and
+  retained derivatives, and again by D1 to close races. Interactive create and
+  replacement retain their atomic D1 finalization and cleanup path.
   Historical maintenance retains its deterministic derivative object after an
   ambiguous D1 response so it cannot delete bytes a committed provenance row
   may already reference.

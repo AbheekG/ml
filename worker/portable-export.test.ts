@@ -203,6 +203,15 @@ function seedSource(database: DatabaseSync): void {
       'image/jpeg', 3, '${"2".repeat(64)}', 10, 10, 'scan-jpeg-v1-2400-q85',
       '${timestamp}', 'system:scan-maintenance'
     );
+    INSERT INTO scan_readability_selections (
+      source_media_id, source_sha256, source_byte_size,
+      source_width, source_height, representation_kind, selection_basis,
+      candidate_byte_size, policy_id, created_at, created_by
+    ) VALUES (
+      'scan-media-1', '${"1".repeat(64)}', 4, 10, 10,
+      'derivative', 'required_normalization', 3,
+      'scan-readability-selection-v2', '${timestamp}', 'system:scan-maintenance'
+    );
     INSERT INTO media_objects (
       id, object_key, original_filename, mime_type, byte_size, sha256, kind,
       created_at, created_by
@@ -696,7 +705,7 @@ describe("portable export server", () => {
       "1234567890abcdef1234567890abcdef12345678",
       "synthetic",
       "cleanup-mutation",
-      new Date("2026-07-24T00:00:00.000Z"),
+      new Date(),
     );
     const revoked = await app.request(`/api/admin/portable-exports/${created.id}/revoke`, {
       method: "POST",

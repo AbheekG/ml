@@ -1,0 +1,690 @@
+PRAGMA foreign_keys = ON;
+
+-- New sources record why their selected readability representation is either
+-- the exact retained source or a distinct immutable v1 JPEG derivative.
+-- Historical derivative rows deliberately remain valid without a backfill.
+CREATE TABLE scan_readability_selections (
+  source_media_id TEXT PRIMARY KEY REFERENCES media_objects(id) ON DELETE RESTRICT,
+  source_sha256 TEXT NOT NULL CHECK (
+    length(source_sha256) = 64
+    AND source_sha256 = lower(source_sha256)
+    AND source_sha256 NOT GLOB '*[^0-9a-f]*'
+  ),
+  source_byte_size INTEGER NOT NULL CHECK (source_byte_size > 0),
+  source_width INTEGER NOT NULL CHECK (source_width BETWEEN 1 AND 100000000),
+  source_height INTEGER NOT NULL CHECK (source_height BETWEEN 1 AND 100000000),
+  representation_kind TEXT NOT NULL CHECK (
+    representation_kind IN ('source', 'derivative')
+  ),
+  selection_basis TEXT NOT NULL CHECK (
+    selection_basis IN (
+      'direct_safe_source',
+      'required_normalization',
+      'optional_material_savings'
+    )
+  ),
+  candidate_byte_size INTEGER CHECK (
+    candidate_byte_size IS NULL OR candidate_byte_size BETWEEN 1 AND 20971520
+  ),
+  policy_id TEXT NOT NULL CHECK (policy_id = 'scan-readability-selection-v2'),
+  created_at TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  CHECK (source_width * source_height <= 100000000),
+  CHECK (
+    (
+      representation_kind = 'source'
+      AND selection_basis = 'direct_safe_source'
+      AND (
+        (source_byte_size < 1048576 AND candidate_byte_size IS NULL)
+        OR (
+          source_byte_size >= 1048576
+          AND (
+            candidate_byte_size IS NULL
+            OR source_byte_size - candidate_byte_size < 262144
+            OR (source_byte_size - candidate_byte_size) * 100 < source_byte_size * 20
+          )
+        )
+      )
+    )
+    OR
+    (
+      representation_kind = 'derivative'
+      AND selection_basis IN ('required_normalization', 'optional_material_savings')
+      AND candidate_byte_size IS NOT NULL
+      AND (
+        selection_basis = 'required_normalization'
+        OR (
+          source_byte_size >= 1048576
+          AND source_byte_size - candidate_byte_size >= 262144
+          AND (source_byte_size - candidate_byte_size) * 100 >= source_byte_size * 20
+        )
+      )
+    )
+  )
+);
+
+CREATE TRIGGER validate_scan_readability_selection_insert
+BEFORE INSERT ON scan_readability_selections
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM media_objects
+  WHERE media_objects.id = NEW.source_media_id
+    AND media_objects.kind = 'scan'
+    AND media_objects.sha256 = NEW.source_sha256
+    AND media_objects.byte_size = NEW.source_byte_size
+    AND (
+      (
+        NEW.representation_kind = 'source'
+        AND media_objects.mime_type = 'image/jpeg'
+        AND NEW.source_width <= 2400
+        AND NEW.source_height <= 2400
+        AND NOT EXISTS (
+          SELECT 1 FROM scan_readability_derivatives
+          WHERE source_media_id = NEW.source_media_id
+        )
+      )
+      OR
+      (
+        NEW.representation_kind = 'derivative'
+        AND EXISTS (
+          SELECT 1
+          FROM scan_readability_derivatives
+          WHERE source_media_id = NEW.source_media_id
+            AND source_sha256 = NEW.source_sha256
+            AND source_byte_size = NEW.source_byte_size
+            AND byte_size = NEW.candidate_byte_size
+        )
+      )
+    )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'invalid_scan_readability_selection');
+END;
+
+CREATE TRIGGER prevent_scan_readability_selection_update
+BEFORE UPDATE ON scan_readability_selections
+BEGIN
+  SELECT RAISE(ABORT, 'scan_readability_selection_is_immutable');
+END;
+
+CREATE TRIGGER retain_attached_scan_readability_selection
+BEFORE DELETE ON scan_readability_selections
+WHEN EXISTS (
+  SELECT 1 FROM scans WHERE media_id = OLD.source_media_id
+)
+OR EXISTS (
+  SELECT 1 FROM scan_media_history WHERE media_id = OLD.source_media_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'attached_scan_readability_selection_is_retained');
+END;
+
+CREATE TRIGGER prevent_derivative_for_direct_scan_readability
+BEFORE INSERT ON scan_readability_derivatives
+WHEN EXISTS (
+  SELECT 1
+  FROM scan_readability_selections
+  WHERE source_media_id = NEW.source_media_id
+    AND representation_kind = 'source'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'direct_scan_readability_cannot_have_derivative');
+END;
+
+CREATE TRIGGER prevent_selected_scan_readability_derivative_delete
+BEFORE DELETE ON scan_readability_derivatives
+WHEN EXISTS (
+  SELECT 1
+  FROM scan_readability_selections
+  WHERE source_media_id = OLD.source_media_id
+    AND representation_kind = 'derivative'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'selected_scan_readability_derivative_is_retained');
+END;
+
+CREATE TRIGGER prevent_selected_scan_readability_source_change
+BEFORE UPDATE OF kind, mime_type, sha256, byte_size ON media_objects
+WHEN EXISTS (
+  SELECT 1
+  FROM scan_readability_selections
+  WHERE source_media_id = OLD.id
+    AND (
+      NEW.kind <> 'scan'
+      OR NEW.sha256 IS NOT source_sha256
+      OR NEW.byte_size <> source_byte_size
+      OR (
+        representation_kind = 'source'
+        AND NEW.mime_type <> 'image/jpeg'
+      )
+    )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'media_is_bound_to_scan_readability_selection');
+END;
+
+DROP TRIGGER validate_portable_export_ready;
+DROP TRIGGER validate_portable_export_transition;
+DROP TRIGGER prevent_portable_export_identity_change;
+DROP TRIGGER prevent_portable_export_delete;
+DROP TRIGGER prevent_portable_export_record_update;
+DROP TRIGGER constrain_portable_export_record_delete;
+DROP TRIGGER prevent_portable_export_item_update;
+DROP TRIGGER constrain_portable_export_item_delete;
+DROP TRIGGER prevent_portable_export_item_chunk_update;
+DROP TRIGGER constrain_portable_export_item_chunk_delete;
+
+DROP INDEX portable_export_sessions_creator_idx;
+DROP INDEX portable_export_sessions_cleanup_idx;
+DROP INDEX portable_export_records_page_idx;
+DROP INDEX portable_export_items_page_idx;
+
+ALTER TABLE portable_export_records RENAME TO portable_export_records_v1;
+ALTER TABLE portable_export_items RENAME TO portable_export_items_v1;
+ALTER TABLE portable_export_sessions RENAME TO portable_export_sessions_v1;
+ALTER TABLE portable_export_item_chunks RENAME TO portable_export_item_chunks_v1;
+
+CREATE TABLE portable_export_sessions (
+  id TEXT PRIMARY KEY CHECK (
+    length(id) = 32
+    AND id = lower(id)
+    AND id NOT GLOB '*[^0-9a-f]*'
+  ),
+  profile_version TEXT NOT NULL CHECK (profile_version = '1.0.0'),
+  client_mutation_id TEXT NOT NULL CHECK (
+    length(client_mutation_id) BETWEEN 1 AND 100
+    AND instr(client_mutation_id, char(10)) = 0
+    AND instr(client_mutation_id, char(13)) = 0
+  ),
+  request_fingerprint TEXT NOT NULL CHECK (
+    length(request_fingerprint) = 64
+    AND request_fingerprint = lower(request_fingerprint)
+    AND request_fingerprint NOT GLOB '*[^0-9a-f]*'
+  ),
+  state TEXT NOT NULL CHECK (
+    state IN ('preparing', 'ready', 'revoked', 'expired', 'failed')
+  ),
+  source_schema_version TEXT NOT NULL CHECK (
+    source_schema_version IN ('0021', '0022', '0023')
+  ),
+  source_commit TEXT NOT NULL CHECK (
+    source_commit = 'local-development'
+    OR (
+      length(source_commit) BETWEEN 7 AND 40
+      AND source_commit = lower(source_commit)
+      AND source_commit NOT GLOB '*[^0-9a-f]*'
+    )
+  ),
+  source_environment TEXT NOT NULL CHECK (
+    length(source_environment) BETWEEN 1 AND 100
+    AND instr(source_environment, char(10)) = 0
+    AND instr(source_environment, char(13)) = 0
+  ),
+  snapshot_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  created_by TEXT NOT NULL CHECK (length(trim(created_by)) > 0),
+  expires_at TEXT NOT NULL CHECK (expires_at > created_at),
+  record_count INTEGER NOT NULL DEFAULT 0 CHECK (record_count >= 0),
+  item_count INTEGER NOT NULL DEFAULT 0 CHECK (item_count >= 0),
+  planned_bytes INTEGER NOT NULL DEFAULT 0 CHECK (planned_bytes >= 0),
+  summary_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(summary_json)),
+  plan_digest TEXT CHECK (
+    plan_digest IS NULL
+    OR (
+      length(plan_digest) = 64
+      AND plan_digest = lower(plan_digest)
+      AND plan_digest NOT GLOB '*[^0-9a-f]*'
+    )
+  ),
+  ready_at TEXT,
+  revoked_at TEXT,
+  expired_at TEXT,
+  failed_at TEXT,
+  failure_code TEXT CHECK (
+    failure_code IS NULL
+    OR (
+      length(failure_code) BETWEEN 1 AND 100
+      AND substr(failure_code, 1, 1) GLOB '[a-z]'
+      AND failure_code NOT GLOB '*[^a-z0-9_]*'
+    )
+  ),
+  detail_purged_at TEXT,
+  UNIQUE (created_by, client_mutation_id),
+  CHECK (
+    (state = 'preparing'
+      AND plan_digest IS NULL AND ready_at IS NULL
+      AND revoked_at IS NULL AND expired_at IS NULL
+      AND failed_at IS NULL AND failure_code IS NULL)
+    OR (state = 'ready'
+      AND plan_digest IS NOT NULL AND ready_at IS NOT NULL
+      AND revoked_at IS NULL AND expired_at IS NULL
+      AND failed_at IS NULL AND failure_code IS NULL)
+    OR (state = 'revoked'
+      AND plan_digest IS NOT NULL AND ready_at IS NOT NULL
+      AND revoked_at IS NOT NULL AND expired_at IS NULL
+      AND failed_at IS NULL AND failure_code IS NULL)
+    OR (state = 'expired'
+      AND plan_digest IS NOT NULL AND ready_at IS NOT NULL
+      AND revoked_at IS NULL AND expired_at IS NOT NULL
+      AND failed_at IS NULL AND failure_code IS NULL)
+    OR (state = 'failed'
+      AND ready_at IS NULL AND revoked_at IS NULL AND expired_at IS NULL
+      AND failed_at IS NOT NULL AND failure_code IS NOT NULL)
+  )
+);
+
+CREATE INDEX portable_export_sessions_creator_idx
+ON portable_export_sessions(created_by, created_at DESC);
+
+CREATE INDEX portable_export_sessions_cleanup_idx
+ON portable_export_sessions(state, detail_purged_at, revoked_at, expired_at, failed_at);
+
+CREATE TABLE portable_export_records (
+  export_id TEXT NOT NULL REFERENCES portable_export_sessions(id) ON DELETE RESTRICT,
+  record_kind TEXT NOT NULL CHECK (
+    record_kind IN (
+      'app_users',
+      'audio_derivatives',
+      'languages',
+      'lyric_texts',
+      'media_objects',
+      'media_parent_moves',
+      'notebooks',
+      'people',
+      'recording_credits',
+      'recording_media_history',
+      'recordings',
+      'scan_fingerprint_members',
+      'scan_fingerprints',
+      'scan_media_history',
+      'scan_readability_derivatives',
+      'scan_readability_selections',
+      'scans',
+      'song_aliases',
+      'song_credits',
+      'song_languages',
+      'song_tags',
+      'songs',
+      'tags'
+    )
+  ),
+  record_key TEXT NOT NULL CHECK (
+    length(record_key) BETWEEN 1 AND 500
+    AND instr(record_key, char(0)) = 0
+  ),
+  order_key TEXT NOT NULL CHECK (
+    length(order_key) BETWEEN 1 AND 1000
+    AND instr(order_key, char(0)) = 0
+  ),
+  frozen_json TEXT NOT NULL CHECK (
+    json_valid(frozen_json)
+    AND length(CAST(frozen_json AS BLOB)) BETWEEN 2 AND 1048576
+  ),
+  PRIMARY KEY (export_id, record_kind, record_key)
+);
+
+CREATE INDEX portable_export_records_page_idx
+ON portable_export_records(export_id, record_kind, order_key, record_key);
+
+CREATE TABLE portable_export_items (
+  id TEXT PRIMARY KEY CHECK (
+    length(id) = 32
+    AND id = lower(id)
+    AND id NOT GLOB '*[^0-9a-f]*'
+  ),
+  export_id TEXT NOT NULL REFERENCES portable_export_sessions(id) ON DELETE RESTRICT,
+  source_kind TEXT NOT NULL CHECK (
+    source_kind IN ('media_object', 'scan_readability')
+  ),
+  source_id TEXT NOT NULL CHECK (
+    length(source_id) BETWEEN 1 AND 200
+    AND instr(source_id, char(0)) = 0
+  ),
+  representation TEXT NOT NULL CHECK (
+    representation IN (
+      'scan_original',
+      'scan_optimized',
+      'recording_original',
+      'recording_playback'
+    )
+  ),
+  object_key TEXT NOT NULL CHECK (
+    length(object_key) BETWEEN 1 AND 1024
+    AND instr(object_key, char(0)) = 0
+    AND instr(object_key, char(10)) = 0
+    AND instr(object_key, char(13)) = 0
+  ),
+  mime_type TEXT NOT NULL CHECK (
+    length(mime_type) BETWEEN 3 AND 200
+    AND mime_type = lower(trim(mime_type))
+  ),
+  byte_size INTEGER NOT NULL CHECK (byte_size > 0),
+  sha256 TEXT NOT NULL CHECK (
+    length(sha256) = 64
+    AND sha256 = lower(sha256)
+    AND sha256 NOT GLOB '*[^0-9a-f]*'
+  ),
+  UNIQUE (export_id, source_kind, source_id),
+  UNIQUE (export_id, object_key)
+);
+
+CREATE INDEX portable_export_items_page_idx
+ON portable_export_items(export_id, source_kind, source_id, id);
+
+CREATE TABLE portable_export_item_chunks (
+  export_id TEXT NOT NULL REFERENCES portable_export_sessions(id) ON DELETE RESTRICT,
+  chunk_key TEXT NOT NULL CHECK (
+    length(chunk_key) = 15
+    AND chunk_key GLOB '@chunk:[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+  ),
+  lookup_id TEXT NOT NULL CHECK (
+    length(lookup_id) = 24
+    AND lookup_id = lower(lookup_id)
+    AND lookup_id NOT GLOB '*[^0-9a-f]*'
+  ),
+  item_count INTEGER NOT NULL CHECK (
+    item_count BETWEEN 1 AND 64
+  ),
+  planned_bytes INTEGER NOT NULL CHECK (planned_bytes > 0),
+  frozen_json TEXT NOT NULL CHECK (
+    json_valid(frozen_json)
+    AND json_type(frozen_json) = 'array'
+    AND json_array_length(frozen_json) = item_count
+    AND length(CAST(frozen_json AS BLOB)) BETWEEN 2 AND 1048576
+  ),
+  PRIMARY KEY (export_id, chunk_key),
+  UNIQUE (export_id, lookup_id)
+);
+
+INSERT INTO portable_export_sessions (
+  id,
+  profile_version,
+  client_mutation_id,
+  request_fingerprint,
+  state,
+  source_schema_version,
+  source_commit,
+  source_environment,
+  snapshot_at,
+  created_at,
+  created_by,
+  expires_at,
+  record_count,
+  item_count,
+  planned_bytes,
+  summary_json,
+  plan_digest,
+  ready_at,
+  revoked_at,
+  expired_at,
+  failed_at,
+  failure_code,
+  detail_purged_at
+)
+SELECT
+  id,
+  profile_version,
+  client_mutation_id,
+  request_fingerprint,
+  state,
+  source_schema_version,
+  source_commit,
+  source_environment,
+  snapshot_at,
+  created_at,
+  created_by,
+  expires_at,
+  record_count,
+  item_count,
+  planned_bytes,
+  summary_json,
+  plan_digest,
+  ready_at,
+  revoked_at,
+  expired_at,
+  failed_at,
+  failure_code,
+  detail_purged_at
+FROM portable_export_sessions_v1;
+
+INSERT INTO portable_export_records (
+  export_id,
+  record_kind,
+  record_key,
+  order_key,
+  frozen_json
+)
+SELECT
+  export_id,
+  record_kind,
+  record_key,
+  order_key,
+  frozen_json
+FROM portable_export_records_v1;
+
+INSERT INTO portable_export_items (
+  id,
+  export_id,
+  source_kind,
+  source_id,
+  representation,
+  object_key,
+  mime_type,
+  byte_size,
+  sha256
+)
+SELECT
+  id,
+  export_id,
+  source_kind,
+  source_id,
+  representation,
+  object_key,
+  mime_type,
+  byte_size,
+  sha256
+FROM portable_export_items_v1;
+
+INSERT INTO portable_export_item_chunks (
+  export_id,
+  chunk_key,
+  lookup_id,
+  item_count,
+  planned_bytes,
+  frozen_json
+)
+SELECT
+  export_id,
+  chunk_key,
+  lookup_id,
+  item_count,
+  planned_bytes,
+  frozen_json
+FROM portable_export_item_chunks_v1;
+
+DROP TABLE portable_export_item_chunks_v1;
+DROP TABLE portable_export_records_v1;
+DROP TABLE portable_export_items_v1;
+DROP TABLE portable_export_sessions_v1;
+
+CREATE TRIGGER validate_portable_export_ready
+BEFORE UPDATE OF state ON portable_export_sessions
+WHEN OLD.state = 'preparing' AND NEW.state = 'ready'
+  AND (
+    NEW.plan_digest IS NULL
+    OR NEW.ready_at IS NULL
+    OR NEW.expires_at <= NEW.ready_at
+    OR NEW.record_count <> (
+      SELECT COUNT(*) FROM portable_export_records WHERE export_id = OLD.id
+    )
+    OR (
+      EXISTS (
+        SELECT 1 FROM portable_export_item_chunks WHERE export_id = OLD.id
+      )
+      AND EXISTS (
+        SELECT 1 FROM portable_export_items WHERE export_id = OLD.id
+      )
+    )
+    OR NEW.item_count <> CASE
+      WHEN EXISTS (
+        SELECT 1 FROM portable_export_item_chunks WHERE export_id = OLD.id
+      ) THEN COALESCE((
+        SELECT SUM(item_count)
+        FROM portable_export_item_chunks
+        WHERE export_id = OLD.id
+      ), 0)
+      ELSE (
+        SELECT COUNT(*) FROM portable_export_items WHERE export_id = OLD.id
+      )
+    END
+    OR NEW.planned_bytes <> CASE
+      WHEN EXISTS (
+        SELECT 1 FROM portable_export_item_chunks WHERE export_id = OLD.id
+      ) THEN COALESCE((
+        SELECT SUM(planned_bytes)
+        FROM portable_export_item_chunks
+        WHERE export_id = OLD.id
+      ), 0)
+      ELSE COALESCE((
+        SELECT SUM(byte_size)
+        FROM portable_export_items
+        WHERE export_id = OLD.id
+      ), 0)
+    END
+    OR EXISTS (
+      SELECT 1
+      FROM scans
+      LEFT JOIN scan_readability_selections
+        ON scan_readability_selections.source_media_id = scans.media_id
+      WHERE scan_readability_selections.source_media_id IS NULL
+    )
+    OR NEW.item_count <> (
+      SELECT COUNT(*) FROM media_objects
+    ) + (
+      SELECT COUNT(*) FROM scan_readability_derivatives
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM media_objects
+      WHERE byte_size <= 0
+        OR sha256 IS NULL
+        OR length(sha256) <> 64
+        OR sha256 <> lower(sha256)
+        OR sha256 GLOB '*[^0-9a-f]*'
+        OR object_key IS NULL
+        OR length(object_key) NOT BETWEEN 1 AND 1024
+        OR instr(object_key, char(0)) <> 0
+        OR instr(object_key, char(10)) <> 0
+        OR instr(object_key, char(13)) <> 0
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM scan_readability_derivatives
+      WHERE byte_size <= 0
+        OR sha256 IS NULL
+        OR length(sha256) <> 64
+        OR sha256 <> lower(sha256)
+        OR sha256 GLOB '*[^0-9a-f]*'
+        OR object_key IS NULL
+        OR length(object_key) NOT BETWEEN 1 AND 1024
+        OR instr(object_key, char(0)) <> 0
+        OR instr(object_key, char(10)) <> 0
+        OR instr(object_key, char(13)) <> 0
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM (
+        SELECT object_key FROM media_objects
+        UNION ALL
+        SELECT object_key FROM scan_readability_derivatives
+      )
+      GROUP BY lower(rtrim(object_key, ' .'))
+      HAVING COUNT(*) > 1
+    )
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'portable_export_precondition_failed');
+END;
+
+CREATE TRIGGER validate_portable_export_transition
+BEFORE UPDATE OF state ON portable_export_sessions
+WHEN NEW.state <> OLD.state
+  AND NOT (
+    (OLD.state = 'preparing' AND NEW.state IN ('ready', 'failed'))
+    OR (OLD.state = 'ready' AND NEW.state IN ('revoked', 'expired'))
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'invalid_portable_export_transition');
+END;
+
+CREATE TRIGGER prevent_portable_export_identity_change
+BEFORE UPDATE OF
+  id, profile_version, client_mutation_id, request_fingerprint,
+  source_schema_version, source_commit, source_environment,
+  snapshot_at, created_at, created_by, expires_at,
+  record_count, item_count, planned_bytes, summary_json, plan_digest, ready_at
+ON portable_export_sessions
+WHEN OLD.state <> 'preparing'
+BEGIN
+  SELECT RAISE(ABORT, 'portable_export_identity_is_immutable');
+END;
+
+CREATE TRIGGER prevent_portable_export_delete
+BEFORE DELETE ON portable_export_sessions
+BEGIN
+  SELECT RAISE(ABORT, 'portable_export_audit_is_retained');
+END;
+
+CREATE TRIGGER prevent_portable_export_record_update
+BEFORE UPDATE ON portable_export_records
+BEGIN
+  SELECT RAISE(ABORT, 'portable_export_record_is_immutable');
+END;
+
+CREATE TRIGGER constrain_portable_export_record_delete
+BEFORE DELETE ON portable_export_records
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM portable_export_sessions
+  WHERE id = OLD.export_id
+    AND state IN ('revoked', 'expired', 'failed')
+)
+BEGIN
+  SELECT RAISE(ABORT, 'portable_export_detail_is_active');
+END;
+
+CREATE TRIGGER prevent_portable_export_item_update
+BEFORE UPDATE ON portable_export_items
+BEGIN
+  SELECT RAISE(ABORT, 'portable_export_item_is_immutable');
+END;
+
+CREATE TRIGGER constrain_portable_export_item_delete
+BEFORE DELETE ON portable_export_items
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM portable_export_sessions
+  WHERE id = OLD.export_id
+    AND state IN ('revoked', 'expired', 'failed')
+)
+BEGIN
+  SELECT RAISE(ABORT, 'portable_export_detail_is_active');
+END;
+
+CREATE TRIGGER prevent_portable_export_item_chunk_update
+BEFORE UPDATE ON portable_export_item_chunks
+BEGIN
+  SELECT RAISE(ABORT, 'portable_export_item_chunk_is_immutable');
+END;
+
+CREATE TRIGGER constrain_portable_export_item_chunk_delete
+BEFORE DELETE ON portable_export_item_chunks
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM portable_export_sessions
+  WHERE id = OLD.export_id
+    AND state IN ('revoked', 'expired', 'failed')
+)
+BEGIN
+  SELECT RAISE(ABORT, 'portable_export_detail_is_active');
+END;

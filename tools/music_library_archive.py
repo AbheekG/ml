@@ -36,7 +36,7 @@ from typing import Any, BinaryIO, Callable, Iterable, Iterator, Mapping, Sequenc
 PROFILE_ID = "urn:music-library:portable-archive-profile:1"
 PROFILE_VERSION = "1.0.0"
 TOOL_VERSION = "1.0.0"
-SOURCE_SCHEMA_VERSION = "0022"
+SOURCE_SCHEMA_VERSION = "0023"
 RO_CRATE_CONTEXT = "https://w3id.org/ro/crate/1.1/context"
 RO_CRATE_VERSION = "1.3"
 DEFAULT_CONCURRENCY = 4
@@ -83,6 +83,7 @@ ALLOWED_SOURCE_TABLES = {
     "scan_fingerprints",
     "scan_media_history",
     "scan_readability_derivatives",
+    "scan_readability_selections",
     "scans",
     "song_aliases",
     "song_credits",
@@ -110,7 +111,7 @@ CONTRACT_SHA256 = {
     "metadata/profile.json":
         "18012b5e2f195ffd6479be2c4a7ee74d3d95dc9d4cd191b4e98a5bd77a457887",
     "metadata/schemas/catalog.schema.json":
-        "fc5cff9acea21cb1f03a2cc6b35f8da7904a2863a155df3c03584e3f1e8ae6eb",
+        "c1b68975f33e35bc0611ed72f881f946826e8a961d2405f0dca1a2f62e5536cd",
     "metadata/schemas/export-plan.schema.json":
         "565d9620cebf02f22ffeefe0af0f73ff837f0872cf65050075f13e83b569889e",
     "metadata/schemas/export-report.schema.json":
@@ -508,13 +509,51 @@ def _validate_source_relations(catalog: Mapping[str, Any]) -> None:
             or row.get("derivative_byte_size") != playback.get("byte_size")
         ):
             raise ArchiveError("invalid_audio_derivative_provenance")
-    for row in source.get("scan_readability_derivatives", []):
+    scan_derivatives = _unique_rows(
+        source, "scan_readability_derivatives", "source_media_id"
+    )
+    for row in scan_derivatives.values():
         source_media = media.get(row.get("source_media_id"))
         if not source_media or (
             row.get("source_sha256") != source_media.get("sha256")
             or row.get("source_byte_size") != source_media.get("byte_size")
         ):
             raise ArchiveError("invalid_scan_derivative_provenance")
+    scan_selections = _unique_rows(
+        source, "scan_readability_selections", "source_media_id"
+    )
+    for media_id, row in scan_selections.items():
+        source_media = media.get(media_id)
+        derivative = scan_derivatives.get(media_id)
+        representation = row.get("representation_kind")
+        basis = row.get("selection_basis")
+        if (
+            not source_media
+            or source_media.get("kind") != "scan"
+            or row.get("source_sha256") != source_media.get("sha256")
+            or row.get("source_byte_size") != source_media.get("byte_size")
+            or row.get("policy_id") != "scan-readability-selection-v2"
+            or not isinstance(row.get("source_width"), int)
+            or not isinstance(row.get("source_height"), int)
+            or row["source_width"] < 1
+            or row["source_height"] < 1
+            or row["source_width"] * row["source_height"] > 100_000_000
+        ):
+            raise ArchiveError("invalid_scan_selection_provenance")
+        if representation == "source":
+            if basis != "direct_safe_source" or derivative is not None:
+                raise ArchiveError("invalid_scan_direct_selection")
+        elif representation == "derivative":
+            if (
+                basis not in {"required_normalization", "optional_material_savings"}
+                or derivative is None
+                or row.get("candidate_byte_size") != derivative.get("byte_size")
+            ):
+                raise ArchiveError("invalid_scan_derivative_selection")
+        else:
+            raise ArchiveError("invalid_scan_selection_provenance")
+    if any(row.get("media_id") not in scan_selections for row in scans.values()):
+        raise ArchiveError("missing_current_scan_selection")
     fingerprints = _unique_rows(source, "scan_fingerprints", "sha256")
     for row in source.get("scan_fingerprint_members", []):
         if row.get("media_id") not in media or row.get("sha256") not in fingerprints:
@@ -686,10 +725,53 @@ def _validate_catalog(catalog: Any, profile: Mapping[str, Any]) -> dict[str, Any
                 raise ArchiveError("invalid_lyric_fixity")
             declared_paths.append(path)
         for scan in song["scans"]:
-            if scan.get("original") is None:
+            original = scan.get("original")
+            optimized = scan.get("optimized")
+            readability = scan.get("readability")
+            if not isinstance(original, dict):
                 raise ArchiveError("missing_scan_original")
-            if (scan.get("optimized") is None) != (scan.get("readability") == "original_fallback"):
-                raise ArchiveError("invalid_scan_fallback")
+            if readability == "direct":
+                if (
+                    optimized is not None
+                    or scan.get("readabilityPath") != original.get("path")
+                    or not isinstance(scan.get("readabilitySelection"), dict)
+                ):
+                    raise ArchiveError("invalid_scan_direct_selection")
+            elif readability == "optimized":
+                if (
+                    not isinstance(optimized, dict)
+                    or scan.get("readabilityPath") != optimized.get("path")
+                    or not isinstance(scan.get("readabilitySelection"), dict)
+                ):
+                    raise ArchiveError("invalid_scan_optimized_selection")
+            else:
+                raise ArchiveError("invalid_current_scan_readability")
+            history = scan.get("replacementHistory")
+            if not isinstance(history, list):
+                raise ArchiveError("invalid_scan_history")
+            for replacement in history:
+                if (
+                    not isinstance(replacement, dict)
+                    or not isinstance(replacement.get("original"), dict)
+                ):
+                    raise ArchiveError("invalid_scan_history")
+                history_original = replacement["original"]
+                history_optimized = replacement.get("optimized")
+                history_readability = replacement.get("readability")
+                if history_readability in {"direct", "original_fallback"}:
+                    if (
+                        history_optimized is not None
+                        or replacement.get("readabilityPath") != history_original.get("path")
+                    ):
+                        raise ArchiveError("invalid_scan_history_readability")
+                elif history_readability in {"optimized", "optimized_legacy"}:
+                    if (
+                        not isinstance(history_optimized, dict)
+                        or replacement.get("readabilityPath") != history_optimized.get("path")
+                    ):
+                        raise ArchiveError("invalid_scan_history_readability")
+                else:
+                    raise ArchiveError("invalid_scan_history_readability")
         for recording in song["recordings"]:
             original = recording.get("original")
             playback = recording.get("playback")

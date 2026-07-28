@@ -154,7 +154,7 @@ const d1Json = [
         unclassified_upload_sessions: 0,
         active_unclassified_upload_sessions: 0,
         missing_scan_hashes: 0,
-        missing_scan_derivatives: 0,
+        missing_current_scan_readability_selections: 0,
         scan_maintenance_failures: 0,
         expired_scan_maintenance_leases: 0,
         foreign_key_errors: 0,
@@ -207,7 +207,7 @@ describe("processor ops snapshot", () => {
     expect(snapshot.logs.stdout.byOutcome.succeeded).toBe(1);
     expect(snapshot.logs.system.exitLines["Container called exit(0)."]).toBe(2);
     expect(snapshot.d1.foreignKeyErrors).toBe(0);
-    expect(snapshot.d1.missingScanDerivatives).toBe(0);
+    expect(snapshot.d1.missingCurrentScanReadabilitySelections).toBe(0);
     expect(snapshot.costSurface.artifactRepoSizeBytes).toBe(429709000);
     expect(snapshot.costSurface.schedulerJobsCount).toBe(1);
     expect(snapshot.alerts.some((alert) => alert.code === "processor_configuration_drift"))
@@ -280,7 +280,7 @@ describe("processor ops snapshot", () => {
       unclassified_upload_sessions: 2,
       active_unclassified_upload_sessions: 2,
       missing_scan_hashes: 3,
-      missing_scan_derivatives: 4,
+      missing_current_scan_readability_selections: 4,
       scan_maintenance_failures: 1,
       expired_scan_maintenance_leases: 1,
     });

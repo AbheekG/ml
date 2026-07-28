@@ -122,6 +122,19 @@ def catalog() -> dict[str, Any]:
         "trashed_by": None,
     }
     media_row = representation()["extensions"]["musicLibrary"]["source"]
+    selection_row = {
+        "source_media_id": "media-1",
+        "source_sha256": MEDIA_HASH,
+        "source_byte_size": len(MEDIA_BYTES),
+        "source_width": 10,
+        "source_height": 10,
+        "representation_kind": "source",
+        "selection_basis": "direct_safe_source",
+        "candidate_byte_size": None,
+        "policy_id": "scan-readability-selection-v2",
+        "created_at": STAMP,
+        "created_by": "system:synthetic",
+    }
     scan_row = {
         "id": "scan-1",
         "song_id": "song-1",
@@ -188,7 +201,9 @@ def catalog() -> dict[str, Any]:
         "revision": 1,
         "original": representation(),
         "optimized": None,
-        "readability": "original_fallback",
+        "readability": "direct",
+        "readabilityPath": MEDIA_PATH,
+        "readabilitySelection": selection_row,
         "replacementHistory": [],
         "createdAt": STAMP,
         "createdBy": "system:synthetic",
@@ -241,7 +256,7 @@ def catalog() -> dict[str, Any]:
         },
         "source": {
             "commit": "1234567890abcdef1234567890abcdef12345678",
-            "schemaVersion": "0022",
+            "schemaVersion": "0023",
             "environment": "synthetic-test",
             "includedTables": sorted(archive.ALLOWED_SOURCE_TABLES),
             "excludedTables": [
@@ -264,6 +279,7 @@ def catalog() -> dict[str, Any]:
                 "lyric_texts": 1,
                 "scans": 1,
                 "media_objects": 1,
+                "scan_readability_selections": 1,
                 "song_languages": 1,
                 "unassignedMedia": 0,
             },
@@ -288,6 +304,7 @@ def catalog() -> dict[str, Any]:
                     "song_languages": [language_link],
                     "lyric_texts": [lyric_row],
                     "media_objects": [media_row],
+                    "scan_readability_selections": [selection_row],
                     "scans": [scan_row],
                 },
             }

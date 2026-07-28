@@ -34,7 +34,7 @@ describe("loadOfflineLibrary", () => {
             pageLabel: "Page 12",
             revision: 3,
             rotationQuarterTurns: 2,
-            hasReadabilityDerivative: 1,
+            hasReadabilityRepresentation: 1,
             filename: "page.jpg",
           }] };
           if (query.includes("FROM recordings\n")) return { results: [{
@@ -73,7 +73,7 @@ describe("loadOfflineLibrary", () => {
         pageLabel: "Page 12",
         revision: 3,
         rotationQuarterTurns: 2,
-        hasReadabilityDerivative: true,
+        hasReadabilityRepresentation: true,
       })],
       recordings: [expect.objectContaining({
         id: "recording-1",

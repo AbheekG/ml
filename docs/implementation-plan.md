@@ -10,6 +10,21 @@ Private legacy file work remains owner-paused; other optional UX refinement,
 audit/cleanup, and production readiness remain separately prioritized and
 approved.
 
+Current Scan-policy checkpoint (2026-07-28): migration
+`0023_scan_readability_selection.sql`, runtime source-versus-derivative
+selection, portable schema `0023`, guarded AppSheet reconciliation, and
+aggregate-only operational monitoring are implemented locally and await the
+ordered protected-staging rollout. The policy always retains the exact source,
+uses a strict safe JPEG directly, skips encoding below 1 MiB, and retains an
+optional candidate only for both 20% and 256 KiB savings. Required
+normalization remains quality-85 JPEG at no more than 2400 pixels per edge.
+The authorized cleanup is exactly 446 recovery histories and their former
+source/derivative pairs plus redundant current derivatives; all 499 current
+sources, the one unrelated synthetic history, all other synthetic test data,
+and all O-1 material are outside deletion scope. Code, tests, and local commits
+must precede migration/deployment; D1 must commit and reconcile before any R2
+delete.
+
 Portable-export implementation checkpoint (2026-07-24): profile 1.0.0,
 migrations through `0022_portable_export_item_chunks.sql`, the admin-only frozen
 API and Account workflow, Access-authenticated resumable local downloads, and the
@@ -323,8 +338,12 @@ hash-collision gates. The separately guarded executor activated new private
 source/readability pairs, retained every former pair through immutable Scan
 history, and used recoverable Trash for the rejected wrong-parent Scan. The
 owner accepted the final post-activation comparison PDF. Do not rerun the swap,
-regenerate its mappings, or garbage-collect the retained history. Production and
-the unresolved cases remain separately owner-gated; see
+or regenerate its mappings. The earlier hold on garbage-collecting its retained
+test-era history was later superseded by the owner's exact 446-history
+readability-policy reconciliation approval. That later cleanup must use the
+accepted plan as immutable scope, preserve the one unrelated synthetic history,
+and leave all unresolved current sources in place. Production and the unresolved
+cases remain separately owner-gated; see
 [scan-original-recovery.md](scan-original-recovery.md).
 
 Protected-staging Worker version `3e6ac24e-93d3-4704-9fd8-a6bbb0b75efc`

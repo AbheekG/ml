@@ -107,7 +107,7 @@ describe("catalog filters", () => {
         pageLabel: "1",
         revision: 1,
         rotationQuarterTurns: 0,
-        hasReadabilityDerivative: true,
+        hasReadabilityRepresentation: true,
         filename: "page.jpg",
       }],
       recordings: [{

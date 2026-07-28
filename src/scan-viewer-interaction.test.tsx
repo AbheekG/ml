@@ -14,7 +14,7 @@ const scan: SongScan = {
   pageLabel: null,
   revision: 2,
   rotationQuarterTurns: 0,
-  hasReadabilityDerivative: true,
+  hasReadabilityRepresentation: true,
   filename: "page.jpg",
 };
 

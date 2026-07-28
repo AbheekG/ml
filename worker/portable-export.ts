@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 
 export const PORTABLE_EXPORT_PROFILE_VERSION = "1.0.0";
-export const PORTABLE_EXPORT_SCHEMA_VERSION = "0022";
+export const PORTABLE_EXPORT_SCHEMA_VERSION = "0023";
 export const PORTABLE_EXPORT_LIFETIME_MS = 24 * 60 * 60 * 1000;
 export const PORTABLE_EXPORT_CLEANUP_GRACE_MS = 6 * 60 * 60 * 1000;
 export const PORTABLE_EXPORT_PAGE_MAX = 200;
@@ -240,6 +240,18 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
       'source_media_id', source_media_id, 'source_sha256', source_sha256,
       'source_byte_size', source_byte_size, 'mime_type', mime_type,
       'byte_size', byte_size, 'sha256', sha256, 'width', width, 'height', height,
+      'policy_id', policy_id, 'created_at', created_at, 'created_by', created_by
+    )`,
+  },
+  {
+    table: "scan_readability_selections",
+    key: "source_media_id",
+    order: "source_media_id",
+    json: `json_object(
+      'source_media_id', source_media_id, 'source_sha256', source_sha256,
+      'source_byte_size', source_byte_size, 'source_width', source_width,
+      'source_height', source_height, 'representation_kind', representation_kind,
+      'selection_basis', selection_basis, 'candidate_byte_size', candidate_byte_size,
       'policy_id', policy_id, 'created_at', created_at, 'created_by', created_by
     )`,
   },

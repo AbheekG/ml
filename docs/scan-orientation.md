@@ -16,10 +16,12 @@ Scan's source media resets the value to `0` because the prior correction does
 not necessarily apply to the replacement.
 
 The value is presentation metadata only. Neither the exact private original nor
-the stored readability JPEG is rotated, replaced, or deleted. The browser
-applies the saved value after the readability pipeline's encoded-orientation
-normalization. `Open original` continues to expose the authenticated untouched
-source and therefore does not promise the saved display orientation.
+an optional stored readability JPEG is rotated or replaced. A direct-safe source
+is already orientation-free; required normalization applies encoded orientation
+once while creating the derivative. The browser then applies the saved
+quarter-turn to whichever representation D1 selected. `Open original` continues
+to expose the authenticated untouched source and therefore does not promise the
+saved display orientation.
 
 ## Viewer and editor behavior
 
@@ -40,7 +42,7 @@ mutation queue and viewers never issue the write.
 
 Viewer sharing uses the complete currently displayed orientation, independent
 of whether an editor save has completed. The browser draws the already loaded,
-authenticated readability image into a dimension-swapped canvas when needed
+authenticated selected readability representation into a dimension-swapped canvas when needed
 and creates a temporary semantic JPEG filename from the Song title plus Scan
 Notebook/Page metadata and multi-Scan list position; zoom and pan do not crop
 the shared page. The temporary file is bounded to 20 MiB, contains no separate
@@ -49,8 +51,9 @@ share may reuse the verified readability bytes; a saved nonzero row orientation
 is applied in the browser before sharing.
 
 The existing second-tap behavior remains when preparation outlasts native user
-activation. Sharing remains unavailable for an original fallback, failed load,
-unsupported browser, or offline device.
+activation. A policy-selected direct source is a validated readability response,
+not an unverified fallback, and is shareable. Sharing remains unavailable for a
+legacy original fallback, failed load, unsupported browser, or offline device.
 
 ## Acceptance gate
 

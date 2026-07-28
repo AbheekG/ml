@@ -21,6 +21,13 @@ build `a21da884e66a` at 100%. Pre/post catalog and media reconciliation is
 unchanged, Access still returns the expected unauthenticated redirect, and the
 final R2 aggregate check remains 2,933 objects / 8.1 GB.
 
+Source schema `0023` is the next rollout. Do not prepare a schema-0023 plan
+until `0023_scan_readability_selection.sql` is applied and the guarded Scan
+reconciliation reports 499 current selections with none missing. Direct Scan
+sources then contribute one payload, while selected derivatives contribute the
+original plus one distinct optimized payload. The schema-0022 acceptance
+figures in this runbook remain historical evidence for the earlier archive.
+
 The owner's two earlier authenticated create requests rolled back cleanly and
 retained bounded aggregate-only failure stubs. The second failure was not the
 previously inferred D1 transaction execution boundary. An exact read-only

@@ -9,15 +9,36 @@ import {
   type AppRole,
 } from "./index";
 
-function fakeImages(): ImagesBinding {
+function safeTestJpeg(totalBytes = 128): Uint8Array<ArrayBuffer> {
+  const width = 1200;
+  const height = 900;
+  const header = [
+    0xff, 0xd8,
+    0xff, 0xe0, 0x00, 0x10,
+    0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x02, 0x00,
+    0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+    0xff, 0xc0, 0x00, 0x11, 0x08,
+    (height >> 8) & 0xff, height & 0xff,
+    (width >> 8) & 0xff, width & 0xff,
+    0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00,
+    0xff, 0xda, 0x00, 0x0c,
+    0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00,
+  ];
+  const bytes = new Uint8Array(Math.max(totalBytes, header.length + 2));
+  bytes.set(header);
+  bytes.set([0xff, 0xd9], bytes.length - 2);
+  return bytes;
+}
+
+function fakeImages(sourceFileSize = 4): ImagesBinding {
   let infoCalls = 0;
-  const output = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+  const output = safeTestJpeg();
   return {
     async info() {
       infoCalls += 1;
       return infoCalls % 2 === 1
-        ? { format: "image/jpeg", fileSize: 4, width: 1200, height: 900 }
-        : { format: "image/jpeg", fileSize: 4, width: 1200, height: 900 };
+        ? { format: "image/jpeg", fileSize: sourceFileSize, width: 1200, height: 900 }
+        : { format: "image/jpeg", fileSize: output.byteLength, width: 1200, height: 900 };
     },
     input() {
       const transformer = {
@@ -180,7 +201,7 @@ describe("historical Scan maintenance", () => {
     };
     const basePrepare = database.prepare.bind(database);
     database.prepare = ((query: string) => {
-      if (query.includes("FROM scan_readability_derivatives")) {
+      if (query.includes("FROM scan_readability_selections")) {
         const statement = {
           bind() { return statement; },
           async first() {
@@ -2125,9 +2146,11 @@ describe("controlled lookup API", () => {
 });
 
 describe("Scan upload API", () => {
-  function scanUploadBody(): FormData {
+  function scanUploadBody(
+    bytes = new Uint8Array([0xff, 0xd8, 0xff, 0x00]),
+  ): FormData {
     const body = new FormData();
-    body.set("file", new File([new Uint8Array([0xff, 0xd8, 0xff, 0x00])], "page.txt", { type: "text/plain" }));
+    body.set("file", new File([bytes], "page.txt", { type: "text/plain" }));
     body.set("notebookId", "");
     body.set("pageLabel", "");
     return body;
@@ -2183,7 +2206,8 @@ describe("Scan upload API", () => {
         expect(statements[0].values[4]).toBe(4);
         expect(statements[0].values[5]).toMatch(/^[a-f0-9]{64}$/);
         expect(statements[1].query).toContain("INSERT INTO scan_readability_derivatives");
-        expect(statements[2].query).toContain("INSERT INTO scans");
+        expect(statements[2].query).toContain("INSERT INTO scan_readability_selections");
+        expect(statements[3].query).toContain("INSERT INTO scans");
         return statements.map(() => ({ meta: { changes: 1 } }));
       },
     } as unknown as D1Database;
@@ -2206,8 +2230,62 @@ describe("Scan upload API", () => {
       expect.stringMatching(/^scans\/[a-f0-9-]+\.jpg$/u),
       expect.stringMatching(/^scans\/readability\/[a-f0-9-]+\.jpg$/u),
     ]));
-    expect([...stored.values()]).toEqual([4, 4]);
+    expect([...stored.values()]).toEqual([4, 128]);
     await expect(response.json()).resolves.toMatchObject({ scan: { revision: 1, filename: "page.txt" } });
+  });
+
+  it("stores one object and a direct selection for a safe sub-1 MiB JPEG", async () => {
+    type FakeStatement = D1PreparedStatement & { query: string; values: unknown[] };
+    const source = safeTestJpeg();
+    const database = {
+      prepare: (query: string) => ({
+        query,
+        values: [],
+        bind(...values: unknown[]) {
+          const statement = this as unknown as FakeStatement;
+          return {
+            ...statement,
+            values,
+            first: async () => query.includes("FROM songs")
+              ? { id: "song-1" }
+              : null,
+          };
+        },
+      }),
+      batch: async (statements: FakeStatement[]) => {
+        expect(statements).toHaveLength(4);
+        expect(statements[0].query).toContain("INSERT INTO media_objects");
+        expect(statements[1].query).toContain("INSERT INTO scan_readability_selections");
+        expect(statements[1].values).toEqual(expect.arrayContaining([
+          "source",
+          "direct_safe_source",
+          null,
+          "scan-readability-selection-v2",
+        ]));
+        expect(statements.some((statement) => (
+          statement.query.includes("INSERT INTO scan_readability_derivatives")
+        ))).toBe(false);
+        return statements.map(() => ({ meta: { changes: 1 } }));
+      },
+    } as unknown as D1Database;
+    const storedKeys: string[] = [];
+    const media = {
+      put: async (key: string) => { storedKeys.push(key); return {}; },
+    } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/songs/song-1/scans",
+      { method: "POST", body: scanUploadBody(source) },
+      {
+        ...localBindings(database),
+        MEDIA: media,
+        IMAGES: fakeImages(source.byteLength),
+      },
+    );
+
+    expect(response.status).toBe(201);
+    expect(storedKeys).toHaveLength(1);
+    expect(storedKeys[0]).toMatch(/^scans\/[a-f0-9-]+\.jpg$/u);
   });
 
   it("rejects exact original or readability bytes before writing to private storage", async () => {
@@ -2500,7 +2578,7 @@ describe("Scan upload API", () => {
           first: async () => {
             if (query.includes("FROM songs")) return { id: "song-1" };
             if (query.includes("AS mediaExists")) {
-              return { mediaExists: 0, derivativeExists: 0 };
+              return { mediaExists: 0, derivativeExists: 0, selectionExists: 0 };
             }
             return null;
           },

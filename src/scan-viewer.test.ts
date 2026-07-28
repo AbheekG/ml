@@ -16,8 +16,8 @@ import {
 } from "./scan-viewer";
 
 const scans = [
-  { id: "one", mediaId: "m1", notebookId: "book", notebookName: "Book", pageLabel: "1", revision: 1, rotationQuarterTurns: 0 as const, hasReadabilityDerivative: true, filename: "1.jpg" },
-  { id: "two", mediaId: "m2", notebookId: null, notebookName: null, pageLabel: null, revision: 1, rotationQuarterTurns: 0 as const, hasReadabilityDerivative: true, filename: "2.jpg" },
+  { id: "one", mediaId: "m1", notebookId: "book", notebookName: "Book", pageLabel: "1", revision: 1, rotationQuarterTurns: 0 as const, hasReadabilityRepresentation: true, filename: "1.jpg" },
+  { id: "two", mediaId: "m2", notebookId: null, notebookName: null, pageLabel: null, revision: 1, rotationQuarterTurns: 0 as const, hasReadabilityRepresentation: true, filename: "2.jpg" },
 ];
 
 describe("scan viewer helpers", () => {

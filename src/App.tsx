@@ -524,7 +524,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
     total: number,
     songTitle: string,
   ): Promise<void> {
-    if (!isOnline || !scan.hasReadabilityDerivative || scanShareBusy !== null) return;
+    if (!isOnline || !scan.hasReadabilityRepresentation || scanShareBusy !== null) return;
     const scanId = scan.id;
     const rotationQuarterTurns = scan.rotationQuarterTurns;
     const filename = scanExportFilename(
@@ -565,7 +565,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
         setPreparedScanShare({ scanId, rotationQuarterTurns, file });
         setScanShareFeedback({
           scanId,
-          message: "The optimized scan is ready. Tap Share again.",
+          message: "The readable scan is ready. Tap Share again.",
           isError: false,
         });
       } else {
@@ -581,12 +581,12 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
       setScanShareFeedback({
         scanId,
         message: code === "optimized_unavailable"
-          ? "An optimized copy is not available for sharing."
+          ? "A validated readable scan is not available for sharing."
           : code === "file_too_large"
-            ? "This optimized scan is too large to share."
+            ? "This readable scan is too large to share."
             : code === "share_unavailable"
               ? "File sharing is not available in this browser."
-              : "The optimized scan could not be shared right now.",
+              : "The readable scan could not be shared right now.",
         isError: true,
       });
     } finally {
@@ -857,7 +857,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                         title={isOnline ? "View Scan" : "Scans require an internet connection"}
                         onClick={() => setViewerScanId(scan.id)}
                       ><ActionContent kind="view" label="View" /></button>
-                      {scan.hasReadabilityDerivative && supportsOptimizedScanSharing() && (
+                      {scan.hasReadabilityRepresentation && supportsOptimizedScanSharing() && (
                         <button
                           className="media-action compact-action"
                           type="button"
@@ -867,7 +867,7 @@ function SongDetailPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: boo
                             : "Share Scan"}
                           aria-busy={scanShareBusy?.scanId === scan.id || undefined}
                           aria-describedby={scanShareFeedback?.scanId === scan.id ? `scan-share-${scan.id}` : undefined}
-                          title={isOnline ? "Share the optimized scan image" : "Scan sharing requires an internet connection"}
+                          title={isOnline ? "Share the readable scan image" : "Scan sharing requires an internet connection"}
                           onClick={() => {
                             void shareScan(scan, index, song.scans.length, song.titleLatin);
                           }}

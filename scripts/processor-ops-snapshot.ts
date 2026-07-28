@@ -98,7 +98,7 @@ export type ProcessorOpsSnapshot = {
     unclassifiedUploadSessions: number;
     activeUnclassifiedUploadSessions: number;
     missingScanHashes: number;
-    missingScanDerivatives: number;
+    missingCurrentScanReadabilitySelections: number;
     scanMaintenanceFailures: number;
     expiredScanMaintenanceLeases: number;
     foreignKeyErrors: number;
@@ -534,11 +534,14 @@ export function evaluateAlerts(
       detail: `missingScanHashes=${snapshot.d1.missingScanHashes}`,
     });
   }
-  if (snapshot.d1.missingScanDerivatives > 0 || snapshot.d1.scanMaintenanceFailures > 0) {
+  if (
+    snapshot.d1.missingCurrentScanReadabilitySelections > 0
+    || snapshot.d1.scanMaintenanceFailures > 0
+  ) {
     alerts.push({
       code: "d1_scan_maintenance_incomplete",
       severity: "warning",
-      detail: `missingDerivatives=${snapshot.d1.missingScanDerivatives},failures=${snapshot.d1.scanMaintenanceFailures}`,
+      detail: `missingCurrentSelections=${snapshot.d1.missingCurrentScanReadabilitySelections},failures=${snapshot.d1.scanMaintenanceFailures}`,
     });
   }
   if (snapshot.d1.expiredScanMaintenanceLeases > 0) {
@@ -807,7 +810,7 @@ export async function buildProcessorOpsSnapshot(
       "--remote",
       "--json",
       "--command",
-      "SELECT COUNT(*) AS total_jobs, COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0) AS pending_jobs, COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0) AS running_jobs, COALESCE(SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END),0) AS succeeded_jobs, COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0) AS failed_jobs, (SELECT COUNT(*) FROM audio_processing_dispatch_attempts WHERE status='started') AS started_dispatch_attempts, (SELECT COUNT(*) FROM audio_processing_dispatch_attempts WHERE status='failed') AS failed_dispatch_attempts, (SELECT COUNT(*) FROM audio_processing_dispatch_attempts WHERE status='started' AND requested_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes')) AS stale_dispatch_attempts, (SELECT COUNT(*) FROM recording_upload_sessions WHERE status IN ('open','completing','stored','duplicate')) AS recoverable_upload_sessions, (SELECT COUNT(*) FROM recording_upload_sessions LEFT JOIN recording_upload_intents ON recording_upload_intents.session_id=recording_upload_sessions.id WHERE recording_upload_intents.session_id IS NULL) AS unclassified_upload_sessions, (SELECT COUNT(*) FROM recording_upload_sessions LEFT JOIN recording_upload_intents ON recording_upload_intents.session_id=recording_upload_sessions.id WHERE recording_upload_intents.session_id IS NULL AND recording_upload_sessions.status IN ('creating','open','completing','stored','duplicate')) AS active_unclassified_upload_sessions, (SELECT COUNT(*) FROM media_objects WHERE kind='scan' AND sha256 IS NULL) AS missing_scan_hashes, (SELECT COUNT(*) FROM media_objects LEFT JOIN scan_readability_derivatives ON scan_readability_derivatives.source_media_id=media_objects.id WHERE media_objects.kind='scan' AND scan_readability_derivatives.source_media_id IS NULL) AS missing_scan_derivatives, (SELECT COUNT(*) FROM scan_maintenance_failures) AS scan_maintenance_failures, (SELECT COUNT(*) FROM scan_maintenance_leases WHERE lease_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now')) AS expired_scan_maintenance_leases, (SELECT COUNT(*) FROM pragma_foreign_key_check) AS foreign_key_errors FROM audio_processing_jobs;",
+      "SELECT COUNT(*) AS total_jobs, COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0) AS pending_jobs, COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0) AS running_jobs, COALESCE(SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END),0) AS succeeded_jobs, COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0) AS failed_jobs, (SELECT COUNT(*) FROM audio_processing_dispatch_attempts WHERE status='started') AS started_dispatch_attempts, (SELECT COUNT(*) FROM audio_processing_dispatch_attempts WHERE status='failed') AS failed_dispatch_attempts, (SELECT COUNT(*) FROM audio_processing_dispatch_attempts WHERE status='started' AND requested_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes')) AS stale_dispatch_attempts, (SELECT COUNT(*) FROM recording_upload_sessions WHERE status IN ('open','completing','stored','duplicate')) AS recoverable_upload_sessions, (SELECT COUNT(*) FROM recording_upload_sessions LEFT JOIN recording_upload_intents ON recording_upload_intents.session_id=recording_upload_sessions.id WHERE recording_upload_intents.session_id IS NULL) AS unclassified_upload_sessions, (SELECT COUNT(*) FROM recording_upload_sessions LEFT JOIN recording_upload_intents ON recording_upload_intents.session_id=recording_upload_sessions.id WHERE recording_upload_intents.session_id IS NULL AND recording_upload_sessions.status IN ('creating','open','completing','stored','duplicate')) AS active_unclassified_upload_sessions, (SELECT COUNT(*) FROM media_objects WHERE kind='scan' AND sha256 IS NULL) AS missing_scan_hashes, (SELECT COUNT(*) FROM scans LEFT JOIN scan_readability_selections ON scan_readability_selections.source_media_id=scans.media_id WHERE scan_readability_selections.source_media_id IS NULL) AS missing_current_scan_readability_selections, (SELECT COUNT(*) FROM scan_maintenance_failures) AS scan_maintenance_failures, (SELECT COUNT(*) FROM scan_maintenance_leases WHERE lease_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now')) AS expired_scan_maintenance_leases, (SELECT COUNT(*) FROM pragma_foreign_key_check) AS foreign_key_errors FROM audio_processing_jobs;",
     ],
     "d1_query_failed",
   );
@@ -978,9 +981,9 @@ export async function buildProcessorOpsSnapshot(
         "invalid_d1_active_unclassified_upload_sessions",
       ),
       missingScanHashes: parseInteger(d1Row.missing_scan_hashes, "invalid_d1_missing_scan_hashes"),
-      missingScanDerivatives: parseInteger(
-        d1Row.missing_scan_derivatives,
-        "invalid_d1_missing_scan_derivatives",
+      missingCurrentScanReadabilitySelections: parseInteger(
+        d1Row.missing_current_scan_readability_selections,
+        "invalid_d1_missing_current_scan_readability_selections",
       ),
       scanMaintenanceFailures: parseInteger(
         d1Row.scan_maintenance_failures,

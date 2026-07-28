@@ -1,6 +1,6 @@
 export const PORTABLE_PROFILE_ID = "urn:music-library:portable-archive-profile:1";
 export const PORTABLE_PROFILE_VERSION = "1.0.0";
-export const PORTABLE_SCHEMA_VERSION = "0022";
+export const PORTABLE_SCHEMA_VERSION = "0023";
 export const PORTABLE_TOOL_VERSION = "1.0.0";
 export const MAX_PORTABLE_COMPONENT_BYTES = 120;
 export const MAX_PORTABLE_PATH_BYTES = 512;
@@ -128,6 +128,7 @@ const INCLUDED_SOURCE_TABLES = [
   "scan_fingerprints",
   "scan_media_history",
   "scan_readability_derivatives",
+  "scan_readability_selections",
   "scans",
   "song_aliases",
   "song_credits",
@@ -439,6 +440,54 @@ function optimizedScanRepresentation(
   return mediaRepresentation(proxy, path, "scan_optimized");
 }
 
+type PortableScanReadabilityChoice = {
+  mode: "direct" | "optimized" | "optimized_legacy" | "original_fallback";
+  derivative: Record<string, JsonValue> | null;
+  selection: Record<string, JsonValue> | null;
+};
+
+function scanReadabilityChoice(
+  media: Record<string, JsonValue>,
+  derivative: Record<string, JsonValue> | undefined,
+  selection: Record<string, JsonValue> | undefined,
+): PortableScanReadabilityChoice {
+  const mediaId = stringValue(media, "id")!;
+  if (!selection) {
+    return {
+      mode: derivative ? "optimized_legacy" : "original_fallback",
+      derivative: derivative ?? null,
+      selection: null,
+    };
+  }
+  if (
+    stringValue(selection, "source_media_id") !== mediaId
+    || stringValue(selection, "source_sha256") !== stringValue(media, "sha256")
+    || numberValue(selection, "source_byte_size") !== numberValue(media, "byte_size")
+    || numberValue(selection, "source_width") < 1
+    || numberValue(selection, "source_height") < 1
+    || stringValue(selection, "policy_id") !== "scan-readability-selection-v2"
+  ) {
+    throw new Error("portable_scan_selection_provenance_invalid");
+  }
+  const representation = stringValue(selection, "representation_kind");
+  const basis = stringValue(selection, "selection_basis");
+  if (representation === "source") {
+    if (basis !== "direct_safe_source" || derivative) {
+      throw new Error("portable_scan_direct_selection_invalid");
+    }
+    return { mode: "direct", derivative: null, selection };
+  }
+  if (
+    representation !== "derivative"
+    || (basis !== "required_normalization" && basis !== "optional_material_savings")
+    || !derivative
+    || numberValue(selection, "candidate_byte_size") !== numberValue(derivative, "byte_size")
+  ) {
+    throw new Error("portable_scan_derivative_selection_invalid");
+  }
+  return { mode: "optimized", derivative, selection };
+}
+
 function sortRows(
   values: Array<Record<string, JsonValue>>,
   orderField: string,
@@ -473,6 +522,7 @@ export async function buildPortableExportModel(
   const recordingById = byId(groups, "recordings");
   const notebookById = byId(groups, "notebooks");
   const readabilityBySource = byId(groups, "scan_readability_derivatives", "source_media_id");
+  const selectionBySource = byId(groups, "scan_readability_selections", "source_media_id");
 
   const itemBySource = new Map<string, FrozenExportItem>();
   for (const item of frozenItems) {
@@ -614,6 +664,12 @@ export async function buildPortableExportModel(
       `media_object:${mediaId}`,
       `${folder}/History/Scans/${marker} — original.${extension}`,
     );
+    if (readabilityBySource.has(mediaId)) {
+      claimPayload(
+        `scan_readability:${mediaId}`,
+        `${folder}/History/Scans/${marker} — optimized.jpg`,
+      );
+    }
   }
   for (const history of rows(groups, "recording_media_history")) {
     const recordingId = stringValue(history, "recording_id")!;
@@ -793,26 +849,52 @@ export async function buildPortableExportModel(
         payloadPathBySource.get(`media_object:${mediaId}`)!,
         "scan_original",
       );
-      const derivative = readabilityBySource.get(mediaId);
-      const optimized = derivative
+      const choice = scanReadabilityChoice(
+        media,
+        readabilityBySource.get(mediaId),
+        selectionBySource.get(mediaId),
+      );
+      const optimized = choice.derivative
         ? optimizedScanRepresentation(
-          derivative,
+          choice.derivative,
           payloadPathBySource.get(`scan_readability:${mediaId}`)!,
         )
         : null;
-      const history = (scanHistoryByScan.get(scanId) ?? []).map((entry) => ({
-        ...portableEntity(entry, "ScanReplacement"),
-        mediaId: stringValue(entry, "media_id"),
-        path: payloadPathBySource.get(`media_object:${stringValue(entry, "media_id")}`)!,
-        original: mediaRepresentation(
-          mediaById.get(stringValue(entry, "media_id")!)!,
-          payloadPathBySource.get(`media_object:${stringValue(entry, "media_id")}`)!,
-          "scan_historical_original",
-        ) as unknown as JsonValue,
-        replacedAt: stringValue(entry, "replaced_at"),
-        replacedBy: stringValue(entry, "replaced_by"),
-        revisionAtReplacement: numberValue(entry, "revision_at_replacement"),
-      }));
+      const history = (scanHistoryByScan.get(scanId) ?? []).map((entry) => {
+        const historicalMediaId = stringValue(entry, "media_id")!;
+        const historicalMedia = mediaById.get(historicalMediaId)!;
+        const historicalChoice = scanReadabilityChoice(
+          historicalMedia,
+          readabilityBySource.get(historicalMediaId),
+          selectionBySource.get(historicalMediaId),
+        );
+        const historicalOriginalPath = payloadPathBySource.get(
+          `media_object:${historicalMediaId}`,
+        )!;
+        const historicalOptimized = historicalChoice.derivative
+          ? optimizedScanRepresentation(
+            historicalChoice.derivative,
+            payloadPathBySource.get(`scan_readability:${historicalMediaId}`)!,
+          )
+          : null;
+        return {
+          ...portableEntity(entry, "ScanReplacement"),
+          mediaId: historicalMediaId,
+          path: historicalOriginalPath,
+          original: mediaRepresentation(
+            historicalMedia,
+            historicalOriginalPath,
+            "scan_historical_original",
+          ) as unknown as JsonValue,
+          optimized: historicalOptimized as unknown as JsonValue,
+          readability: historicalChoice.mode,
+          readabilityPath: historicalOptimized?.path ?? historicalOriginalPath,
+          readabilitySelection: historicalChoice.selection as unknown as JsonValue,
+          replacedAt: stringValue(entry, "replaced_at"),
+          replacedBy: stringValue(entry, "replaced_by"),
+          revisionAtReplacement: numberValue(entry, "revision_at_replacement"),
+        };
+      });
       return {
         ...portableEntity(scan, "Scan"),
         songId: id,
@@ -822,7 +904,9 @@ export async function buildPortableExportModel(
         revision: numberValue(scan, "revision"),
         original: original as unknown as JsonValue,
         optimized: optimized as unknown as JsonValue,
-        readability: optimized ? "optimized" : "original_fallback",
+        readability: choice.mode,
+        readabilityPath: optimized?.path ?? original.path,
+        readabilitySelection: choice.selection as unknown as JsonValue,
         replacementHistory: history as unknown as JsonValue,
         createdAt: stringValue(scan, "created_at"),
         createdBy: stringValue(scan, "created_by"),

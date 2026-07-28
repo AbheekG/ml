@@ -29,6 +29,7 @@
     "media:review-unassigned-drive": "tsx scripts/scan-original-unassigned-drive-review.ts",
     "media:apply-unassigned-drive-feedback": "tsx scripts/scan-original-unassigned-drive-feedback.ts",
     "media:swap-scan-originals": "tsx scripts/scan-original-swap-executor.ts",
+    "media:reconcile-scan-readability": "tsx scripts/scan-readability-reconciliation.ts",
     "media:backfill-scan-fingerprints": "tsx scripts/scan-fingerprint-backfill-executor.ts",
     "media:integrate-audio": "tsx scripts/audio-integration-executor.ts",
     "ops:processor-snapshot": "tsx scripts/processor-ops-snapshot.ts",
