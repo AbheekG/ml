@@ -4,6 +4,7 @@ import {
   MAX_SCAN_IMAGE_BINDING_BYTES,
   scanCandidateHasMaterialSavings,
   scanJpegIsDirectlyUsable,
+  stripScanJpegMetadata,
   scanReadabilityObjectKey,
   SCAN_OPTIONAL_CANDIDATE_MIN_SOURCE_BYTES,
   selectScanReadabilityRepresentation,
@@ -18,6 +19,7 @@ function fakeImages(options: {
   outputBytes?: number;
   outputWidth?: number;
   outputHeight?: number;
+  outputMetadata?: boolean;
   rejectSource?: boolean;
   rejectOutput?: boolean;
   onInput?: () => void;
@@ -26,6 +28,7 @@ function fakeImages(options: {
   const output = safeJpeg(options.outputBytes ?? 128, {
     width: options.outputWidth ?? 2400,
     height: options.outputHeight ?? 1350,
+    metadata: options.outputMetadata,
   });
   return {
     async info() {
@@ -115,7 +118,19 @@ describe("Scan readability derivatives", () => {
       policyId: "scan-jpeg-v1-2400-q85",
     });
     expect(derivative.sha256).toMatch(/^[0-9a-f]{64}$/u);
-    expect(scanReadabilityObjectKey("media-1")).toBe("scans/readability/media-1.jpg");
+    expect(scanReadabilityObjectKey("media-1")).toBe("scans/readability-v2/media-1.jpg");
+  });
+
+  it("strips metadata emitted by the image service before hashing the derivative", async () => {
+    const derivative = await createScanReadabilityDerivative(
+      fakeImages({ outputMetadata: true }),
+      new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+    );
+    expect(derivative.bytes.byteLength).toBe(128 - 6);
+    expect(scanJpegIsDirectlyUsable(
+      derivative.bytes,
+      { width: derivative.width, height: derivative.height },
+    )).toBe(true);
   });
 
   it("rejects undecodable and over-area source images", async () => {
@@ -171,6 +186,14 @@ describe("Scan readability derivatives", () => {
     hiddenMetadata.set([0xff, 0xe1, 0x00, 0x04, 0x00, 0x00], hiddenMetadata.length - 8);
     expect(scanJpegIsDirectlyUsable(hiddenMetadata, { width: 1200, height: 900 }))
       .toBe(false);
+  });
+
+  it("losslessly removes pre-scan metadata while retaining decoded JPEG content", () => {
+    const withMetadata = safeJpeg(256, { metadata: true });
+    const stripped = stripScanJpegMetadata(withMetadata);
+    expect(stripped.byteLength).toBe(withMetadata.byteLength - 6);
+    expect(scanJpegIsDirectlyUsable(stripped, { width: 1200, height: 900 })).toBe(true);
+    expect([...stripped.slice(-2)]).toEqual([0xff, 0xd9]);
   });
 
   it.each([

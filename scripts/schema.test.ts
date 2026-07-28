@@ -27,10 +27,11 @@ const canonicalRecordingDatesMigration = readFileSync(resolve("migrations/0020_c
 const portableExportsMigration = readFileSync(resolve("migrations/0021_portable_exports.sql"), "utf8");
 const portableExportItemChunksMigration = readFileSync(resolve("migrations/0022_portable_export_item_chunks.sql"), "utf8");
 const scanReadabilitySelectionMigration = readFileSync(resolve("migrations/0023_scan_readability_selection.sql"), "utf8");
+const scanReadabilityV2KeysMigration = readFileSync(resolve("migrations/0024_scan_readability_v2_keys.sql"), "utf8");
 const migrationThroughPortableExports = `${initialMigration}\n${editingMigration}\n${songWritesMigration}\n${audioDerivativesMigration}\n${audioProcessingJobsMigration}\n${recordingUploadSessionsMigration}\n${audioProcessingControlMigration}\n${audioProcessingConcurrencyMigration}\n${mediaReplacementsMigration}\n${nonUniqueJobsMigration}\n${audioDispatchMigration}\n${scanIntegrityMigration}\n${scanMaintenanceLeasesMigration}\n${scanDisplayRotationMigration}\n${mediaParentMovesMigration}\n${playbackDuplicateDetectionMigration}\n${scanReadabilityDuplicateDetectionMigration}\n${indiaRecordingCalendarMigration}\n${recordingUploadFileIdentityMigration}\n${canonicalRecordingDatesMigration}\n${portableExportsMigration}`;
 const migrationBeforeReadabilitySelection =
   `${migrationThroughPortableExports}\n${portableExportItemChunksMigration}`;
-const migration = `${migrationBeforeReadabilitySelection}\n${scanReadabilitySelectionMigration}`;
+const migration = `${migrationBeforeReadabilitySelection}\n${scanReadabilitySelectionMigration}\n${scanReadabilityV2KeysMigration}`;
 const sqliteTestPreamble = "PRAGMA legacy_alter_table = OFF;";
 const timestamp = "2026-07-12T00:00:00.000Z";
 
@@ -57,6 +58,14 @@ function migrateReadabilitySelection(beforeMigration: string, afterMigration: st
   return execFileSync("sqlite3", [":memory:"], {
     encoding: "utf8",
     input: `${sqliteTestPreamble}\n${migrationBeforeReadabilitySelection}\n${beforeMigration}\n${scanReadabilitySelectionMigration}\n${afterMigration}`,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
+function migrateReadabilityV2Keys(beforeMigration: string, afterMigration: string): string {
+  return execFileSync("sqlite3", [":memory:"], {
+    encoding: "utf8",
+    input: `${sqliteTestPreamble}\n${migrationBeforeReadabilitySelection}\n${scanReadabilitySelectionMigration}\n${beforeMigration}\n${scanReadabilityV2KeysMigration}\n${afterMigration}`,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -1810,7 +1819,7 @@ describe("initial database schema", () => {
         created_at, created_by
       ) VALUES (
         'scan-media-1', '${"a".repeat(64)}', 1500000,
-        'scans/readability/scan-media-1.jpg', 'image/jpeg', 1300000,
+        'scans/readability-v2/scan-media-1.jpg', 'image/jpeg', 1300000,
         '${"b".repeat(64)}', 1200, 900, 'scan-jpeg-v1-2400-q85',
         '${timestamp}', 'test'
       );
@@ -1839,7 +1848,7 @@ describe("initial database schema", () => {
         created_at, created_by
       ) VALUES (
         'scan-media-1', '${"a".repeat(64)}', 400,
-        'scans/readability/scan-media-1.jpg', 'image/jpeg', 300,
+        'scans/readability-v2/scan-media-1.jpg', 'image/jpeg', 300,
         '${"b".repeat(64)}', 1200, 900, 'scan-jpeg-v1-2400-q85',
         '${timestamp}', 'test'
       );
@@ -1882,6 +1891,66 @@ describe("initial database schema", () => {
         (SELECT count(*) FROM scan_readability_selections);
     `);
     expect(output).toBe("1|0\n");
+  });
+
+  it("preserves legacy derivative keys while requiring v2 keys for new selections", () => {
+    const output = migrateReadabilityV2Keys(`
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'legacy-media', 'scans/legacy-media.png', 'legacy.png', 'image/png', 400,
+        '${"a".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO scan_readability_derivatives (
+        source_media_id, source_sha256, source_byte_size, object_key,
+        mime_type, byte_size, sha256, width, height, policy_id,
+        created_at, created_by
+      ) VALUES (
+        'legacy-media', '${"a".repeat(64)}', 400,
+        'scans/readability/legacy-media.jpg', 'image/jpeg', 300,
+        '${"b".repeat(64)}', 1200, 900, 'scan-jpeg-v1-2400-q85',
+        '${timestamp}', 'test'
+      );
+    `, `
+      INSERT INTO media_objects (
+        id, object_key, original_filename, mime_type, byte_size, sha256, kind,
+        created_at, created_by
+      ) VALUES (
+        'current-media', 'scans/current-media.png', 'current.png', 'image/png', 400,
+        '${"c".repeat(64)}', 'scan', '${timestamp}', 'test'
+      );
+      INSERT INTO scan_readability_derivatives (
+        source_media_id, source_sha256, source_byte_size, object_key,
+        mime_type, byte_size, sha256, width, height, policy_id,
+        created_at, created_by
+      ) VALUES (
+        'current-media', '${"c".repeat(64)}', 400,
+        'scans/readability-v2/current-media.jpg', 'image/jpeg', 300,
+        '${"d".repeat(64)}', 1200, 900, 'scan-jpeg-v1-2400-q85',
+        '${timestamp}', 'test'
+      );
+      INSERT INTO scan_readability_selections (
+        source_media_id, source_sha256, source_byte_size,
+        source_width, source_height, representation_kind, selection_basis,
+        candidate_byte_size, policy_id, created_at, created_by
+      ) VALUES (
+        'current-media', '${"c".repeat(64)}', 400, 1200, 900,
+        'derivative', 'required_normalization', 300,
+        'scan-readability-selection-v2', '${timestamp}', 'test'
+      );
+      SELECT
+        (SELECT object_key FROM scan_readability_derivatives
+          WHERE source_media_id = 'legacy-media') || '|' ||
+        (SELECT object_key FROM scan_readability_derivatives
+          WHERE source_media_id = 'current-media') || '|' ||
+        (SELECT COUNT(*) FROM scan_readability_selections) || '|' ||
+        (SELECT COUNT(*) FROM pragma_foreign_key_check);
+    `);
+    expect(output).toBe(
+      "scans/readability/legacy-media.jpg|"
+      + "scans/readability-v2/current-media.jpg|1|0\n",
+    );
   });
 
   it("preserves schema-0022 export audit/detail while enabling schema 0023 records", () => {

@@ -91,7 +91,7 @@ class TestD1 {
 class TestR2 {
   readonly objects = new Map<string, Uint8Array>([
     ["scans/original/scan-media-1", new Uint8Array([1, 2, 3, 4])],
-    ["scans/readability/scan-media-1.jpg", new Uint8Array([5, 6, 7])],
+    ["scans/readability-v2/scan-media-1.jpg", new Uint8Array([5, 6, 7])],
     ["recordings/original/audio-media-1", new Uint8Array([8, 9, 10, 11, 12])],
   ]);
   reads = 0;
@@ -199,7 +199,7 @@ function seedSource(database: DatabaseSync): void {
       source_media_id, source_sha256, source_byte_size, object_key,
       mime_type, byte_size, sha256, width, height, policy_id, created_at, created_by
     ) VALUES (
-      'scan-media-1', '${"1".repeat(64)}', 4, 'scans/readability/scan-media-1.jpg',
+      'scan-media-1', '${"1".repeat(64)}', 4, 'scans/readability-v2/scan-media-1.jpg',
       'image/jpeg', 3, '${"2".repeat(64)}', 10, 10, 'scan-jpeg-v1-2400-q85',
       '${timestamp}', 'system:scan-maintenance'
     );

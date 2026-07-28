@@ -102,7 +102,12 @@ function plan(): ReconciliationPlan {
     representationKind: "source",
     selectionBasis: "direct_safe_source",
     candidateByteSize: null,
-    derivativeObjectKey: `scans/readability/current-media-${index}.jpg`,
+    formerDerivativeObjectKey: `scans/readability/current-media-${index}.jpg`,
+    candidateObjectKey: `scans/readability-v2/current-media-${index}.jpg`,
+    candidateSha256: (index + 1000).toString(16).padStart(64, "0"),
+    candidateWidth: 1200,
+    candidateHeight: 900,
+    candidateLocalPath: null,
   }));
   const recoveryDeletes = Array.from({ length: 446 }, (_, index) => ({
     historyId: `recovery-history-${index}`,
@@ -112,7 +117,7 @@ function plan(): ReconciliationPlan {
     derivativeObjectKey: `scans/readability/recovery-media-${index}.jpg`,
   }));
   const r2DeleteKeys = [
-    ...decisions.map((row) => row.derivativeObjectKey),
+    ...decisions.map((row) => row.formerDerivativeObjectKey),
     ...recoveryDeletes.flatMap((row) => [row.sourceObjectKey, row.derivativeObjectKey]),
   ].sort();
   return {
@@ -137,6 +142,8 @@ function plan(): ReconciliationPlan {
       recoveryHistoriesDeleted: 446,
       preservedHistories: 1,
       d1DerivativeRowsDeleted: 945,
+      d1DerivativeRowsInserted: 0,
+      r2ObjectsUploaded: 0,
       r2ObjectsDeleted: r2DeleteKeys.length,
     },
   };
@@ -156,14 +163,16 @@ describe("Scan readability reconciliation", () => {
     });
 
     const material = currentRow(2, 1_500_000, 700_000);
-    expect(decideExistingReadability(
+    const materialDecision = decideExistingReadability(
       material,
       image(jpeg(material.sourceByteSize)),
       image(jpeg(material.derivativeByteSize)),
-    )).toMatchObject({
+    );
+    expect(materialDecision).toMatchObject({
       representationKind: "derivative",
       selectionBasis: "optional_material_savings",
       candidateByteSize: 700_000,
+      candidateObjectKey: "scans/readability-v2/media-2.jpg",
     });
 
     const metadata = currentRow(3, 500_000, 200_000);
@@ -174,6 +183,18 @@ describe("Scan readability reconciliation", () => {
     )).toMatchObject({
       representationKind: "derivative",
       selectionBasis: "required_normalization",
+    });
+
+    const legacyMetadata = currentRow(4, 500_000, 200_000);
+    const legacyDecision = decideExistingReadability(
+      legacyMetadata,
+      image(jpeg(legacyMetadata.sourceByteSize, { metadata: true })),
+      image(jpeg(legacyMetadata.derivativeByteSize, { metadata: true })),
+    );
+    expect(legacyDecision).toMatchObject({
+      representationKind: "derivative",
+      selectionBasis: "required_normalization",
+      candidateByteSize: legacyMetadata.derivativeByteSize - 6,
     });
   });
 
@@ -350,15 +371,38 @@ describe("Scan readability reconciliation", () => {
           representationKind: "source",
           selectionBasis: "direct_safe_source",
           candidateByteSize: null,
-          derivativeObjectKey: currentDerivativeKey,
+          formerDerivativeObjectKey: currentDerivativeKey,
+          candidateObjectKey: `scans/readability-v2/${currentMediaId}.jpg`,
+          candidateSha256: derivativeHash(index + 500),
+          candidateWidth: 1200,
+          candidateHeight: 900,
+          candidateLocalPath: null,
         });
       }
       database.exec("COMMIT");
+      decisions[498] = {
+        ...decisions[498]!,
+        representationKind: "derivative",
+        selectionBasis: "required_normalization",
+        candidateByteSize: 200000,
+        candidateLocalPath: resolve(
+          "notes/private/scan-readability-reconciliation/prepared/synthetic-candidate.jpg",
+        ),
+      };
       const completePlan = plan();
       completePlan.decisions = decisions;
       completePlan.recoveryDeletes = recoveryDeletes;
-      completePlan.aggregate.directSources = 499;
+      completePlan.r2DeleteKeys = [
+        ...decisions.map((row) => row.formerDerivativeObjectKey),
+        ...recoveryDeletes.flatMap(
+          (row) => [row.sourceObjectKey, row.derivativeObjectKey],
+        ),
+      ].sort();
+      completePlan.aggregate.directSources = 498;
+      completePlan.aggregate.requiredDerivatives = 1;
       completePlan.aggregate.d1DerivativeRowsDeleted = 945;
+      completePlan.aggregate.d1DerivativeRowsInserted = 1;
+      completePlan.aggregate.r2ObjectsUploaded = 1;
       database.exec(buildReconciliationSql(completePlan));
       expect(database.prepare(`
         SELECT
@@ -376,7 +420,7 @@ describe("Scan readability reconciliation", () => {
         scans: 499,
         media: 500,
         histories: 1,
-        derivatives: 1,
+        derivatives: 2,
         selections: 499,
         fingerprints: 500,
         foreignKeys: 0,
@@ -388,6 +432,13 @@ describe("Scan readability reconciliation", () => {
         id: "synthetic-history-to-preserve",
         media_id: "synthetic-history-media",
         replaced_by: "synthetic:test",
+      });
+      expect(database.prepare(`
+        SELECT object_key
+        FROM scan_readability_derivatives
+        WHERE source_media_id = 'current-media-498'
+      `).get()).toEqual({
+        object_key: "scans/readability-v2/current-media-498.jpg",
       });
     } finally {
       database.close();

@@ -1,6 +1,7 @@
 {
   "version": "1.0.0",
   "sourceSchema": "0023",
+  "databaseSchemaThrough": "0024",
   "tables": {
     "app_users": {
       "treatment": "included_as_historical_actors",

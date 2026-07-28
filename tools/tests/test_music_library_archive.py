@@ -641,6 +641,13 @@ class ArchiveToolTests(unittest.TestCase):
         ):
             archive.load_kit(self.kit)
 
+        with self.assertRaisesRegex(
+            archive.ArchiveError, "forbidden_storage_locator"
+        ):
+            archive._assert_no_capabilities(
+                {"opaqueValue": "scans/readability-v2/media-1.jpg"}
+            )
+
         shutil.rmtree(self.kit)
         write_kit(self.kit)
         schema = self.kit / "metadata/schemas/catalog.schema.json"

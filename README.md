@@ -79,15 +79,25 @@ and separately authorized cutover work:
 - the deployed audit follow-up gives focus and interactive controls at least 3:1 non-text contrast, completes keyboard/ARIA behavior for the Lists tabs, protects dirty editor state across navigation and reconnect, and classifies terminal pre-intent upload history as informational; the owner accepted its keyboard, unsaved-work, offline/reconnect, and date-input behavior on macOS;
 - the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
 - the protected Access/session boundary uses a Worker-compatible, bounded rotating JWKS cache; protected catalog refresh waits for a validated session and turns a definitive 401/403 into one explicit renewal screen instead of a false empty catalog. Logout keeps its durable privacy barrier through a matched Cloudflare return, treats the bounded HTTP-cache-clear request as defense in depth, and has only one automatic top-level Access navigation. The owner accepted the repaired Chrome sign-in/catalog and single-cycle logout flow;
-- the current protected-staging deployment is Worker `39a615da-a23b-4931-b0fc-d0d7612fc39c` with client/service-worker build `a21da884e66a`; migrations through `0022_portable_export_item_chunks.sql` are applied with none pending. The Account page recovers the creator's current ready plan across refresh/tabs, reuses it instead of creating a duplicate, preserves local kit-download state, and reads up to four bounded chunks per page. Account and kit instructions explicitly keep the private archive/work cache outside Git repositories, and the local tool explains that safety boundary when rejecting a path;
-- the next protected-staging change implements source-versus-derivative Scan
-  selection and schema `0023`. It is not described as deployed until the exact
-  446-history AppSheet reconciliation and D1/R2 postflight complete. Synthetic
-  test data remains outside that cleanup, and O-1 processing remains outside
-  this work entirely. Its local gate passes 70 Vitest files / 494 tests, all 12
-  archive and 91 audio Python tests, all three TypeScript projects, migration
-  replay, and production/service-worker build `79396fc0bf71` with seven
-  precache entries;
+- the current protected-staging deployment is Worker
+  `cc11dead-697b-461e-90cb-92c9f508ff9f` with client/service-worker build
+  `79396fc0bf71`; migration `0023_scan_readability_selection.sql` is applied
+  and corrective migration `0024_scan_readability_v2_keys.sql` remains local
+  until the revised gate and rollout complete. The Account page recovers the
+  creator's current ready plan across refresh/tabs, reuses it instead of
+  creating a duplicate, preserves local kit-download state, and reads up to
+  four bounded chunks per page. Account and kit instructions explicitly keep
+  the private archive/work cache outside Git repositories, and the local tool
+  explains that safety boundary when rejecting a path;
+- the pending protected-staging completion implements metadata-free,
+  source-versus-derivative Scan selection under versioned v2 derivative keys.
+  It is not described as reconciled until migration 0024, the Worker
+  deployment, exact 446-history AppSheet cleanup, and D1/R2 postflight all
+  complete. Synthetic test data remains outside that cleanup, and O-1
+  processing remains outside this work entirely. The revised local gate passes
+  70 Vitest files / 497 tests, all 12 archive and 91 audio Python tests, all
+  three TypeScript projects, migration replay, and production/service-worker
+  build `f7237f7d3987` with seven precache entries;
 - the current application checkpoint passes 69 Vitest files / 474 tests, 12 Python archive tests, all 91 Python audio tests, all three TypeScript projects, fresh migration replay, the production/service-worker build with seven precache entries, whitespace/privacy checks, and protected-staging reconciliation with unchanged catalog/media aggregates and zero foreign-key errors. The browser-to-Python round trip includes history-only media representations. The owner's complete 7,972,873,832-byte archive passed both build-integrated and independent verification; its plan was revoked and all derived export detail was purged.
 
 The bounded improvements selected from the 2026-07-18 whole-application audit are

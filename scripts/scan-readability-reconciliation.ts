@@ -18,11 +18,14 @@ import {
   SCAN_OPTIONAL_CANDIDATE_MIN_SOURCE_BYTES,
   scanCandidateHasMaterialSavings,
   scanJpegIsDirectlyUsable,
+  scanReadabilityObjectKey,
+  stripScanJpegMetadata,
 } from "../worker/scan-readability";
 
 const PROJECT_ROOT = resolve(".");
 const PRIVATE_ROOT = resolve("notes/private/scan-readability-reconciliation");
 const CACHE_ROOT = resolve(PRIVATE_ROOT, "r2-cache");
+const PREPARED_ROOT = resolve(PRIVATE_ROOT, "prepared");
 const PLAN_PATH = resolve(PRIVATE_ROOT, "plan.json");
 const APPLY_SQL_PATH = resolve(PRIVATE_ROOT, "apply-d1.sql");
 const STATE_PATH = resolve(PRIVATE_ROOT, "state.json");
@@ -95,7 +98,12 @@ export type ReadabilityDecision = {
     | "required_normalization"
     | "optional_material_savings";
   candidateByteSize: number | null;
-  derivativeObjectKey: string;
+  formerDerivativeObjectKey: string;
+  candidateObjectKey: string;
+  candidateSha256: string;
+  candidateWidth: number;
+  candidateHeight: number;
+  candidateLocalPath: string | null;
 };
 
 export type RecoveryDelete = {
@@ -128,6 +136,8 @@ export type ReconciliationPlan = {
     recoveryHistoriesDeleted: number;
     preservedHistories: number;
     d1DerivativeRowsDeleted: number;
+    d1DerivativeRowsInserted: number;
+    r2ObjectsUploaded: number;
     r2ObjectsDeleted: number;
   };
 };
@@ -147,11 +157,12 @@ type RecoveryPlanReplacement = {
 type ReconciliationState = {
   schemaVersion: 1;
   planSha256: string;
+  uploadedR2Keys: string[];
   d1Applied: boolean;
   deletedR2Keys: string[];
 };
 
-type Mode = "plan" | "apply-d1" | "delete-r2" | "postflight";
+type Mode = "plan" | "upload-r2" | "apply-d1" | "delete-r2" | "postflight";
 
 type Options = {
   mode: Mode;
@@ -227,7 +238,10 @@ async function sha256File(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
-async function writePrivateAtomic(path: string, contents: string): Promise<void> {
+async function writePrivateAtomic(
+  path: string,
+  contents: string | Uint8Array,
+): Promise<void> {
   if (!isWithin(path, PRIVATE_ROOT)) {
     throw new ScanReconciliationError("output_must_be_private");
   }
@@ -270,17 +284,23 @@ async function mapLimit<T, U>(
 ): Promise<U[]> {
   const output = new Array<U>(values.length);
   let next = 0;
+  let firstFailure: unknown;
   async function worker(): Promise<void> {
-    while (next < values.length) {
+    while (next < values.length && firstFailure === undefined) {
       const index = next;
       next += 1;
-      output[index] = await operation(values[index]!, index);
+      try {
+        output[index] = await operation(values[index]!, index);
+      } catch (error) {
+        firstFailure ??= error;
+      }
     }
   }
-  await Promise.all(Array.from(
+  await Promise.allSettled(Array.from(
     { length: Math.min(limit, values.length) },
     () => worker(),
   ));
+  if (firstFailure !== undefined) throw firstFailure;
   return output;
 }
 
@@ -543,12 +563,40 @@ async function fullyDecodedImage(
   };
 }
 
+async function decodedPixelDigest(
+  bytes: Uint8Array,
+): Promise<{ width: number; height: number; sha256: string }> {
+  try {
+    const decoded = await sharp(bytes, {
+      failOn: "error",
+      limitInputPixels: SCAN_IMAGE_MAX_PIXELS,
+    })
+      .rotate()
+      .toColourspace("srgb")
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    return {
+      width: decoded.info.width,
+      height: decoded.info.height,
+      sha256: sha256Bytes(decoded.data),
+    };
+  } catch {
+    throw new ScanReconciliationError("image_decode_failed");
+  }
+}
+
 export function decideExistingReadability(
   row: CurrentScanRow,
   source: { bytes: Uint8Array; format: string; width: number; height: number },
   derivative: { bytes: Uint8Array; format: string; width: number; height: number },
 ): ReadabilityDecision {
   const expectedSourceFormat = row.sourceMimeType.slice("image/".length);
+  let candidateBytes: Uint8Array;
+  try {
+    candidateBytes = stripScanJpegMetadata(derivative.bytes);
+  } catch {
+    throw new ScanReconciliationError("representation_facts_mismatch");
+  }
   if (
     source.format !== expectedSourceFormat
     || source.bytes.byteLength !== row.sourceByteSize
@@ -558,7 +606,7 @@ export function decideExistingReadability(
     || derivative.height !== row.derivativeHeight
     || derivative.width > 2400
     || derivative.height > 2400
-    || !scanJpegIsDirectlyUsable(derivative.bytes, derivative)
+    || !scanJpegIsDirectlyUsable(candidateBytes, derivative)
   ) {
     throw new ScanReconciliationError("representation_facts_mismatch");
   }
@@ -572,25 +620,30 @@ export function decideExistingReadability(
     sourceByteSize: row.sourceByteSize,
     sourceWidth: source.width,
     sourceHeight: source.height,
-    derivativeObjectKey: row.derivativeObjectKey,
+    formerDerivativeObjectKey: row.derivativeObjectKey,
+    candidateObjectKey: scanReadabilityObjectKey(row.mediaId),
+    candidateSha256: sha256Bytes(candidateBytes),
+    candidateWidth: derivative.width,
+    candidateHeight: derivative.height,
+    candidateLocalPath: null,
   } as const;
   if (!directlyUsable) {
     return {
       ...base,
       representationKind: "derivative",
       selectionBasis: "required_normalization",
-      candidateByteSize: row.derivativeByteSize,
+      candidateByteSize: candidateBytes.byteLength,
     };
   }
   if (
     row.sourceByteSize >= SCAN_OPTIONAL_CANDIDATE_MIN_SOURCE_BYTES
-    && scanCandidateHasMaterialSavings(row.sourceByteSize, row.derivativeByteSize)
+    && scanCandidateHasMaterialSavings(row.sourceByteSize, candidateBytes.byteLength)
   ) {
     return {
       ...base,
       representationKind: "derivative",
       selectionBasis: "optional_material_savings",
-      candidateByteSize: row.derivativeByteSize,
+      candidateByteSize: candidateBytes.byteLength,
     };
   }
   return {
@@ -599,7 +652,7 @@ export function decideExistingReadability(
     selectionBasis: "direct_safe_source",
     candidateByteSize: row.sourceByteSize < SCAN_OPTIONAL_CANDIDATE_MIN_SOURCE_BYTES
       ? null
-      : row.derivativeByteSize,
+      : candidateBytes.byteLength,
   };
 }
 
@@ -662,6 +715,7 @@ async function createPlan(
     live.preservedHistoryCount,
   );
   await mkdir(PRIVATE_ROOT, { recursive: true });
+  await rm(PREPARED_ROOT, { recursive: true, force: true });
   const storage = await statfs(PRIVATE_ROOT);
   const requiredCacheBytes = [
     ...live.currentRows.flatMap((row) => [row.sourceByteSize, row.derivativeByteSize]),
@@ -697,7 +751,31 @@ async function createPlan(
         fullyDecodedImage(sourcePath),
         fullyDecodedImage(derivativePath),
       ]);
-      return decideExistingReadability(row, source, derivative);
+      const decision = decideExistingReadability(row, source, derivative);
+      if (decision.representationKind === "source") return decision;
+      const preparedBytes = stripScanJpegMetadata(derivative.bytes);
+      if (preparedBytes.byteLength !== derivative.bytes.byteLength) {
+        const [before, after] = await Promise.all([
+          decodedPixelDigest(derivative.bytes),
+          decodedPixelDigest(preparedBytes),
+        ]);
+        if (
+          before.width !== after.width
+          || before.height !== after.height
+          || before.sha256 !== after.sha256
+        ) {
+          throw new ScanReconciliationError("metadata_strip_changed_pixels");
+        }
+      }
+      const candidateLocalPath = resolve(
+        PREPARED_ROOT,
+        `${index.toString().padStart(4, "0")}-${decision.candidateSha256}.jpg`,
+      );
+      if (!isWithin(candidateLocalPath, PREPARED_ROOT)) {
+        throw new ScanReconciliationError("invalid_prepared_path");
+      }
+      await writePrivateAtomic(candidateLocalPath, preparedBytes);
+      return { ...decision, candidateLocalPath };
     },
   );
   await mapLimit(live.recoveryRows, options.concurrency, async (row, index) => {
@@ -726,12 +804,15 @@ async function createPlan(
     sourceObjectKey: row.sourceObjectKey,
     derivativeObjectKey: row.derivativeObjectKey,
   })).sort((left, right) => left.historyId.localeCompare(right.historyId));
-  const directDerivativeKeys = decisions
-    .filter((decision) => decision.representationKind === "source")
-    .map((decision) => decision.derivativeObjectKey);
+  const currentDerivativeKeys = decisions.map(
+    (decision) => decision.formerDerivativeObjectKey,
+  );
+  const keptDerivativeCount = decisions.filter(
+    (decision) => decision.representationKind === "derivative",
+  ).length;
   const r2DeleteKeys = [
     ...recoveryDeletes.flatMap((row) => [row.sourceObjectKey, row.derivativeObjectKey]),
-    ...directDerivativeKeys,
+    ...currentDerivativeKeys,
   ].sort();
   if (new Set(r2DeleteKeys).size !== r2DeleteKeys.length) {
     throw new ScanReconciliationError("duplicate_delete_key");
@@ -767,11 +848,15 @@ async function createPlan(
       ).length,
       recoveryHistoriesDeleted: recoveryDeletes.length,
       preservedHistories: live.preservedHistoryCount,
-      d1DerivativeRowsDeleted: recoveryDeletes.length + directDerivativeKeys.length,
+      d1DerivativeRowsDeleted: recoveryDeletes.length + decisions.length,
+      d1DerivativeRowsInserted: keptDerivativeCount,
+      r2ObjectsUploaded: keptDerivativeCount,
       r2ObjectsDeleted: r2DeleteKeys.length,
     },
   };
   const json = `${JSON.stringify(plan, null, 2)}\n`;
+  await rm(STATE_PATH, { force: true });
+  await rm(APPLY_SQL_PATH, { force: true });
   await writePrivateAtomic(PLAN_PATH, json);
   return { plan, sha256: sha256Bytes(json) };
 }
@@ -786,19 +871,127 @@ function inList(values: string[]): string {
 }
 
 export function buildReconciliationSql(plan: ReconciliationPlan): string {
+  const keptDecisions = plan.decisions.filter(
+    (row) => row.representationKind === "derivative",
+  );
+  const decisionIds = plan.decisions.map((row) => row.sourceMediaId);
+  const recoveryIds = plan.recoveryDeletes.map((row) => row.historyId);
+  const recoveryMediaIds = plan.recoveryDeletes.map((row) => row.mediaId);
+  const expectedDeleteKeys = [
+    ...plan.decisions.map((row) => row.formerDerivativeObjectKey),
+    ...plan.recoveryDeletes.flatMap(
+      (row) => [row.sourceObjectKey, row.derivativeObjectKey],
+    ),
+  ].sort();
+  const expectedAggregate: ReconciliationPlan["aggregate"] = {
+    currentScans: plan.decisions.length,
+    directSources: plan.decisions.length - keptDecisions.length,
+    requiredDerivatives: keptDecisions.filter(
+      (row) => row.selectionBasis === "required_normalization",
+    ).length,
+    materialDerivatives: keptDecisions.filter(
+      (row) => row.selectionBasis === "optional_material_savings",
+    ).length,
+    recoveryHistoriesDeleted: plan.recoveryDeletes.length,
+    preservedHistories: EXPECTED_PRESERVED_HISTORIES,
+    d1DerivativeRowsDeleted: plan.decisions.length + plan.recoveryDeletes.length,
+    d1DerivativeRowsInserted: keptDecisions.length,
+    r2ObjectsUploaded: keptDecisions.length,
+    r2ObjectsDeleted: expectedDeleteKeys.length,
+  };
   if (
     plan.decisions.length !== EXPECTED_CURRENT_SCANS
     || plan.recoveryDeletes.length !== EXPECTED_RECOVERY_HISTORIES
-    || plan.aggregate.preservedHistories !== EXPECTED_PRESERVED_HISTORIES
   ) {
     throw new ScanReconciliationError("plan_scope_mismatch");
   }
-  const directMediaIds = plan.decisions
-    .filter((row) => row.representationKind === "source")
-    .map((row) => row.sourceMediaId);
-  const recoveryMediaIds = plan.recoveryDeletes.map((row) => row.mediaId);
+  if (
+    new Set(decisionIds).size !== decisionIds.length
+    || new Set(recoveryIds).size !== recoveryIds.length
+    || new Set(recoveryMediaIds).size !== recoveryMediaIds.length
+  ) {
+    throw new ScanReconciliationError("plan_identity_mismatch");
+  }
+  if (
+    plan.r2DeleteKeys.length !== expectedDeleteKeys.length
+    || plan.r2DeleteKeys.some((key, index) => key !== expectedDeleteKeys[index])
+  ) {
+    throw new ScanReconciliationError("plan_delete_scope_mismatch");
+  }
+  if (stableJson(plan.aggregate) !== stableJson(expectedAggregate)) {
+    throw new ScanReconciliationError("plan_aggregate_mismatch");
+  }
+  if (
+    plan.decisions.some((row) => (
+      row.formerDerivativeObjectKey !== `scans/readability/${row.sourceMediaId}.jpg`
+      || row.candidateObjectKey !== scanReadabilityObjectKey(row.sourceMediaId)
+      || !SHA256.test(row.candidateSha256)
+      || !SHA256.test(row.sourceSha256)
+      || !Number.isSafeInteger(row.sourceByteSize)
+      || row.sourceByteSize < 1
+      || !Number.isSafeInteger(row.sourceWidth)
+      || !Number.isSafeInteger(row.sourceHeight)
+      || row.sourceWidth < 1
+      || row.sourceHeight < 1
+      || !Number.isSafeInteger(row.candidateWidth)
+      || !Number.isSafeInteger(row.candidateHeight)
+      || row.candidateWidth < 1
+      || row.candidateWidth > 2400
+      || row.candidateHeight < 1
+      || row.candidateHeight > 2400
+      || (
+        row.representationKind === "derivative"
+          ? (
+              row.candidateByteSize === null
+              || !Number.isSafeInteger(row.candidateByteSize)
+              || row.candidateByteSize < 1
+              || typeof row.candidateLocalPath !== "string"
+              || !isWithin(row.candidateLocalPath, PREPARED_ROOT)
+            )
+          : row.candidateLocalPath !== null
+      )
+    ))
+  ) {
+    throw new ScanReconciliationError("plan_decision_mismatch");
+  }
   const recoveryHistoryIds = plan.recoveryDeletes.map((row) => row.historyId);
-  const derivativeDeleteIds = [...recoveryMediaIds, ...directMediaIds];
+  const derivativeDeleteIds = [
+    ...recoveryMediaIds,
+    ...plan.decisions.map((row) => row.sourceMediaId),
+  ];
+  const derivativeValues = keptDecisions.map((row) => `(
+    ${sqlString(row.sourceMediaId)},
+    ${sqlString(row.sourceSha256)},
+    ${row.sourceByteSize},
+    ${sqlString(row.candidateObjectKey)},
+    'image/jpeg',
+    ${row.candidateByteSize},
+    ${sqlString(row.candidateSha256)},
+    ${row.candidateWidth},
+    ${row.candidateHeight},
+    ${sqlString(DERIVATIVE_POLICY)},
+    ${sqlString(plan.createdAt)},
+    ${sqlString(RECONCILIATION_ACTOR)}
+  )`).join(",\n");
+  const derivativeInsert = keptDecisions.length === 0 ? "" : `
+INSERT INTO scan_readability_derivatives (
+  source_media_id,
+  source_sha256,
+  source_byte_size,
+  object_key,
+  mime_type,
+  byte_size,
+  sha256,
+  width,
+  height,
+  policy_id,
+  created_at,
+  created_by
+) VALUES
+${derivativeValues};
+INSERT INTO scan_readability_reconciliation_guard
+SELECT CASE WHEN changes() = ${keptDecisions.length} THEN 1 ELSE 0 END;
+`;
   const selectionValues = plan.decisions.map((row) => `(
     ${sqlString(row.sourceMediaId)},
     ${sqlString(row.sourceSha256)},
@@ -854,6 +1047,7 @@ WHERE id IN ${inList(recoveryMediaIds)};
 INSERT INTO scan_readability_reconciliation_guard
 SELECT CASE WHEN changes() = ${EXPECTED_RECOVERY_HISTORIES} THEN 1 ELSE 0 END;
 
+${derivativeInsert}
 INSERT INTO scan_readability_selections (
   source_media_id,
   source_sha256,
@@ -894,6 +1088,28 @@ SELECT CASE WHEN
   ) = ${
   EXPECTED_CURRENT_SCANS + EXPECTED_PRESERVED_HISTORIES
 }
+  AND (
+    SELECT COUNT(*) FROM scan_readability_derivatives
+  ) = ${keptDecisions.length + EXPECTED_PRESERVED_HISTORIES}
+  AND NOT EXISTS (
+    SELECT 1
+    FROM scans
+    JOIN scan_readability_selections
+      ON scan_readability_selections.source_media_id = scans.media_id
+    LEFT JOIN scan_readability_derivatives
+      ON scan_readability_derivatives.source_media_id = scans.media_id
+    WHERE (
+      scan_readability_selections.representation_kind = 'source'
+      AND scan_readability_derivatives.source_media_id IS NOT NULL
+    ) OR (
+      scan_readability_selections.representation_kind = 'derivative'
+      AND (
+        scan_readability_derivatives.source_media_id IS NULL
+        OR scan_readability_derivatives.object_key
+          <> 'scans/readability-v2/' || scans.media_id || '.jpg'
+      )
+    )
+  )
   AND (SELECT COUNT(*) FROM pragma_foreign_key_check) = 0
 THEN 1 ELSE 0 END;
 
@@ -945,6 +1161,8 @@ async function readState(planSha256: string): Promise<ReconciliationState> {
     if (
       value.schemaVersion !== 1
       || value.planSha256 !== planSha256
+      || !Array.isArray(value.uploadedR2Keys)
+      || value.uploadedR2Keys.some((key) => typeof key !== "string")
       || typeof value.d1Applied !== "boolean"
       || !Array.isArray(value.deletedR2Keys)
       || value.deletedR2Keys.some((key) => typeof key !== "string")
@@ -961,12 +1179,166 @@ async function readState(planSha256: string): Promise<ReconciliationState> {
       return {
         schemaVersion: 1,
         planSha256,
+        uploadedR2Keys: [],
         d1Applied: false,
         deletedR2Keys: [],
       };
     }
     throw error;
   }
+}
+
+function uploadedDecisions(plan: ReconciliationPlan): ReadabilityDecision[] {
+  return plan.decisions.filter((decision) => decision.representationKind === "derivative");
+}
+
+function expectedUploadKeys(plan: ReconciliationPlan): string[] {
+  return uploadedDecisions(plan).map((decision) => decision.candidateObjectKey).sort();
+}
+
+async function assertPreparedCandidate(decision: ReadabilityDecision): Promise<void> {
+  if (
+    decision.representationKind !== "derivative"
+    || decision.candidateByteSize === null
+    || decision.candidateLocalPath === null
+    || !isWithin(decision.candidateLocalPath, PREPARED_ROOT)
+  ) {
+    throw new ScanReconciliationError("prepared_candidate_invalid");
+  }
+  try {
+    const [facts, hash, bytes] = await Promise.all([
+      stat(decision.candidateLocalPath),
+      sha256File(decision.candidateLocalPath),
+      readFile(decision.candidateLocalPath),
+    ]);
+    if (
+      !facts.isFile()
+      || facts.size !== decision.candidateByteSize
+      || hash !== decision.candidateSha256
+      || !scanJpegIsDirectlyUsable(
+        new Uint8Array(bytes),
+        { width: decision.candidateWidth, height: decision.candidateHeight },
+      )
+    ) {
+      throw new ScanReconciliationError("prepared_candidate_invalid");
+    }
+  } catch (error) {
+    if (error instanceof ScanReconciliationError) throw error;
+    throw new ScanReconciliationError("prepared_candidate_invalid");
+  }
+}
+
+async function assertFreshPreD1(
+  plan: ReconciliationPlan,
+  runner: CommandRunner,
+): Promise<void> {
+  const [live, recoveryPlan] = await Promise.all([inventory(runner), readRecoveryPlan()]);
+  assertAcceptedScope(
+    live.currentRows,
+    live.recoveryRows,
+    recoveryPlan.replacements,
+    live.preservedHistoryCount,
+  );
+  const inventoryDigest = sha256Bytes(stableJson({
+    current: live.currentRows,
+    recovery: live.recoveryRows,
+    preservedHistoryCount: live.preservedHistoryCount,
+  }));
+  if (
+    inventoryDigest !== plan.inventoryDigest
+    || recoveryPlan.sha256 !== plan.recoveryPlanSha256
+  ) {
+    throw new ScanReconciliationError("fresh_inventory_mismatch");
+  }
+}
+
+async function verifyR2Uploads(
+  plan: ReconciliationPlan,
+  concurrency: number,
+  runner: CommandRunner,
+): Promise<void> {
+  const probeRoot = resolve(PRIVATE_ROOT, "upload-probes");
+  await mkdir(probeRoot, { recursive: true });
+  try {
+    await mapLimit(uploadedDecisions(plan), concurrency, async (decision, index) => {
+      if (decision.candidateByteSize === null) {
+        throw new ScanReconciliationError("r2_upload_postflight_failed");
+      }
+      const destination = resolve(
+        probeRoot,
+        `${index.toString().padStart(4, "0")}-${decision.candidateSha256}.probe`,
+      );
+      await rm(destination, { force: true });
+      await downloadR2(decision.candidateObjectKey, destination, runner);
+      const [facts, hash] = await Promise.all([
+        stat(destination),
+        sha256File(destination),
+      ]);
+      await rm(destination, { force: true });
+      if (facts.size !== decision.candidateByteSize || hash !== decision.candidateSha256) {
+        throw new ScanReconciliationError("r2_upload_postflight_failed");
+      }
+    });
+  } finally {
+    await rm(probeRoot, { recursive: true, force: true });
+  }
+}
+
+async function uploadR2(
+  options: Options,
+  runner: CommandRunner,
+): Promise<{ plan: ReconciliationPlan; sha256: string }> {
+  const loaded = await loadPlan(options);
+  const state = await readState(loaded.sha256);
+  if (state.d1Applied) throw new ScanReconciliationError("d1_already_applied");
+  await assertFreshPreD1(loaded.plan, runner);
+  const uploaded = new Set(state.uploadedR2Keys);
+  const decisions = uploadedDecisions(loaded.plan);
+  await mapLimit(decisions, options.concurrency, async (decision, index) => {
+    await assertPreparedCandidate(decision);
+    if (uploaded.has(decision.candidateObjectKey)) return;
+    const probePath = resolve(
+      PRIVATE_ROOT,
+      "upload-preflight",
+      `${index.toString().padStart(4, "0")}-${decision.candidateSha256}.probe`,
+    );
+    await mkdir(dirname(probePath), { recursive: true });
+    await rm(probePath, { force: true });
+    const existing = await runner(WRANGLER, [
+      "r2", "object", "get", `${BUCKET}/${decision.candidateObjectKey}`,
+      "--remote", "--file", probePath,
+    ]);
+    if (existing.exitCode === 0) {
+      const [facts, hash] = await Promise.all([stat(probePath), sha256File(probePath)]);
+      await rm(probePath, { force: true });
+      if (facts.size !== decision.candidateByteSize || hash !== decision.candidateSha256) {
+        throw new ScanReconciliationError("r2_upload_key_conflict");
+      }
+      uploaded.add(decision.candidateObjectKey);
+      return;
+    }
+    await rm(probePath, { force: true });
+    if (!remoteMissing(existing)) {
+      throw new ScanReconciliationError("remote_r2_read_failed");
+    }
+    const result = await runner(WRANGLER, [
+      "r2", "object", "put", `${BUCKET}/${decision.candidateObjectKey}`,
+      "--remote", "--file", decision.candidateLocalPath!,
+      "--content-type", "image/jpeg",
+      "--content-disposition", "inline",
+      "--cache-control", "private, max-age=3600",
+      "--force",
+    ]);
+    if (result.exitCode !== 0) {
+      throw new ScanReconciliationError("r2_upload_failed");
+    }
+    uploaded.add(decision.candidateObjectKey);
+  });
+  await rm(resolve(PRIVATE_ROOT, "upload-preflight"), { recursive: true, force: true });
+  await verifyR2Uploads(loaded.plan, options.concurrency, runner);
+  state.uploadedR2Keys = [...uploaded].sort();
+  await saveState(state);
+  return loaded;
 }
 
 async function assertPostD1(plan: ReconciliationPlan, runner: CommandRunner): Promise<void> {
@@ -1030,24 +1402,15 @@ async function applyD1(
       throw error;
     }
   }
-  const [live, recoveryPlan] = await Promise.all([inventory(runner), readRecoveryPlan()]);
-  assertAcceptedScope(
-    live.currentRows,
-    live.recoveryRows,
-    recoveryPlan.replacements,
-    live.preservedHistoryCount,
-  );
-  const inventoryDigest = sha256Bytes(stableJson({
-    current: live.currentRows,
-    recovery: live.recoveryRows,
-    preservedHistoryCount: live.preservedHistoryCount,
-  }));
+  const expectedUploads = expectedUploadKeys(loaded.plan);
   if (
-    inventoryDigest !== loaded.plan.inventoryDigest
-    || recoveryPlan.sha256 !== loaded.plan.recoveryPlanSha256
+    state.uploadedR2Keys.length !== expectedUploads.length
+    || state.uploadedR2Keys.some((key, index) => key !== expectedUploads[index])
   ) {
-    throw new ScanReconciliationError("fresh_inventory_mismatch");
+    throw new ScanReconciliationError("r2_uploads_not_checkpointed");
   }
+  await assertFreshPreD1(loaded.plan, runner);
+  await verifyR2Uploads(loaded.plan, options.concurrency, runner);
   const sql = buildReconciliationSql(loaded.plan);
   await writePrivateAtomic(APPLY_SQL_PATH, sql);
   const result = await runner(WRANGLER, [
@@ -1122,7 +1485,9 @@ async function postflight(
   }
   await assertPostD1(loaded.plan, runner);
   await verifyR2Deletes(loaded.plan, options.concurrency, runner);
+  await verifyR2Uploads(loaded.plan, options.concurrency, runner);
   await rm(CACHE_ROOT, { recursive: true, force: true });
+  await rm(PREPARED_ROOT, { recursive: true, force: true });
   return loaded;
 }
 
@@ -1136,6 +1501,7 @@ function parseOptions(arguments_: string[]): Options {
       const value = arguments_[index + 1];
       if (
         value !== "plan"
+        && value !== "upload-r2"
         && value !== "apply-d1"
         && value !== "delete-r2"
         && value !== "postflight"
@@ -1171,6 +1537,8 @@ async function main(
   let result: { plan: ReconciliationPlan; sha256: string };
   if (options.mode === "plan") {
     result = await createPlan(options, runner);
+  } else if (options.mode === "upload-r2") {
+    result = await uploadR2(options, runner);
   } else if (options.mode === "apply-d1") {
     result = await applyD1(options, runner);
   } else if (options.mode === "delete-r2") {

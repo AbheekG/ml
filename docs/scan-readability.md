@@ -1,9 +1,12 @@
 # Scan integrity and readability
 
-Status: the selective representation policy is implemented and covered locally
-by migration `0023_scan_readability_selection.sql`. Protected-staging rollout
-and the one-time AppSheet reconciliation are deliberately recorded only after
-their guarded postflight succeeds. O-1 material is outside this operation.
+Status: the selective representation policy is implemented by migrations
+`0023_scan_readability_selection.sql` and
+`0024_scan_readability_v2_keys.sql`. Migration 0023 and the first Worker
+checkpoint are deployed to protected staging; the corrective v2-key migration,
+Worker deployment, and one-time AppSheet reconciliation are recorded as
+complete only after their guarded postflight succeeds. O-1 material is outside
+this operation.
 
 ## Retained source and selected representation
 
@@ -36,7 +39,8 @@ PNG, WebP, an over-2400 source, or a JPEG outside the direct-safe encoding rules
 requires normalization. The required candidate uses the existing immutable
 `scan-jpeg-v1-2400-q85` contract: applied source orientation, longest edge at
 most 2400 without enlargement, quality 85, white transparency background,
-animation disabled, and metadata omitted. Its type, dimensions, exact byte
+animation disabled, and metadata omitted. Any metadata block emitted by the
+image service is stripped before hashing or storage. Its type, dimensions, exact byte
 size, SHA-256, and conventional JPEG structure are reverified. Required
 generation failure fails safely before a Scan record is committed.
 
@@ -76,9 +80,12 @@ The cleanup is intentionally narrower than a general test-data purge:
 
 - preserve all 499 current Scan source objects and all Scan rows;
 - classify every current source with the same policy and record 499 selections;
-- delete only a current derivative whose source qualifies for direct use and
-  whose candidate is not materially smaller;
-- preserve required/material current derivatives;
+- prepare every required/material current derivative as metadata-free bytes,
+  prove that metadata removal did not change its displayed pixels, and upload
+  it under a new `scans/readability-v2/<media-id>.jpg` key before D1 changes;
+- delete every old current derivative object after D1 commits: direct
+  selections have no replacement, while required/material selections point to
+  their verified v2 replacement;
 - delete exactly the 446 accepted
   `migration:scan-original-recovery-v1` superseded history rows, their former
   media/provenance/fingerprint rows, and—only after D1 commits—their former
@@ -89,23 +96,29 @@ The cleanup is intentionally narrower than a general test-data purge:
   sources, applying only the representation-selection policy to them.
 
 `scripts/scan-readability-reconciliation.ts` defaults to no mode and exposes
-four explicit phases: `plan`, `apply-d1`, `delete-r2`, and `postflight`. Planning
+five explicit phases: `plan`, `upload-r2`, `apply-d1`, `delete-r2`, and
+`postflight`. Planning
 freshly reads and hashes every current source/derivative and every object
 proposed for recovery-history deletion, binds the accepted private recovery
-plan, and writes only an ignored private plan. D1 application requires that
-plan's SHA-256, repeats the full live inventory, and runs one guarded
-transaction. It temporarily removes and recreates the history-retention trigger
-inside that transaction. R2 deletion is a separate idempotent phase that cannot
-start until the exact D1 post-state is confirmed. Failure after D1 can therefore
-leak unreferenced private objects but cannot leave D1 pointing to a deleted
-object.
+plan, and writes only an ignored private plan and prepared candidates. The
+upload phase refuses a conflicting v2 key, verifies every uploaded object by
+size and SHA-256, and checkpoints the exact set. D1 application requires that
+plan's SHA-256 and complete upload checkpoint, re-verifies the v2 objects,
+repeats the full live inventory, and runs one guarded transaction. It
+temporarily removes and recreates the history-retention trigger inside that
+transaction. R2 deletion is a separate idempotent phase that cannot start until
+the exact D1 post-state is confirmed. Failure after D1 can therefore leak
+unreferenced private objects but cannot leave D1 pointing to a deleted object.
 
 The expected post-state is 499 current Scans, 500 retained Scan media rows and
 fingerprint members (499 current plus the one preserved synthetic history), one
 history row, 499 selections, and zero foreign-key errors. The derivative count
 and R2 object count depend on the freshly measured number of direct selections.
-Any count, ID, hash, byte-size, policy, or object mismatch aborts before a
-destructive phase.
+The R2 deletion scope is always 1,391 old objects: 499 old current derivatives
+plus 446 recovery source/derivative pairs. The number of prior v2 uploads and
+retained current derivatives is the freshly measured number of
+required/material selections. Any count, ID, hash, byte-size, policy, or object
+mismatch aborts before a destructive phase.
 
 ## Portable archives and acceptance
 

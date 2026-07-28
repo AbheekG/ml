@@ -2228,7 +2228,7 @@ describe("Scan upload API", () => {
     expect(response.status).toBe(201);
     expect([...stored.keys()]).toEqual(expect.arrayContaining([
       expect.stringMatching(/^scans\/[a-f0-9-]+\.jpg$/u),
-      expect.stringMatching(/^scans\/readability\/[a-f0-9-]+\.jpg$/u),
+      expect.stringMatching(/^scans\/readability-v2\/[a-f0-9-]+\.jpg$/u),
     ]));
     expect([...stored.values()]).toEqual([4, 128]);
     await expect(response.json()).resolves.toMatchObject({ scan: { revision: 1, filename: "page.txt" } });

@@ -326,7 +326,12 @@ def _assert_no_capabilities(value: Any) -> None:
         if key in FORBIDDEN_KEYS:
             raise ArchiveError("forbidden_capability_field")
         if isinstance(child, str) and (
-            child.startswith(("scans/readability/", "recordings/original/", "recordings/playback/"))
+            child.startswith((
+                "scans/readability/",
+                "scans/readability-v2/",
+                "recordings/original/",
+                "recordings/playback/",
+            ))
             and key not in {"path", "payloadPath"}
         ):
             raise ArchiveError("forbidden_storage_locator")

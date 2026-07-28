@@ -13,17 +13,23 @@ approved.
 Current Scan-policy checkpoint (2026-07-28): migration
 `0023_scan_readability_selection.sql`, runtime source-versus-derivative
 selection, portable schema `0023`, guarded AppSheet reconciliation, and
-aggregate-only operational monitoring are implemented locally and await the
-ordered protected-staging rollout. The policy always retains the exact source,
+aggregate-only operational monitoring are implemented. The first Worker
+checkpoint and migration 0023 are deployed to protected staging. Corrective
+migration `0024_scan_readability_v2_keys.sql` and the revised reconciliation
+use metadata-free, versioned v2 derivative objects and await their complete
+local gate before the remaining ordered protected-staging rollout. The policy
+always retains the exact source,
 uses a strict safe JPEG directly, skips encoding below 1 MiB, and retains an
 optional candidate only for both 20% and 256 KiB savings. Required
 normalization remains quality-85 JPEG at no more than 2400 pixels per edge.
 The authorized cleanup is exactly 446 recovery histories and their former
-source/derivative pairs plus redundant current derivatives; all 499 current
-sources, the one unrelated synthetic history, all other synthetic test data,
-and all O-1 material are outside deletion scope. Code, tests, and local commits
-must precede migration/deployment; D1 must commit and reconcile before any R2
-delete.
+source/derivative pairs plus all 499 legacy current derivative objects.
+Required/material derivatives are metadata-stripped and verified under new v2
+keys before D1 selects them; direct selections receive no replacement. All 499
+current sources, the one unrelated synthetic history, all other synthetic test
+data, and all O-1 material are outside deletion scope. Code, tests, and local
+commits must precede migration/deployment; new R2 objects must verify before D1,
+and D1 must commit and reconcile before any old R2 delete.
 
 Portable-export implementation checkpoint (2026-07-24): profile 1.0.0,
 migrations through `0022_portable_export_item_chunks.sql`, the admin-only frozen

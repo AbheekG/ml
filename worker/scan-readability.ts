@@ -156,6 +156,81 @@ export function scanJpegIsDirectlyUsable(
   return false;
 }
 
+function minimalJfifSegment(
+  bytes: Uint8Array,
+  lengthOffset: number,
+  segmentLength: number,
+): boolean {
+  return segmentLength === 16
+    && bytes[lengthOffset + 2] === 0x4a
+    && bytes[lengthOffset + 3] === 0x46
+    && bytes[lengthOffset + 4] === 0x49
+    && bytes[lengthOffset + 5] === 0x46
+    && bytes[lengthOffset + 6] === 0x00
+    && bytes[lengthOffset + 14] === 0
+    && bytes[lengthOffset + 15] === 0;
+}
+
+export function stripScanJpegMetadata(bytes: Uint8Array): Uint8Array {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) {
+    throw new ScanReadabilityError("scan_readability_output_invalid");
+  }
+  const chunks: Uint8Array[] = [bytes.slice(0, 2)];
+  let totalBytes = 2;
+  let offset = 2;
+  let scanFound = false;
+  while (offset < bytes.length) {
+    const markerStart = offset;
+    if (bytes[offset] !== 0xff) {
+      throw new ScanReadabilityError("scan_readability_output_invalid");
+    }
+    while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
+    if (offset >= bytes.length) {
+      throw new ScanReadabilityError("scan_readability_output_invalid");
+    }
+    const marker = bytes[offset]!;
+    offset += 1;
+    if (
+      marker === 0xd9
+      || marker === 0xd8
+      || marker === 0x01
+      || (marker >= 0xd0 && marker <= 0xd7)
+      || offset + 2 > bytes.length
+    ) {
+      throw new ScanReadabilityError("scan_readability_output_invalid");
+    }
+    const segmentLength = (bytes[offset]! << 8) | bytes[offset + 1]!;
+    const segmentEnd = offset + segmentLength;
+    if (segmentLength < 2 || segmentEnd > bytes.length) {
+      throw new ScanReadabilityError("scan_readability_output_invalid");
+    }
+    const discard = marker === 0xfe
+      || (marker >= 0xe1 && marker <= 0xef)
+      || (marker === 0xe0 && !minimalJfifSegment(bytes, offset, segmentLength));
+    if (!discard) {
+      const chunk = bytes.slice(markerStart, segmentEnd);
+      chunks.push(chunk);
+      totalBytes += chunk.byteLength;
+    }
+    offset = segmentEnd;
+    if (marker === 0xda) {
+      const entropy = bytes.slice(offset);
+      chunks.push(entropy);
+      totalBytes += entropy.byteLength;
+      scanFound = true;
+      break;
+    }
+  }
+  if (!scanFound) throw new ScanReadabilityError("scan_readability_output_invalid");
+  const output = new Uint8Array(totalBytes);
+  let outputOffset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, outputOffset);
+    outputOffset += chunk.byteLength;
+  }
+  return output;
+}
+
 async function boundedImageOperation<T>(
   operation: Promise<T>,
   error: ScanReadabilityError,
@@ -231,7 +306,7 @@ async function createDerivativeCandidate(
       new Response(output.image()).arrayBuffer(),
       new ScanReadabilityError("scan_readability_generation_failed"),
     );
-    outputBytes = new Uint8Array(outputBuffer);
+    outputBytes = stripScanJpegMetadata(new Uint8Array(outputBuffer));
   } catch (error) {
     if (error instanceof ScanReadabilityError) throw error;
     throw new ScanReadabilityError("scan_readability_generation_failed");
@@ -360,5 +435,5 @@ export async function selectScanReadabilityRepresentation(
 }
 
 export function scanReadabilityObjectKey(sourceMediaId: string): string {
-  return `scans/readability/${sourceMediaId}.jpg`;
+  return `scans/readability-v2/${sourceMediaId}.jpg`;
 }

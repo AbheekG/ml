@@ -13,6 +13,7 @@ type CoverageTable = {
 type Coverage = {
   version: string;
   sourceSchema: string;
+  databaseSchemaThrough: string;
   tables: Record<string, CoverageTable>;
 };
 
@@ -48,7 +49,7 @@ function currentSchema(): Record<string, string[]> {
 
 describe("portable source schema coverage", () => {
   it("explicitly covers every source table and column through the declared migration", () => {
-    expect(migrationFiles.at(-1)?.slice(0, 4)).toBe(coverage.sourceSchema);
+    expect(migrationFiles.at(-1)?.slice(0, 4)).toBe(coverage.databaseSchemaThrough);
     const schema = currentSchema();
     expect(Object.keys(coverage.tables).sort()).toEqual(Object.keys(schema).sort());
 
