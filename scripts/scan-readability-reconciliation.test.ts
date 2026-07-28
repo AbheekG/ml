@@ -1,11 +1,14 @@
 import { DatabaseSync } from "node:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   assertAcceptedScope,
   buildReconciliationSql,
   decideExistingReadability,
+  downloadR2,
   ScanReconciliationError,
   type CurrentScanRow,
   type ReadabilityDecision,
@@ -150,6 +153,43 @@ function plan(): ReconciliationPlan {
 }
 
 describe("Scan readability reconciliation", () => {
+  it("retries transient R2 reads but fails a genuinely missing object immediately", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "scan-readability-r2-"));
+    try {
+      const destination = resolve(directory, "verified.jpg");
+      let attempts = 0;
+      await downloadR2("scans/readability-v2/synthetic.jpg", destination, async (
+        _executable,
+        arguments_,
+      ) => {
+        attempts += 1;
+        if (attempts < 3) {
+          return { exitCode: 1, stdout: "", stderr: "temporary upstream failure" };
+        }
+        const outputPath = arguments_[arguments_.indexOf("--file") + 1]!;
+        await writeFile(outputPath, new Uint8Array([1, 2, 3]));
+        return { exitCode: 0, stdout: "", stderr: "" };
+      });
+      expect(attempts).toBe(3);
+      expect(new Uint8Array(await readFile(destination))).toEqual(
+        new Uint8Array([1, 2, 3]),
+      );
+
+      attempts = 0;
+      await expect(downloadR2(
+        "scans/readability-v2/missing.jpg",
+        destination,
+        async () => {
+          attempts += 1;
+          return { exitCode: 1, stdout: "", stderr: "NoSuchKey" };
+        },
+      )).rejects.toMatchObject({ code: "remote_r2_object_missing" });
+      expect(attempts).toBe(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("uses the same direct, material-savings, and required-normalization policy", () => {
     const small = currentRow(1, 500_000, 200_000);
     expect(decideExistingReadability(

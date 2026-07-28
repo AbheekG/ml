@@ -490,7 +490,24 @@ function remoteMissing(result: CommandResult): boolean {
   );
 }
 
-async function downloadR2(
+async function runR2WithRetries(
+  arguments_: string[],
+  runner: CommandRunner,
+): Promise<CommandResult> {
+  let result: CommandResult | undefined;
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    result = await runner(WRANGLER, arguments_);
+    if (result.exitCode === 0 || remoteMissing(result)) return result;
+    if (attempt < 4) {
+      await new Promise<void>((resolvePromise) => {
+        setTimeout(resolvePromise, attempt * 250);
+      });
+    }
+  }
+  return result!;
+}
+
+export async function downloadR2(
   objectKey: string,
   destination: string,
   runner: CommandRunner,
@@ -498,10 +515,10 @@ async function downloadR2(
   await mkdir(dirname(destination), { recursive: true });
   const temporary = `${destination}.${process.pid}.temporary`;
   await rm(temporary, { force: true });
-  const result = await runner(WRANGLER, [
+  const result = await runR2WithRetries([
     "r2", "object", "get", `${BUCKET}/${objectKey}`,
     "--remote", "--file", temporary,
-  ]);
+  ], runner);
   if (result.exitCode !== 0) {
     await rm(temporary, { force: true });
     throw new ScanReconciliationError(
@@ -1304,10 +1321,10 @@ async function uploadR2(
     );
     await mkdir(dirname(probePath), { recursive: true });
     await rm(probePath, { force: true });
-    const existing = await runner(WRANGLER, [
+    const existing = await runR2WithRetries([
       "r2", "object", "get", `${BUCKET}/${decision.candidateObjectKey}`,
       "--remote", "--file", probePath,
-    ]);
+    ], runner);
     if (existing.exitCode === 0) {
       const [facts, hash] = await Promise.all([stat(probePath), sha256File(probePath)]);
       await rm(probePath, { force: true });
@@ -1321,14 +1338,14 @@ async function uploadR2(
     if (!remoteMissing(existing)) {
       throw new ScanReconciliationError("remote_r2_read_failed");
     }
-    const result = await runner(WRANGLER, [
+    const result = await runR2WithRetries([
       "r2", "object", "put", `${BUCKET}/${decision.candidateObjectKey}`,
       "--remote", "--file", decision.candidateLocalPath!,
       "--content-type", "image/jpeg",
       "--content-disposition", "inline",
       "--cache-control", "private, max-age=3600",
       "--force",
-    ]);
+    ], runner);
     if (result.exitCode !== 0) {
       throw new ScanReconciliationError("r2_upload_failed");
     }
@@ -1435,9 +1452,9 @@ async function deleteR2(
   const deleted = new Set(state.deletedR2Keys);
   const pending = loaded.plan.r2DeleteKeys.filter((key) => !deleted.has(key));
   await mapLimit(pending, options.concurrency, async (key) => {
-    const result = await runner(WRANGLER, [
+    const result = await runR2WithRetries([
       "r2", "object", "delete", `${BUCKET}/${key}`, "--remote", "--force",
-    ]);
+    ], runner);
     if (result.exitCode !== 0 && !remoteMissing(result)) {
       throw new ScanReconciliationError("r2_delete_failed");
     }
@@ -1458,10 +1475,10 @@ async function verifyR2Deletes(
   await mapLimit(plan.r2DeleteKeys, concurrency, async (key, index) => {
     const destination = resolve(probeRoot, `${index.toString().padStart(4, "0")}.probe`);
     await rm(destination, { force: true });
-    const result = await runner(WRANGLER, [
+    const result = await runR2WithRetries([
       "r2", "object", "get", `${BUCKET}/${key}`,
       "--remote", "--file", destination,
-    ]);
+    ], runner);
     await rm(destination, { force: true });
     if (result.exitCode === 0 || !remoteMissing(result)) {
       throw new ScanReconciliationError("r2_postflight_failed");
