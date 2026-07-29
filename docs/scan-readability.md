@@ -2,11 +2,9 @@
 
 Status: the selective representation policy is implemented by migrations
 `0023_scan_readability_selection.sql` and
-`0024_scan_readability_v2_keys.sql`. Migration 0023 and the first Worker
-checkpoint are deployed to protected staging; the corrective v2-key migration,
-Worker deployment, and one-time AppSheet reconciliation are recorded as
-complete only after their guarded postflight succeeds. O-1 material is outside
-this operation.
+`0024_scan_readability_v2_keys.sql`. Both migrations, the final Worker, and the
+one-time AppSheet reconciliation are complete in protected staging after the
+guarded postflight succeeded. O-1 material was outside this operation.
 
 ## Retained source and selected representation
 
@@ -126,6 +124,16 @@ plus 446 recovery source/derivative pairs. The number of prior v2 uploads and
 retained current derivatives is the freshly measured number of
 required/material selections. Any count, ID, hash, byte-size, policy, or object
 mismatch aborts before a destructive phase.
+
+The accepted plan SHA-256 was
+`7c68e91207caac609afa9d5eb58c995cd6318d3be7625d916ae90be7d052fe88`.
+It selected 9 direct sources, 490 required-normalization derivatives, and zero
+optional-material-savings derivatives. The upload phase added and independently
+read back all 490 v2 objects. The D1 phase then produced 500 retained Scan media
+rows, one preserved synthetic history, 491 derivatives (490 current v2 plus
+the preserved legacy derivative), 499 selections, 500 fingerprint members, and
+zero foreign-key errors. The deletion phase removed and absence-checked all
+1,391 obsolete objects. Final R2 inventory is 2,032 objects / 8.02 GB.
 
 ## Portable archives and acceptance
 

@@ -7,8 +7,11 @@ synthetic/adversarial/round-trip coverage are implemented. Migrations through
 bounded media/range verification, revocation, and derived-detail cleanup are
 accepted in protected staging, and the complete local archive was subsequently
 accepted. Source schema `0023` adds Scan readability-selection provenance and
-direct-source export semantics; its protected-staging rollout is recorded only
-after the separate guarded Scan reconciliation succeeds. This record does
+direct-source export semantics; its protected-staging rollout and the separate
+guarded Scan reconciliation are complete. Database migration coverage now
+extends through `0024`, which changes storage-key constraints without changing
+the exported table/column shape, so the portable source schema remains `0023`.
+This record does
 not authorize a production/DNS change, a catalog or media mutation, an R2 write
 or deletion, a legacy change, or a full-cloud import feature.
 

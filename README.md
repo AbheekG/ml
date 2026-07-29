@@ -80,24 +80,28 @@ and separately authorized cutover work:
 - the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
 - the protected Access/session boundary uses a Worker-compatible, bounded rotating JWKS cache; protected catalog refresh waits for a validated session and turns a definitive 401/403 into one explicit renewal screen instead of a false empty catalog. Logout keeps its durable privacy barrier through a matched Cloudflare return, treats the bounded HTTP-cache-clear request as defense in depth, and has only one automatic top-level Access navigation. The owner accepted the repaired Chrome sign-in/catalog and single-cycle logout flow;
 - the current protected-staging deployment is Worker
-  `cc11dead-697b-461e-90cb-92c9f508ff9f` with client/service-worker build
-  `79396fc0bf71`; migration `0023_scan_readability_selection.sql` is applied
-  and corrective migration `0024_scan_readability_v2_keys.sql` remains local
-  until the revised gate and rollout complete. The Account page recovers the
+  `eb4068c8-1c97-4f7e-bd2f-a0ba79172587` with client/service-worker build
+  `f7237f7d3987`; migrations `0023_scan_readability_selection.sql` and
+  `0024_scan_readability_v2_keys.sql` are applied with none pending. The
+  Account page recovers the
   creator's current ready plan across refresh/tabs, reuses it instead of
   creating a duplicate, preserves local kit-download state, and reads up to
   four bounded chunks per page. Account and kit instructions explicitly keep
   the private archive/work cache outside Git repositories, and the local tool
   explains that safety boundary when rejecting a path;
-- the pending protected-staging completion implements metadata-free,
+- the completed protected-staging reconciliation implements metadata-free,
   source-versus-derivative Scan selection under versioned v2 derivative keys.
-  It is not described as reconciled until migration 0024, the Worker
-  deployment, exact 446-history AppSheet cleanup, and D1/R2 postflight all
-  complete. Synthetic test data remains outside that cleanup, and O-1
-  processing remains outside this work entirely. The revised local gate passes
-  70 Vitest files / 497 tests, all 12 archive and 91 audio Python tests, all
-  three TypeScript projects, migration replay, and production/service-worker
-  build `f7237f7d3987` with seven precache entries;
+  The exact plan selected 9 direct sources and 490 required derivatives, with
+  no optional candidate meeting both savings thresholds. It removed exactly
+  446 AppSheet recovery histories and 1,391 obsolete R2 objects while
+  preserving all 499 current originals and the one unrelated synthetic
+  history. Final D1 state is 499 Scans, 500 Scan media rows, 1 history, 491
+  derivatives, 499 selections, 500 fingerprint members, and zero foreign-key
+  errors; R2 is 2,032 objects / 8.02 GB. Synthetic test data remained outside
+  the cleanup, and O-1 processing remains outside this work entirely. The
+  revised gate passes 70 Vitest files / 498 tests, all 12 archive and 91 audio
+  Python tests, all three TypeScript projects, migration replay, and
+  production/service-worker build `f7237f7d3987` with seven precache entries;
 - the current application checkpoint passes 69 Vitest files / 474 tests, 12 Python archive tests, all 91 Python audio tests, all three TypeScript projects, fresh migration replay, the production/service-worker build with seven precache entries, whitespace/privacy checks, and protected-staging reconciliation with unchanged catalog/media aggregates and zero foreign-key errors. The browser-to-Python round trip includes history-only media representations. The owner's complete 7,972,873,832-byte archive passed both build-integrated and independent verification; its plan was revoked and all derived export detail was purged.
 
 The bounded improvements selected from the 2026-07-18 whole-application audit are
@@ -214,11 +218,11 @@ Migration `0020_canonical_recording_dates.sql` replaces only two validation
 triggers; it does not rewrite application data.
 
 Current protected-staging deployment: Worker
-`39a615da-a23b-4931-b0fc-d0d7612fc39c`, client/service-worker build
-`a21da884e66a`, and audio converter image
+`eb4068c8-1c97-4f7e-bd2f-a0ba79172587`, client/service-worker build
+`f7237f7d3987`, and audio converter image
 `sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
-Migrations through `0022_portable_export_item_chunks.sql` are fully applied
-with none pending. The enforced read-only processor snapshot confirms the
+Migrations through `0024_scan_readability_v2_keys.sql` are fully applied with
+none pending. The enforced read-only processor snapshot confirms the
 Scheduler and immutable image match the reviewed configuration, its latest
 execution succeeded, all nine jobs succeeded, no job is pending or running,
 and there are no critical or warning alerts. This Worker/schema deployment did

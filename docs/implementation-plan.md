@@ -13,23 +13,21 @@ approved.
 Current Scan-policy checkpoint (2026-07-28): migration
 `0023_scan_readability_selection.sql`, runtime source-versus-derivative
 selection, portable schema `0023`, guarded AppSheet reconciliation, and
-aggregate-only operational monitoring are implemented. The first Worker
-checkpoint and migration 0023 are deployed to protected staging. Corrective
-migration `0024_scan_readability_v2_keys.sql` and the revised reconciliation
-use metadata-free, versioned v2 derivative objects and await their complete
-local gate before the remaining ordered protected-staging rollout. The policy
-always retains the exact source,
+aggregate-only operational monitoring are implemented. Corrective migration
+`0024_scan_readability_v2_keys.sql`, the final Worker, and the complete guarded
+reconciliation are deployed to protected staging. The policy always retains the
+exact source,
 uses a strict safe JPEG directly, skips encoding below 1 MiB, and retains an
 optional candidate only for both 20% and 256 KiB savings. Required
 normalization remains quality-85 JPEG at no more than 2400 pixels per edge.
-The authorized cleanup is exactly 446 recovery histories and their former
+The completed cleanup removed exactly 446 recovery histories and their former
 source/derivative pairs plus all 499 legacy current derivative objects.
-Required/material derivatives are metadata-stripped and verified under new v2
-keys before D1 selects them; direct selections receive no replacement. All 499
-current sources, the one unrelated synthetic history, all other synthetic test
-data, and all O-1 material are outside deletion scope. Code, tests, and local
-commits must precede migration/deployment; new R2 objects must verify before D1,
-and D1 must commit and reconcile before any old R2 delete.
+The exact plan selected 9 direct sources and 490 required metadata-free v2
+derivatives; no optional candidate met both savings thresholds. New objects
+were uploaded and verified before D1 changed, and D1 committed and reconciled
+before all 1,391 obsolete objects were deleted. All 499 current sources, the
+one unrelated synthetic history, all other synthetic test data, and all O-1
+material remained outside deletion scope.
 
 Portable-export implementation checkpoint (2026-07-24): profile 1.0.0,
 migrations through `0022_portable_export_item_chunks.sql`, the admin-only frozen
@@ -47,18 +45,18 @@ corrected browser-to-Python round trip now covers that case. The owner's
 complete archive then passed build-integrated and independent verification,
 after which its plan was revoked and all derived export detail was purged.
 
-Current application/deployment checkpoint (2026-07-24): protected staging runs
-Worker `39a615da-a23b-4931-b0fc-d0d7612fc39c` at 100%,
-client/service-worker build `a21da884e66a`, and the unchanged accepted
+Current application/deployment checkpoint (2026-07-28): protected staging runs
+Worker `eb4068c8-1c97-4f7e-bd2f-a0ba79172587` at 100%,
+client/service-worker build `f7237f7d3987`, and the unchanged accepted
 converter image
 `sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
-Migration `0022_portable_export_item_chunks.sql` is applied with ten export
-guards and no pending migration. The accepted plan retained its aggregate audit
-stub as revoked/purged with zero remaining record/item chunks. Pre/post
-aggregate reconciliation is unchanged at 581 Songs / 335 lyric rows / 499 Scans / 835
-Recordings / 1,979 media rows, 2,925 registered payload objects /
-7,955,140,423 bytes, and 2,933 private R2 objects / 8.1 GB, with zero invalid
-payload hashes or foreign-key errors.
+Migrations through `0024_scan_readability_v2_keys.sql` are applied with none
+pending. Scan reconciliation finished at 499 Scans / 500 Scan media / 1 Scan
+history / 491 Scan derivatives / 499 readability selections / 500 fingerprint
+members and zero foreign-key errors. The R2 bucket contains 2,032 private
+objects / 8.02 GB after 490 verified v2 uploads and 1,391 verified deletions.
+The portable-export plan remains revoked/purged with zero remaining
+record/item chunks.
 
 The accepted snapshot contains exactly 8,532 logical records in 148 record
 chunks and 2,925 logical payload items in 46 item chunks, totaling
@@ -93,15 +91,16 @@ documentation. Final export-only cleanup wrote 198 rows as reported by D1,
 removed 148 + 46 chunks, and retained the aggregate audit stub. R2 remains
 2,933 objects / 8.1 GB.
 
-The gate passed 69 Vitest files / 474 tests, 12 Python archive tests, all 91
+The gate passed 70 Vitest files / 498 tests, 12 Python archive tests, all 91
 Python converter tests, all three TypeScript projects, fresh replay through
-0022, production/service-worker build, whitespace/privacy checks, exact
-dependency-tree review, and offline advisory audit with zero findings. The
+0024, production/service-worker build `f7237f7d3987` with seven precache
+entries, whitespace/privacy checks, exact dependency-tree review, and offline
+advisory audit with zero findings. The
 enforced processor snapshot remains at zero critical/warning alerts, Scheduler
 enabled, latest execution successful, and all nine jobs succeeded. Access still
-returns the expected unauthenticated 302. No catalog/media row, R2 object,
-converter/Scheduler resource, Access policy, legacy file, production/DNS
-setting, or Git remote was changed.
+returns the expected unauthenticated 302. No synthetic test entity, O-1
+material, converter/Scheduler resource, Access policy, legacy file,
+production/DNS setting, or Git remote was changed.
 
 At the historical application/deployment checkpoint from the 2026-07-21 second
 audit, protected staging ran Worker `e6f1ddc7-4706-4b8b-8b01-0090850b8a23`,
