@@ -414,6 +414,16 @@ export function validPortableSourceCommit(value: string | undefined): value is s
   return value === "local-development" || /^[0-9a-f]{7,40}$/u.test(value ?? "");
 }
 
+export function resolvePortableSourceCommit(
+  value: string | undefined,
+  authMode: "access" | "local",
+): string | null {
+  const candidate = value ?? (authMode === "local" ? "local-development" : undefined);
+  if (!validPortableSourceCommit(candidate)) return null;
+  if (authMode === "access" && candidate === "local-development") return null;
+  return candidate;
+}
+
 function recordStatement(database: D1Database, exportId: string, spec: SnapshotSpec): D1PreparedStatement {
   return database.prepare(`
     INSERT INTO portable_export_records (

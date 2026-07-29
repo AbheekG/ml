@@ -107,8 +107,8 @@ import {
   parsePortableExportCreate,
   parsePortablePage,
   portableExportContentResponse,
+  resolvePortableSourceCommit,
   revokePortableExport,
-  validPortableSourceCommit,
 } from "./portable-export";
 
 export type AppRole = "viewer" | "editor" | "admin";
@@ -2399,9 +2399,11 @@ app.post("/api/admin/portable-exports", requireRole("admin"), async (context) =>
   }
   const input = parsePortableExportCreate(body);
   if (!input.success) return context.json({ error: "invalid_portable_export_request" }, 400);
-  const sourceCommit = context.env.SOURCE_COMMIT
-    ?? (context.env.AUTH_MODE === "local" ? "local-development" : undefined);
-  if (!validPortableSourceCommit(sourceCommit)) {
+  const sourceCommit = resolvePortableSourceCommit(
+    context.env.SOURCE_COMMIT,
+    context.env.AUTH_MODE,
+  );
+  if (sourceCommit === null) {
     return context.json({ error: "portable_export_not_configured" }, 503);
   }
   const current = await loadCurrentPortableExport(

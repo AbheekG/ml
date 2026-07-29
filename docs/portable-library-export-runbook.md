@@ -5,7 +5,8 @@ authenticated plan, private kit download, bounded content/range reads,
 revocation, and cleanup passed. A later real kit exposed and received a
 history-only representation correction. The corrected complete local archive
 passed build-integrated and independent verification, and its plan was revoked
-and purged.
+and purged. A later source-provenance deployment regression is diagnosed and
+corrected locally; the protected-staging repair rollout remains owner-gated.
 
 This runbook is for the admin-only portable export defined in
 [portable-library-export.md](portable-library-export.md). It does not authorize
@@ -14,19 +15,30 @@ changes, or a cloud import.
 
 ## Protected-staging status
 
-Migrations through `0022_portable_export_item_chunks.sql` are applied with none
-pending. Worker `39a615da-a23b-4931-b0fc-d0d7612fc39c` serves final source
-commit `95e771537bbcc7cbf5036228ab25fba0ec8cbff5` and client/service-worker
-build `a21da884e66a` at 100%. Pre/post catalog and media reconciliation is
-unchanged, Access still returns the expected unauthenticated redirect, and the
-final R2 aggregate check remains 2,933 objects / 8.1 GB.
+Migrations through `0024_scan_readability_v2_keys.sql` are applied with none
+pending. Worker `eb4068c8-1c97-4f7e-bd2f-a0ba79172587` and
+client/service-worker build `f7237f7d3987` remain at 100%. Read-only version
+inspection on 2026-07-30 confirmed that this Worker retains the reviewed
+Access, D1, R2, Images, cron, audio, and secret boundaries but lacks the
+required `SOURCE_COMMIT` plain-text binding. **Do not select Prepare export kit
+until the owner-authorized correction rollout and binding postflight pass.**
 
-Source schema `0023` is the next rollout. Do not prepare a schema-0023 plan
-until `0023_scan_readability_selection.sql` is applied and the guarded Scan
-reconciliation reports 499 current selections with none missing. Direct Scan
-sources then contribute one payload, while selected derivatives contribute the
-original plus one distinct optimized payload. The schema-0022 acceptance
-figures in this runbook remain historical evidence for the earlier archive.
+The current failure is before snapshot creation. An aggregate-only D1 check
+found no session created since this Worker was deployed, no preparing or ready
+session, and zero rows in every export-detail table. The retained audit stubs
+remain one expired, three failed, and four revoked sessions. Every diagnostic
+query reported zero rows written.
+
+Worker `39a615da-a23b-4931-b0fc-d0d7612fc39c` is the historical final accepted
+archive checkpoint. It served exact source
+`95e771537bbcc7cbf5036228ab25fba0ec8cbff5` and client/service-worker build
+`a21da884e66a`; the later archive acceptance evidence below remains valid.
+
+Portable source schema `0023` is deployed over database migrations through
+`0024`. The guarded Scan reconciliation and later O-1 work are already accepted
+and outside this repair. The schema-0022 figures in this runbook remain
+historical evidence for the earlier accepted archive; do not use them as
+expected counts for a future plan.
 
 The owner's two earlier authenticated create requests rolled back cleanly and
 retained bounded aggregate-only failure stubs. The second failure was not the
@@ -61,6 +73,35 @@ After moving the output/work paths outside the Git repository, the complete
 7,955,140,423 payload bytes and the same archive digest. The plan is now
 revoked, its 148 record chunks and 46 item chunks are purged, and only its
 aggregate audit stub remains.
+
+## Reviewed deployment source provenance
+
+Use only `npm run deploy` for a reviewed Worker rollout. The repository-owned
+deployment driver:
+
+- requires execution from the project root with a completely clean Git
+  worktree;
+- resolves and validates the full 40-character lowercase `HEAD` commit before
+  building;
+- runs the full production/client/service-worker build;
+- rechecks that the worktree is still clean and `HEAD` is unchanged;
+- invokes Wrangler without a shell, with `--keep-vars`, the exact
+  `SOURCE_COMMIT:<full HEAD>` binding, and a source-bearing version message; and
+- stops before Wrangler on missing/malformed Git provenance, dirty or changing
+  source, or a failed build.
+
+`SOURCE_COMMIT` is deliberately not a static value in `wrangler.jsonc`, where
+it would become stale. Do not replace the driver with raw `wrangler deploy` or
+append manual deployment flags to the npm command. The driver rejects CLI
+arguments so resource names, environments, bindings, and routes cannot be
+silently overridden.
+
+After deployment and before any Prepare action, inspect the new Worker version
+read-only. Prove that `SOURCE_COMMIT` equals the deployed full Git commit and
+that the binding inventory still includes the reviewed Access variables and
+secrets, APAC D1, private R2, Images, audio settings, and scheduled handler.
+Also confirm the expected unauthenticated Access redirect and run an
+aggregate-only D1 check showing no unexpected export session/detail change.
 
 ## Prepare and download the private kit
 

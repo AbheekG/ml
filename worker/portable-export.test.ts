@@ -11,12 +11,14 @@ import {
   pagePortableExportItems,
   pagePortableExportRecords,
   parsePortableRange,
+  resolvePortableSourceCommit,
   type PortableExportItem,
   type PortableExportRecord,
   PORTABLE_EXPORT_CLEANUP_GRACE_MS,
   PORTABLE_EXPORT_ITEM_CHUNK_SIZE,
   PORTABLE_EXPORT_RECORD_CHUNK_SIZE,
   PORTABLE_SNAPSHOT_STATEMENT_COUNT,
+  validPortableSourceCommit,
 } from "./portable-export";
 
 type BoundValue = string | number | null;
@@ -305,6 +307,37 @@ describe("portable export server", () => {
   });
 
   afterEach(() => database.close());
+
+  it("rejects missing or malformed protected source provenance before snapshot writes", async () => {
+    expect(resolvePortableSourceCommit(undefined, "access")).toBeNull();
+    expect(resolvePortableSourceCommit("", "access")).toBeNull();
+    expect(resolvePortableSourceCommit("123456", "access")).toBeNull();
+    expect(resolvePortableSourceCommit("123456A", "access")).toBeNull();
+    expect(resolvePortableSourceCommit("local-development", "access")).toBeNull();
+    expect(resolvePortableSourceCommit(undefined, "local")).toBe("local-development");
+    expect(validPortableSourceCommit("1234567")).toBe(true);
+    expect(validPortableSourceCommit("123456")).toBe(false);
+
+    const response = await app.request("/api/admin/portable-exports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientMutationId: "invalid-source-commit" }),
+    }, {
+      ...env(database, mediaBucket),
+      SOURCE_COMMIT: "malformed",
+    });
+
+    expect(response.status).toBe(503);
+    expect(await json(response)).toEqual({ error: "portable_export_not_configured" });
+    expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM portable_export_sessions")
+      .get()).toEqual({ count: 0 });
+    expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM portable_export_records")
+      .get()).toEqual({ count: 0 });
+    expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM portable_export_items")
+      .get()).toEqual({ count: 0 });
+    expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM portable_export_item_chunks")
+      .get()).toEqual({ count: 0 });
+  });
 
   it("uses one bounded transactional batch, freezes later source edits, and replays exactly", async () => {
     database.enforceD1CompoundSelectLimit = true;

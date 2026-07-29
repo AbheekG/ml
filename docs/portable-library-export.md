@@ -1066,6 +1066,36 @@ critical/warning alerts, and only the expected historical informational alert.
 No catalog/media row, R2 object, Access policy, processor resource, DNS,
 production resource, legacy file, or Git remote changed.
 
+### Source-provenance deployment correction, 2026-07-30
+
+The accepted export implementation did not regress. The current protected
+Worker instead lacks its required `SOURCE_COMMIT` binding, so the create route
+returns `portable_export_not_configured` before reading or writing export
+state. Live version inspection showed that accepted export-era versions carried
+the exact full source commit, while the later Scan-policy deployments did not.
+Aggregate-only D1 inspection proved that the failed owner request created no
+session and no detail row.
+
+The earlier rollout supplied provenance manually with Wrangler
+`--var SOURCE_COMMIT:<full commit>` and preserved remote vars with
+`--keep-vars`. The later deployments used the tracked plain `npm run deploy`,
+which ran unadorned `wrangler deploy`. Because `SOURCE_COMMIT` was absent from
+`wrangler.jsonc` and Wrangler deletes unspecified plain-text vars unless
+`--keep-vars` is used, the first such deployment removed the binding and each
+subsequent deployment retained the broken state.
+
+The corrected `npm run deploy` is a repository-owned, tested driver. It accepts
+only a clean, full 40-character lowercase Git `HEAD`, runs the complete build,
+rechecks that neither the commit nor worktree changed, and then passes that
+commit to Wrangler automatically with `--keep-vars` and a source-bearing
+version message. Protected mode also rejects the local-development provenance
+marker. This keeps the exact source-to-export relationship automatic without a
+stale tracked hash or an operator-supplied commit.
+
+The local correction does not itself authorize a deployment or export-plan
+creation. The staging rollout, live binding inspection, aggregate-only
+postflight, one owner Prepare check, and any rollback remain explicit gates.
+
 Before protected-staging deployment:
 
 - all Vitest files pass;

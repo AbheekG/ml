@@ -33,6 +33,9 @@ cloud-import UI. See
 [the normative archive profile](docs/portable-library-archive-profile.md).
 Operator commands are in
 [the portable export runbook](docs/portable-library-export-runbook.md).
+The current protected Worker has a diagnosed source-provenance binding
+regression: Prepare fails closed before creating a plan. The reviewed local
+deployment correction is awaiting a separately authorized staging rollout.
 
 ## Repository privacy
 
