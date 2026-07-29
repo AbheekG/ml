@@ -45,8 +45,9 @@ corrected browser-to-Python round trip now covers that case. The owner's
 complete archive then passed build-integrated and independent verification,
 after which its plan was revoked and all derived export detail was purged.
 
-Current application/deployment checkpoint (2026-07-28): protected staging runs
-Worker `eb4068c8-1c97-4f7e-bd2f-a0ba79172587` at 100%,
+Current application/deployment checkpoint (2026-07-30): protected staging runs
+Worker `b95a572b-e8fe-4372-852d-ee6a0a72ae32` at 100% from exact source
+`5fad783833739facffe4cd1aeb3cc1da07ad90a2`,
 client/service-worker build `f7237f7d3987`, and the unchanged accepted
 converter image
 `sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
@@ -55,8 +56,10 @@ pending. Scan reconciliation finished at 499 Scans / 500 Scan media / 1 Scan
 history / 491 Scan derivatives / 499 readability selections / 500 fingerprint
 members and zero foreign-key errors. The R2 bucket contains 2,032 private
 objects / 8.02 GB after 490 verified v2 uploads and 1,391 verified deletions.
-The portable-export plan remains revoked/purged with zero remaining
-record/item chunks.
+The source-provenance repair passed an authenticated Prepare check. Its exact
+schema-0023/source plan was revoked without a kit or media read, so no active
+plan remains; its 134 record chunks and 34 item chunks await the ordinary
+bounded scheduled cleanup.
 
 The accepted snapshot contains exactly 8,532 logical records in 148 record
 chunks and 2,925 logical payload items in 46 item chunks, totaling

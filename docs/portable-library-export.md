@@ -1092,9 +1092,13 @@ version message. Protected mode also rejects the local-development provenance
 marker. This keeps the exact source-to-export relationship automatic without a
 stale tracked hash or an operator-supplied commit.
 
-The local correction does not itself authorize a deployment or export-plan
-creation. The staging rollout, live binding inspection, aggregate-only
-postflight, one owner Prepare check, and any rollback remain explicit gates.
+Worker `b95a572b-e8fe-4372-852d-ee6a0a72ae32` now serves exact source
+`5fad783833739facffe4cd1aeb3cc1da07ad90a2` at 100%. Live inspection confirmed
+the exact source binding and all reviewed resource/secret boundaries. An
+authenticated Prepare returned one ready schema-0023 plan with 7,377 logical
+records and 2,115 payload items, proving the failed path is repaired. It was
+revoked without kit construction or media access, creator recovery returns no
+active plan, and aggregate catalog/foreign-key state is unchanged.
 
 Before protected-staging deployment:
 

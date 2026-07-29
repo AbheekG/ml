@@ -5,8 +5,8 @@ authenticated plan, private kit download, bounded content/range reads,
 revocation, and cleanup passed. A later real kit exposed and received a
 history-only representation correction. The corrected complete local archive
 passed build-integrated and independent verification, and its plan was revoked
-and purged. A later source-provenance deployment regression is diagnosed and
-corrected locally; the protected-staging repair rollout remains owner-gated.
+and purged. A later source-provenance deployment regression is corrected and
+verified in protected staging.
 
 This runbook is for the admin-only portable export defined in
 [portable-library-export.md](portable-library-export.md). It does not authorize
@@ -16,18 +16,27 @@ changes, or a cloud import.
 ## Protected-staging status
 
 Migrations through `0024_scan_readability_v2_keys.sql` are applied with none
-pending. Worker `eb4068c8-1c97-4f7e-bd2f-a0ba79172587` and
-client/service-worker build `f7237f7d3987` remain at 100%. Read-only version
-inspection on 2026-07-30 confirmed that this Worker retains the reviewed
-Access, D1, R2, Images, cron, audio, and secret boundaries but lacks the
-required `SOURCE_COMMIT` plain-text binding. **Do not select Prepare export kit
-until the owner-authorized correction rollout and binding postflight pass.**
+pending. Worker `b95a572b-e8fe-4372-852d-ee6a0a72ae32` serves exact source
+`5fad783833739facffe4cd1aeb3cc1da07ad90a2` with client/service-worker build
+`f7237f7d3987` at 100%. Read-only version inspection confirms the exact
+`SOURCE_COMMIT` plus the reviewed Access, D1, R2, Images, cron, audio, and
+secret boundaries. Access still returns the expected unauthenticated redirect,
+all migrations are complete, and the enforced processor snapshot has zero
+critical or warning alerts.
 
-The current failure is before snapshot creation. An aggregate-only D1 check
-found no session created since this Worker was deployed, no preparing or ready
-session, and zero rows in every export-detail table. The retained audit stubs
-remain one expired, three failed, and four revoked sessions. Every diagnostic
-query reported zero rows written.
+The authenticated regression check received `201` and a ready schema-0023 plan
+from that exact source. It reported 7,377 logical records, 2,115 payload items,
+and 7,940,702,512 planned bytes. The plan was revoked without downloading a
+kit, reading a payload, or building an archive. Creator recovery now returns no
+active plan. Its 134 record chunks and 34 item chunks remain derived,
+unavailable detail until the existing bounded scheduled cleanup becomes
+eligible; retained audit state is one expired, three failed, and five revoked
+sessions.
+
+Aggregate postflight remains 644 Songs / 641 active, 335 lyric rows,
+590 Scans / 588 active, 835 Recordings / 833 active, 1,624 media rows, and zero
+foreign-key errors. The deployment itself wrote no D1 row; only the separately
+authorized Prepare and revoke changed export-derived state.
 
 Worker `39a615da-a23b-4931-b0fc-d0d7612fc39c` is the historical final accepted
 archive checkpoint. It served exact source

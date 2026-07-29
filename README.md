@@ -33,9 +33,9 @@ cloud-import UI. See
 [the normative archive profile](docs/portable-library-archive-profile.md).
 Operator commands are in
 [the portable export runbook](docs/portable-library-export-runbook.md).
-The current protected Worker has a diagnosed source-provenance binding
-regression: Prepare fails closed before creating a plan. The reviewed local
-deployment correction is awaiting a separately authorized staging rollout.
+The later source-provenance binding regression is fixed in protected staging.
+An authenticated Prepare check produced a ready plan from the exact deployed
+commit and was then revoked without downloading a kit or reading media.
 
 ## Repository privacy
 
@@ -84,7 +84,7 @@ workspace/production-readiness review, and separately authorized cutover work:
 - the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
 - the protected Access/session boundary uses a Worker-compatible, bounded rotating JWKS cache; protected catalog refresh waits for a validated session and turns a definitive 401/403 into one explicit renewal screen instead of a false empty catalog. Logout keeps its durable privacy barrier through a matched Cloudflare return, treats the bounded HTTP-cache-clear request as defense in depth, and has only one automatic top-level Access navigation. The owner accepted the repaired Chrome sign-in/catalog and single-cycle logout flow;
 - the current protected-staging deployment is Worker
-  `eb4068c8-1c97-4f7e-bd2f-a0ba79172587` with client/service-worker build
+  `b95a572b-e8fe-4372-852d-ee6a0a72ae32` with client/service-worker build
   `f7237f7d3987`; migrations `0023_scan_readability_selection.sql` and
   `0024_scan_readability_v2_keys.sql` are applied with none pending. The
   Account page recovers the
@@ -245,7 +245,7 @@ Migration `0020_canonical_recording_dates.sql` replaces only two validation
 triggers; it does not rewrite application data.
 
 Current protected-staging deployment: Worker
-`eb4068c8-1c97-4f7e-bd2f-a0ba79172587`, client/service-worker build
+`b95a572b-e8fe-4372-852d-ee6a0a72ae32`, client/service-worker build
 `f7237f7d3987`, and audio converter image
 `sha256:5ebdc2b061b07a33ad222b1e1cb60a218013abfece6849110de25426118de349`.
 Migrations through `0024_scan_readability_v2_keys.sql` are fully applied with

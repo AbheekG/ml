@@ -85,9 +85,10 @@ and O-1 reconciliation plus its duplicate-title correction on 2026-07-30 is:
 - zero foreign-key errors.
 
 The protected application deployment is Worker
-`eb4068c8-1c97-4f7e-bd2f-a0ba79172587` with client/service-worker build
-`f7237f7d3987`. The O-1 operation was data-only and did not deploy an
-application build.
+`b95a572b-e8fe-4372-852d-ee6a0a72ae32` with client/service-worker build
+`f7237f7d3987`. The O-1 operation was data-only; the later application
+deployment only repaired portable-export source provenance and did not alter
+the accepted O-1 data.
 
 ## Paused private file work
 
