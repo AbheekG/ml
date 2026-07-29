@@ -109,11 +109,14 @@ workspace/production-readiness review, and separately authorized cutover work:
   existing readability policy selected each source directly and created no
   derivative copy. The guarded import re-read all 91 private objects by exact
   SHA-256 and size before and after its atomic D1 transaction. Final aggregate
-  state is 644 Songs (642 active), 590 Scans (588 active), 119 active Old 1
+  state is 644 Songs (641 active), 590 Scans (588 active), 119 active Old 1
   Scans, 591 Scan media rows, 491 Scan derivatives, 590 readability selections,
-  591 fingerprint members, and zero foreign-key errors. No migration, Worker
+  591 fingerprint members, and zero foreign-key errors. A subsequent
+  owner-identified duplicate-title correction moved three Scans to the other
+  newly imported Song, preserved all Scan/media identities and storage, and
+  moved the now-empty duplicate Song to recoverable Trash. No migration, Worker
   deployment, production/DNS change, legacy-file mutation, or unrelated cleanup
-  was part of the import;
+  was part of either operation;
 - the current application checkpoint passes 70 Vitest files / 498 tests, 12
   Python archive tests, all 91 Python audio tests, all three TypeScript projects,
   the production/service-worker build with seven precache entries,
@@ -196,7 +199,8 @@ The private staging catalog is loaded into an APAC-primary D1 database for the
 application's users in India. After the retained synthetic acceptance records,
 four later genuine Recording uploads, the completed guarded Lyrics imports, and
 the accepted Drive Recording metadata/reparent reconciliation and O-1 notebook
-import, the verified 2026-07-29 snapshot has 644 Songs (642 active), 335 lyric
+import and its duplicate-title correction, the verified 2026-07-30 snapshot has
+644 Songs (641 active), 335 lyric
 rows, 590 Scans (588 active), 835 Recordings (833 active), and 1,624 media rows,
 with zero foreign-key errors. The additional retained owner-test
 Recording/media row is not cleaned up implicitly; read-only postflight records

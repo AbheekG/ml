@@ -63,15 +63,19 @@ and import plans remain under the ignored `notes/private/` and `legacy/` trees.
   below 1 MiB, so the accepted readability policy created no derivative copy.
   The D1 import was proved locally for rollback and idempotency before its
   atomic staging application; exact postflight found zero foreign-key errors.
+  A later owner-identified duplicate-title correction moved three of those
+  Scans to the other newly imported Song, preserved their Scan/media identities
+  and storage, recorded three immutable parent moves, and moved the now-empty
+  duplicate Song to recoverable Trash.
   No migration, Worker deployment, production/DNS change, legacy-source edit,
   or unrelated test-data cleanup was included.
 
 ## Current protected-staging catalog
 
 The verified aggregate snapshot after the completed Lyrics, Drive Recording,
-and O-1 reconciliation on 2026-07-29 is:
+and O-1 reconciliation plus its duplicate-title correction on 2026-07-30 is:
 
-- 644 Songs, 642 active;
+- 644 Songs, 641 active;
 - 335 lyric rows;
 - 10 Languages, 5 Tags, 21 People, 5 aliases, 137 Song credits, and 6 Recording
   credits;
