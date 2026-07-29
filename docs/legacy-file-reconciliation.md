@@ -1,10 +1,12 @@
 # Legacy file reconciliation
 
 Status: the individual typed-lyric document pass and the additional Drive
-Recording triage are complete. Private file work is owner-paused. The deferred
-boundary consists of an owner-review Recording set, visual/OCR material,
-multi-item compilations/indexes, and one notation archive outside the completed
-Drive `Final` boundary.
+Recording triage are complete. The first owner-reviewed notebook pass (`O-1` /
+Old 1) is also complete in protected staging. Other private file work remains
+owner-directed. The deferred boundary consists of an owner-review Recording set,
+visual/OCR material, multi-item compilations/indexes, one notation archive
+outside the completed Drive `Final` boundary, and later notebook batches as the
+owner supplies them.
 
 This tracked record contains aggregate status only. Source filenames, Song
 titles, lyrics, People, detailed matches, review decisions, exports, backups,
@@ -53,26 +55,35 @@ and import plans remain under the ignored `notes/private/` and `legacy/` trees.
   reparented the existing Recording while preserving its Recording ID, both
   media references, fingerprint, byte size, and active media state. It created
   no Recording or media row and used no Trash/re-upload path.
+- The O-1 notebook pass accounted for all 131 owner-reviewed Scan decisions. Its
+  guarded staging import added 91 Scans, skipped 40 reviewed sources, created 63
+  Songs, and applied 9 reviewed existing-Song metadata updates. All 91 selected
+  JPEGs were prepared outside the immutable legacy tree, then uploaded and
+  independently re-read by exact size and SHA-256. Each was a direct-safe source
+  below 1 MiB, so the accepted readability policy created no derivative copy.
+  The D1 import was proved locally for rollback and idempotency before its
+  atomic staging application; exact postflight found zero foreign-key errors.
+  No migration, Worker deployment, production/DNS change, legacy-source edit,
+  or unrelated test-data cleanup was included.
 
 ## Current protected-staging catalog
 
-The verified aggregate snapshot after the completed Lyrics and Drive Recording
-reconciliation on 2026-07-20 is:
+The verified aggregate snapshot after the completed Lyrics, Drive Recording,
+and O-1 reconciliation on 2026-07-29 is:
 
-- 581 Songs;
+- 644 Songs, 642 active;
 - 335 lyric rows;
 - 10 Languages, 5 Tags, 21 People, 5 aliases, 137 Song credits, and 6 Recording
   credits;
-- 499 Scans;
-- 834 Recordings, 833 active;
-- 1,978 media rows; and
+- 590 Scans, 588 active;
+- 835 Recordings, 833 active;
+- 1,624 media rows; and
 - zero foreign-key errors.
 
 The protected application deployment is Worker
-`31242783-052d-4520-8313-ca1a2bce9531` with client/service-worker build
-`b9c8a5f52641`. The later filename-presentation deployment made no catalog,
-media, or legacy-file change; the Lyrics and Recording reconciliation operations
-did not deploy an application build.
+`eb4068c8-1c97-4f7e-bd2f-a0ba79172587` with client/service-worker build
+`f7237f7d3987`. The O-1 operation was data-only and did not deploy an
+application build.
 
 ## Paused private file work
 
@@ -96,4 +107,6 @@ file move, transcription/OCR run, or deletion from this list.
 
 The owner separately selected the filename-presentation refinement while this
 private legacy work remains paused. The app change does not resume any item
-above and does not authorize removal of filename provenance.
+above and does not authorize removal of filename provenance. Likewise, the
+completed O-1 pass does not authorize any later notebook import; each future
+notebook starts from its own complete Scan inventory and owner review.

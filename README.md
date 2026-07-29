@@ -47,12 +47,13 @@ Do not commit song titles, lyrics, names, email addresses, media, credentials, g
 
 The necessary private-beta feature set is implemented and operational in
 protected staging. The individual typed-lyric document reconciliation is also
-complete in staging, and the additional Drive Recording inventory is triaged.
-Private legacy file work is now owner-paused: the remaining boundary is an
-owner-review set of unassigned Recordings plus deferred visual/OCR,
-compilation/index, and notation material. Other possible work includes optional
-UX refinement, broader device coverage, workspace/production-readiness review,
-and separately authorized cutover work:
+complete in staging, the additional Drive Recording inventory is triaged, and
+the first owner-reviewed notebook pass (`O-1` / Old 1) is imported. Other
+private legacy-file boundaries remain owner-directed: unassigned Recordings,
+deferred visual/OCR, compilation/index and notation material, and later notebook
+batches are not inferred from the completed O-1 pass. Other possible work
+includes optional UX refinement, broader device coverage,
+workspace/production-readiness review, and separately authorized cutover work:
 
 - the normalized D1 schema and guarded relationships are implemented;
 - the AppSheet importer reproducibly validates and loads the original 454-Song
@@ -98,11 +99,29 @@ and separately authorized cutover work:
   history. Final D1 state is 499 Scans, 500 Scan media rows, 1 history, 491
   derivatives, 499 selections, 500 fingerprint members, and zero foreign-key
   errors; R2 is 2,032 objects / 8.02 GB. Synthetic test data remained outside
-  the cleanup, and O-1 processing remains outside this work entirely. The
+  the cleanup. The later O-1 import used this accepted policy unchanged. The
   revised gate passes 70 Vitest files / 498 tests, all 12 archive and 91 audio
   Python tests, all three TypeScript projects, migration replay, and
   production/service-worker build `f7237f7d3987` with seven precache entries;
-- the current application checkpoint passes 69 Vitest files / 474 tests, 12 Python archive tests, all 91 Python audio tests, all three TypeScript projects, fresh migration replay, the production/service-worker build with seven precache entries, whitespace/privacy checks, and protected-staging reconciliation with unchanged catalog/media aggregates and zero foreign-key errors. The browser-to-Python round trip includes history-only media representations. The owner's complete 7,972,873,832-byte archive passed both build-integrated and independent verification; its plan was revoked and all derived export detail was purged.
+- the O-1 notebook pass applied all 131 owner decisions: 91 Scan additions and
+  40 skips, 63 new Songs, and 9 reviewed updates to existing Song metadata.
+  Every added JPEG is a metadata-free, direct-safe source below 1 MiB, so the
+  existing readability policy selected each source directly and created no
+  derivative copy. The guarded import re-read all 91 private objects by exact
+  SHA-256 and size before and after its atomic D1 transaction. Final aggregate
+  state is 644 Songs (642 active), 590 Scans (588 active), 119 active Old 1
+  Scans, 591 Scan media rows, 491 Scan derivatives, 590 readability selections,
+  591 fingerprint members, and zero foreign-key errors. No migration, Worker
+  deployment, production/DNS change, legacy-file mutation, or unrelated cleanup
+  was part of the import;
+- the current application checkpoint passes 70 Vitest files / 498 tests, 12
+  Python archive tests, all 91 Python audio tests, all three TypeScript projects,
+  the production/service-worker build with seven precache entries,
+  whitespace/privacy checks, and exact protected-staging D1/R2 postflight. The
+  browser-to-Python round trip includes history-only media representations. The
+  owner's complete 7,972,873,832-byte archive passed both build-integrated and
+  independent verification; its plan was revoked and all derived export detail
+  was purged.
 
 The bounded improvements selected from the 2026-07-18 whole-application audit are
 implemented, deployed, and accepted. No further implementation slice is implied
@@ -176,12 +195,13 @@ The logout/cache guarantees and remaining real-browser gate are recorded in
 The private staging catalog is loaded into an APAC-primary D1 database for the
 application's users in India. After the retained synthetic acceptance records,
 four later genuine Recording uploads, the completed guarded Lyrics imports, and
-the accepted Drive Recording metadata/reparent reconciliation, the verified
-2026-07-22 snapshot has 581 Songs, 335 lyric rows, 499 Scans, 835 Recordings
-(833 active), and 1,979 media rows, with zero foreign-key errors. The additional
-retained owner-test Recording/media row is not cleaned up implicitly; read-only
-postflight records one exact playback/original overlap while leaving its review
-to a separate owner decision.
+the accepted Drive Recording metadata/reparent reconciliation and O-1 notebook
+import, the verified 2026-07-29 snapshot has 644 Songs (642 active), 335 lyric
+rows, 590 Scans (588 active), 835 Recordings (833 active), and 1,624 media rows,
+with zero foreign-key errors. The additional retained owner-test
+Recording/media row is not cleaned up implicitly; read-only postflight records
+one exact playback/original overlap while leaving its review to a separate owner
+decision.
 Originals/derivatives remain in private APAC storage and are delivered only
 through authenticated API routes. The owner-review Recording copies and all
 unassigned/unlinked legacy sources remain local; legacy sources are immutable.
