@@ -17,7 +17,9 @@ The application is being rebuilt from private legacy attempts (grouped inside th
 - target zero recurring cloud spend under the providers' free allowances when that does not compromise privacy, correctness, durability, or media quality;
 - immediate local/offline field-aware search with phonetic/transliteration and bounded typo-tolerant title/alias ranking.
 
-See [the product plan](docs/product-plan.md) and [the implementation plan](docs/implementation-plan.md).
+See [the product plan](docs/product-plan.md),
+[the implementation plan](docs/implementation-plan.md), and
+[the visual-identity decision](docs/visual-identity.md).
 
 The admin-only portable preservation export is implemented, deployed, and
 owner-accepted in protected staging. A real frozen plan produced the expected

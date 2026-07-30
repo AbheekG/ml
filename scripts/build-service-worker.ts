@@ -9,7 +9,14 @@ const serviceWorkerPath = resolve(outputDirectory, "sw.js");
 const indexHtml = await readFile(indexPath, "utf8");
 const serviceWorker = await readFile(serviceWorkerPath, "utf8");
 const referencedUrls = [...indexHtml.matchAll(/(?:src|href)="(\/[^\"]+)"/g)].map((match) => match[1]);
-const precacheUrls = [...new Set(["/", "/manifest.webmanifest", "/icon-512.png", ...referencedUrls])].sort();
+const precacheUrls = [...new Set([
+  "/",
+  "/manifest.webmanifest",
+  "/icon-512.png",
+  "/icon-maskable-192.png",
+  "/icon-maskable-512.png",
+  ...referencedUrls,
+])].sort();
 const buildId = createHash("sha256")
   .update(indexHtml)
   .update(JSON.stringify(precacheUrls))

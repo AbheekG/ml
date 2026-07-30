@@ -2720,9 +2720,9 @@ export function App() {
     <UnsavedChangesProvider>
     <div className="app-frame">
       <SkipLink />
-      <header className="app-header">
+      <header className={isOnline ? "app-header" : "app-header app-header-offline"}>
         <Link className="brand" to="/songs" aria-label="Music Library home">
-          <span className="brand-mark" aria-hidden="true">M</span>
+          <img className="brand-mark" src="/icon.svg" alt="" width="32" height="32" aria-hidden="true" />
           <span>Music Library</span>
         </Link>
         <span className={isOnline ? "connection online" : "connection offline"} role="status">
