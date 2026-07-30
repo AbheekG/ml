@@ -489,6 +489,7 @@ class ArchiveToolTests(unittest.TestCase):
         output, built, fake = self._build()
         self.assertTrue(output.is_file())
         self.assertFalse(output.with_name(output.name + ".partial").exists())
+        self.assertFalse((self.root / "work").exists())
         self.assertEqual(built.catalog["export"]["id"], EXPORT_ID)
         self.assertEqual(len(fake.calls), 1)
 
@@ -542,7 +543,6 @@ class ArchiveToolTests(unittest.TestCase):
         self.assertEqual(fake.calls[-1].get("range"), "bytes=5-")
 
         output.unlink()
-        shutil.rmtree(self.root / "work")
         resume_opener = FakeOpener(ignore_range_once=True)
         rebuilt, _, _ = self._build(
             opener=resume_opener,
@@ -599,13 +599,29 @@ class ArchiveToolTests(unittest.TestCase):
         cache = objects / f"{ITEM_ID}-{MEDIA_HASH}"
         cache.write_bytes(b"wrong")
         output = self.root / "preservation.zip"
-        archive.build_archive(
-            self.kit,
-            output,
-            work=work,
-            token_provider=lambda _: "token",
-            opener=FakeOpener(),
-        )
+        notice = io.StringIO()
+        with (
+            redirect_stdout(notice),
+            mock.patch.object(
+                archive,
+                "assemble_archive",
+                side_effect=archive.ArchiveError("synthetic_assembly_failure"),
+            ),
+            self.assertRaisesRegex(
+                archive.ArchiveError,
+                "synthetic_assembly_failure",
+            ),
+        ):
+            archive.build_archive(
+                self.kit,
+                output,
+                work=work,
+                token_provider=lambda _: "token",
+                opener=FakeOpener(),
+            )
+        self.assertIn("objects/ and checkpoint.json", notice.getvalue())
+        self.assertIn("keep them to resume", notice.getvalue())
+        self.assertIn("delete only those builder-owned entries", notice.getvalue())
         quarantined = list(objects.glob("*.corrupt-*"))
         self.assertEqual(len(quarantined), 1)
         checkpoint = json.loads((work / "checkpoint.json").read_text())
@@ -613,6 +629,56 @@ class ArchiveToolTests(unittest.TestCase):
         self.assertNotIn("Synthetic Song", checkpoint_text)
         self.assertNotIn("synthetic.jpg", checkpoint_text)
         self.assertNotIn("token", checkpoint_text)
+
+    def test_success_removes_only_builder_owned_work_files(self) -> None:
+        work = self.root / "custom-work"
+        work.mkdir()
+        unrelated = work / "keep-me.txt"
+        unrelated.write_text("unrelated", encoding="utf-8")
+        output = self.root / "preservation.zip"
+        notice = io.StringIO()
+        with redirect_stdout(notice):
+            archive.build_archive(
+                self.kit,
+                output,
+                work=work,
+                token_provider=lambda _: "token",
+                opener=FakeOpener(),
+            )
+        self.assertTrue(output.is_file())
+        self.assertEqual(unrelated.read_text(encoding="utf-8"), "unrelated")
+        self.assertFalse((work / "objects").exists())
+        self.assertFalse((work / "checkpoint.json").exists())
+        self.assertIn("Temporary resumable work files reused", notice.getvalue())
+        self.assertIn("delete only those builder-owned entries", notice.getvalue())
+
+    def test_preview_groups_trash_and_does_not_link_an_empty_song(self) -> None:
+        data = catalog()
+        empty_song = {
+            **data["songs"][0],
+            "id": "song-empty",
+            "titleLatin": "Synthetic Empty Song",
+            "folderPath": "songs/trashed/Synthetic Empty Song",
+            "lyricTexts": [],
+            "scans": [],
+            "recordings": [],
+            "trashedAt": STAMP,
+            "trashedBy": "system:synthetic",
+        }
+        data["songs"].append(empty_song)
+        preview = archive._preview_html(data).decode("utf-8")
+        self.assertIn("<h2>Active Songs</h2>", preview)
+        self.assertIn("<h2>Trash</h2>", preview)
+        self.assertIn(
+            'href="songs/active/Synthetic Song/"',
+            preview,
+        )
+        self.assertIn("Synthetic Empty Song", preview)
+        self.assertIn("no exported files", preview)
+        self.assertNotIn(
+            'href="songs/trashed/Synthetic Empty Song/"',
+            preview,
+        )
 
     def test_kit_manifest_origin_plan_and_capability_validation(self) -> None:
         (self.kit / "metadata/catalog.json").write_text("{}", encoding="utf-8")

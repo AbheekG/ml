@@ -130,8 +130,9 @@ storage credential. It is not a completed backup.
 
 Use Python 3.11 or newer and the official `cloudflared` CLI. The builder uses
 four bounded downloads by default, keeps the Access token only in memory, and
-retains an aggregate-only resumable work directory next to the requested
-archive.
+uses an aggregate-only resumable work directory next to the requested archive.
+After a successful `VERIFIED` build it removes the downloaded-object cache and
+checkpoint automatically.
 
 Keep the extracted kit, output ZIP, and resumable work folder on a private disk
 outside any Git/source-code repository, the kit itself, the home-directory
@@ -165,15 +166,21 @@ one, follow the URL it prints. Do not copy the token into a shell variable, log,
 or file; the builder obtains it with `cloudflared access login` and
 `cloudflared access token -app=...`.
 
+At startup the builder prints whether it created or reused the hidden automatic
+work folder beside the output archive. If the build fails or is interrupted,
+keep that named folder to resume, or delete it to discard the cached downloads.
+With a custom `--work` directory, delete only its builder-owned `objects/`
+directory and `checkpoint.json`; do not remove unrelated files.
+
 The output is not accepted until `build` reports `VERIFIED` and the independent
 `verify` command returns `"status": "VERIFIED"`. `inspect` prints aggregate
 counts only. Add `--show-paths` only when deliberately inspecting private
 friendly paths on the trusted computer.
 
-An interrupted build can be rerun with the same kit, output, and default work
-location. Do not delete the work directory if resumption is wanted. If the
-24-hour plan expires or is revoked before every object is verified, prepare a
-new kit.
+An interrupted or failed build can be rerun with the same kit, output, and
+default work location. Do not delete the work directory if resumption is wanted;
+a successful build cleans it automatically. If the 24-hour plan expires or is
+revoked before every object is verified, prepare a new kit.
 
 ## Inspect and exercise the local reference restore
 
@@ -202,8 +209,8 @@ copy of `tools/music_library_archive.py` for `verify`, `inspect`, and
 
 ## Privacy and revocation
 
-- Keep kits, archives, work directories, and restored databases out of Git and
-  public file-sharing services.
+- Keep kits, archives, in-progress work directories, and restored databases out
+  of Git and public file-sharing services.
 - Normal progress and checkpoints are aggregate-only. Do not paste
   `--show-paths` output into routine tickets or logs.
 - **Revoke this kit** disables its remaining server reads but cannot recall an

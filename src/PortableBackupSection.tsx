@@ -215,7 +215,7 @@ export function PortableBackupSection({
         <li>Online administrator access is required to prepare, download, or revoke a plan.</li>
         <li>Building requires Python 3.11+ and <code>cloudflared</code> on the destination computer.</li>
         <li><code>cloudflared</code> may open a browser once; its Access token remains only in process memory.</li>
-        <li>Four bounded downloads run by default and can resume after interruption.</li>
+        <li>Four bounded downloads run by default and can resume after interruption. The builder identifies its temporary folder for failed-build cleanup and removes its cache after a verified build.</li>
       </ul>
 
       {!prepared ? (

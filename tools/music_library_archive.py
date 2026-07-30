@@ -1380,11 +1380,41 @@ def _preview_html(catalog: Mapping[str, Any]) -> bytes:
     count_items = "".join(
         f"<li>{html.escape(key)}: {value}</li>" for key, value in counts.items()
     )
-    song_links = "".join(
-        f'<li><a href="{html.escape(str(song["folderPath"]), quote=True)}/">'
-        f'{html.escape(str(song.get("titleLatin", "Song")))}</a></li>'
-        for song in catalog.get("songs", [])
+
+    def song_items(songs: Sequence[Mapping[str, Any]]) -> str:
+        items: list[str] = []
+        for song in songs:
+            title = html.escape(str(song.get("titleLatin", "Song")))
+            has_files = any(
+                isinstance(song.get(key), list) and len(song[key]) > 0
+                for key in ("lyricTexts", "scans", "recordings")
+            )
+            if has_files:
+                folder = html.escape(str(song["folderPath"]), quote=True)
+                items.append(f'<li><a href="{folder}/">{title}</a></li>')
+            else:
+                items.append(f"<li>{title} <span>— no exported files</span></li>")
+        return "".join(items)
+
+    songs = catalog.get("songs", [])
+    active_songs = [
+        song for song in songs
+        if isinstance(song, dict) and song.get("trashedAt") is None
+    ]
+    trashed_songs = [
+        song for song in songs
+        if isinstance(song, dict) and song.get("trashedAt") is not None
+    ]
+    song_sections = (
+        f"<h2>Active Songs</h2><ul>{song_items(active_songs)}</ul>"
+        if active_songs else ""
     )
+    if trashed_songs:
+        song_sections += (
+            "<h2>Trash</h2>"
+            "<p>These Songs were in Trash when the archive was prepared.</p>"
+            f"<ul>{song_items(trashed_songs)}</ul>"
+        )
     return (
         "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\">"
         "<title>Music Library archive preview</title><body>"
@@ -1395,7 +1425,7 @@ def _preview_html(catalog: Mapping[str, Any]) -> bytes:
         f"<ul>{count_items}</ul>"
         "<p>Verify with the bundled trusted tool before relying on this archive.</p>"
         "<p><a href=\"metadata/catalog.json\">Consolidated catalog metadata</a></p>"
-        f"<h2>Songs</h2><ul>{song_links}</ul>"
+        f"{song_sections}"
         "</body></html>"
     ).encode("utf-8")
 
@@ -1746,6 +1776,20 @@ def assemble_archive(
     return dataclasses.replace(result, archive=output)
 
 
+def _cleanup_verified_build_work(work: Path) -> None:
+    try:
+        checkpoint = work / "checkpoint.json"
+        with contextlib.suppress(FileNotFoundError):
+            checkpoint.unlink()
+        objects = work / "objects"
+        if objects.exists():
+            shutil.rmtree(objects)
+        if work.exists() and not any(work.iterdir()):
+            work.rmdir()
+    except OSError as error:
+        raise ArchiveError("verified_archive_work_cleanup_failed") from error
+
+
 def build_archive(
     kit_root: Path,
     output: Path,
@@ -1779,8 +1823,38 @@ def build_archive(
         )
     _preflight_disk(kit, work, output)
     output.parent.mkdir(parents=True, exist_ok=True)
+    automatic_work = work == output.with_name(
+        f".music-library-export-{kit.plan['exportId']}.work"
+    )
+    work_existed = work.exists()
     work.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(work, 0o700)
+    if automatic_work:
+        print(
+            f"Temporary resumable work folder "
+            f"{'reused' if work_existed else 'created'} beside the output archive: "
+            f"{work.name}",
+            flush=True,
+        )
+        print(
+            "A VERIFIED build removes it. If this build fails or is interrupted, "
+            "keep that folder to resume or delete it to discard the cached media "
+            "downloads.",
+            flush=True,
+        )
+    else:
+        print(
+            f"Temporary resumable work files "
+            f"{'reused' if work_existed else 'created'} in the --work directory "
+            "you selected: objects/ and checkpoint.json",
+            flush=True,
+        )
+        print(
+            "A VERIFIED build removes those files. If this build fails or is "
+            "interrupted, keep them to resume or delete only those builder-owned "
+            "entries to discard the cached media downloads.",
+            flush=True,
+        )
     print(
         f"Plan prepared: {len(kit.items)} private objects, "
         f"{sum(item.byte_size for item in kit.items)} bytes. "
@@ -1796,6 +1870,7 @@ def build_archive(
     )
     print("Media complete. Building and fully reading the private archive…", flush=True)
     result = assemble_archive(kit, object_paths, stats, output)
+    _cleanup_verified_build_work(work)
     print(
         f"VERIFIED: {result.report['counts'].get('songs', 0)} Songs, "
         f"{len(kit.items)} stored objects, {output.stat().st_size} archive bytes.",

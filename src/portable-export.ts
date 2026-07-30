@@ -304,14 +304,16 @@ function kitReadme(): Uint8Array {
 <p><strong>Private and incomplete:</strong> this kit contains frozen metadata, but it is not a backup
 until the local builder downloads every media object and reports <code>VERIFIED</code>.</p>
 <p>Requirements: Python 3.11 or newer, <code>cloudflared</code>, and conservative free disk space.</p>
-<p>Keep the extracted kit, archive, and resumable work folder on a private disk outside any Git
-or source-code repository. In Terminal, change into the extracted kit directory before running:</p>
+<p>Keep the extracted kit, archive, and temporary resumable work folder on a private disk
+outside any Git or source-code repository. In Terminal, change into the extracted kit directory before running:</p>
 <pre>python3 tools/music_library_archive.py build --kit . --output ../music-library-preservation.zip
 python3 tools/music_library_archive.py verify ../music-library-preservation.zip
 python3 tools/music_library_archive.py inspect ../music-library-preservation.zip</pre>
 <p>The builder uses Cloudflare's end-user Access login, keeps the token only in memory, supports
-resuming interrupted downloads, and never receives a storage key. The plan expires at the time
-recorded in <code>export-plan.json</code>.</p></body></html>
+resuming interrupted downloads, and never receives a storage key. It prints the hidden automatic
+work-folder name and explains that failed or interrupted work may be kept to resume or deleted to
+discard the cache. After a successful <code>VERIFIED</code> build it deletes its downloaded-object
+cache and checkpoint. The plan expires at the time recorded in <code>export-plan.json</code>.</p></body></html>
 `);
 }
 

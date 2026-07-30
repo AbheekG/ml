@@ -2,6 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -221,8 +222,18 @@ describe("browser kit and Python archive interoperability", () => {
       const paths = extractStoredKit(kit.bytes, kitDirectory);
       expect(paths).toContain("KIT-MANIFEST.sha256");
       expect(paths).toContain("tools/music_library_archive.py");
-      expect(readFileSync(join(kitDirectory, "README.html"), "utf8")).toContain(
+      const kitReadme = readFileSync(
+        join(kitDirectory, "README.html"),
+        "utf8",
+      ).replace(/\s+/g, " ");
+      expect(kitReadme).toContain(
         "outside any Git",
+      );
+      expect(kitReadme).toContain(
+        "deletes its downloaded-object cache",
+      );
+      expect(kitReadme).toContain(
+        "failed or interrupted work may be kept to resume or deleted",
       );
 
       const archive = join(root, "preservation.zip");
@@ -277,6 +288,15 @@ module.build_archive(
         { encoding: "utf8" },
       );
       expect(buildOutput).toContain("VERIFIED:");
+      expect(buildOutput).toContain(
+        `created beside the output archive: .music-library-export-${session.id}.work`,
+      );
+      expect(buildOutput).toContain(
+        "delete it to discard the cached media downloads",
+      );
+      expect(existsSync(
+        join(root, `.music-library-export-${session.id}.work`),
+      )).toBe(false);
       const verify = JSON.parse(execFileSync(
         "python3",
         [join(kitDirectory, "tools/music_library_archive.py"), "verify", archive],

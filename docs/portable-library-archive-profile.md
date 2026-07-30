@@ -96,6 +96,11 @@ be covered as required by the tag manifest. There MUST be no symlinks, hardlink
 entries, devices, FIFOs, absolute paths, or entries outside the top-level
 directory.
 
+The HTML preview MUST group active Songs separately from Songs in Trash. A Song
+with no exported lyric, scan, or recording files remains represented in the
+authoritative metadata and preview, but the preview MUST label it as having no
+exported files instead of linking to an omitted empty directory.
+
 All ZIP members MUST use stored compression. ZIP64 structures MUST be permitted
 and used when required. Entry order MUST be deterministic by UTF-8 payload path.
 The builder MUST use deterministic safe permissions and fixed ZIP timestamps;

@@ -500,8 +500,8 @@ kit.
 
 The kit is a normal ZIP containing private metadata. Extract it on a private
 disk outside any Git/source-code repository, change into the extracted kit
-directory, and keep the output and automatic work folder outside the kit. The
-main command is intentionally ordinary:
+directory, and keep the output and temporary automatic work folder outside the
+kit. The main command is intentionally ordinary:
 
 ```bash
 python3 tools/music_library_archive.py build \
@@ -591,11 +591,25 @@ Requirements:
 - checkpoints never contain Access tokens, R2 keys, titles, lyrics, original
   filenames, or person identities;
 - progress output is aggregate by default; and
-- Ctrl-C leaves resumable work and no apparently final archive.
+- an interrupted or failed build leaves resumable work and no apparently final
+  archive.
 
 Cache identity is the planned durable object identity plus SHA-256, not merely a
 friendly path. The same object referenced by multiple semantic relationships is
 downloaded once.
+
+After the final archive passes full read-back verification, the builder deletes
+its downloaded-object cache and checkpoint. When an explicit custom work
+directory contains unrelated files, cleanup removes only the builder-owned
+`objects/` directory and `checkpoint.json`, leaving the unrelated files and
+container intact.
+
+When the builder begins, it MUST identify whether it created or reused the
+hidden automatic work folder beside the output archive. It MUST explain that a
+failed or interrupted build may keep that folder for resumption or delete it to
+discard cached downloads. For an explicit custom `--work` directory, the notice
+MUST identify only the builder-owned `objects/` directory and
+`checkpoint.json` as cleanup targets so unrelated files are not removed.
 
 ### Assembly
 
@@ -615,10 +629,16 @@ After all objects are verified, the builder:
    BagIt payload and tag checksum, revalidates metadata and relationships, and
    confirms there are no extra/missing entries; and
 9. atomically renames the file to the requested final name only after all checks
-   pass.
+   pass; and
+10. removes the downloaded-object cache and checkpoint after the verified final
+    archive exists.
 
 The builder never adds its work directory, checkpoints, local Access state,
 token, source kit path, shell history, or host username to the archive.
+
+The HTML preview groups active Songs separately from Trash. A Song with no
+exported lyric, scan, or recording files remains in metadata and is shown as
+having no exported files, without a link to an omitted empty folder.
 
 There is no `--skip-verification` path that can produce a normally named final
 archive. A diagnostic option may stop after download/assembly, but its output
@@ -938,7 +958,10 @@ At minimum, cover:
 - corrupt partial/cache files;
 - insufficient disk and unsafe output/work targets;
 - one download for a multiply referenced durable object;
+- successful cache/checkpoint cleanup and failed/interrupted work retention;
+- privacy-safe automatic/custom work-location and manual-cleanup notices;
 - exact lyric bytes and no automatic splitting;
+- active/Trash preview grouping and an unlinked explanation for an empty Song;
 - deterministic stored ZIP entries and ZIP64;
 - atomic `.partial` → final rename only after full verification; and
 - aggregate privacy-safe progress/reports.
