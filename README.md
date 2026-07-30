@@ -90,9 +90,9 @@ workspace/production-readiness review, and separately authorized cutover work:
 - the deployed Recording-date follow-up uses `Asia/Kolkata` as the shared library calendar while showing a compact India-date note only when the editor's device shows a different date; the owner confirmed the ordinary selector still behaves normally, and automated boundary coverage accepts the conditional note that could not naturally appear while both locations shared the same date;
 - the protected Access/session boundary uses a Worker-compatible, bounded rotating JWKS cache; protected catalog refresh waits for a validated session and turns a definitive 401/403 into one explicit renewal screen instead of a false empty catalog. Logout keeps its durable privacy barrier through a matched Cloudflare return, treats the bounded HTTP-cache-clear request as defense in depth, and has only one automatic top-level Access navigation. The owner accepted the repaired Chrome sign-in/catalog and single-cycle logout flow;
 - the current protected-staging deployment is Worker
-  `7878e8e9-1968-4a2d-9be4-a17fa4893ef7` from exact source
-  `f31d1070aab77e0e9baaab3410e2bf4cb17832f9`, with client/service-worker
-  build `15ae03aa84c9`; migrations `0023_scan_readability_selection.sql` and
+  `af7b674a-2d7c-43f5-878b-2146016dbb59` from exact source
+  `732655798f68cbd669747e7ee0d3edcb321e944a`, with client/service-worker
+  build `6c1050d1cd94`; migrations `0023_scan_readability_selection.sql` and
   `0024_scan_readability_v2_keys.sql` are applied with none pending. The
   Account page recovers the
   creator's current ready plan across refresh/tabs, reuses it instead of
@@ -102,6 +102,13 @@ workspace/production-readiness review, and separately authorized cutover work:
   local tool explains that safety boundary, identifies created or reused
   temporary work, preserves it after failure for resumption, and removes its
   builder-owned cache after successful verification;
+- the installed-app identity now uses one crisp full-bleed cream-note and
+  terracotta design across the browser, in-app header, Apple touch icon, and
+  ordinary/maskable PWA assets. The 56 px online header scrolls away to recover
+  mobile space while fixed bottom navigation remains available; it stays sticky
+  offline so the read-only state remains visible. Protected-staging assets and
+  install metadata are verified, with fresh iOS and Android installation
+  acceptance left to the owner because operating systems cache installed icons;
 - the completed protected-staging reconciliation implements metadata-free,
   source-versus-derivative Scan selection under versioned v2 derivative keys.
   The exact plan selected 9 direct sources and 490 required derivatives, with
@@ -129,9 +136,9 @@ workspace/production-readiness review, and separately authorized cutover work:
   moved the now-empty duplicate Song to recoverable Trash. No migration, Worker
   deployment, production/DNS change, legacy-file mutation, or unrelated cleanup
   was part of either operation;
-- the current application checkpoint passes 71 Vitest files / 508 tests, 14
+- the current application checkpoint passes 72 Vitest files / 517 tests, 14
   Python archive tests, all 91 Python audio tests, all three TypeScript projects,
-  production/service-worker build `15ae03aa84c9` with seven precache entries,
+  production/service-worker build `6c1050d1cd94` with ten precache entries,
   whitespace/privacy checks, and exact protected-staging D1/R2 postflight. The
   browser-to-Python round trip includes history-only media representations. The
   owner's complete 7,972,873,832-byte archive passed both build-integrated and
