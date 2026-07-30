@@ -47,10 +47,16 @@ were unchanged and the deployment created no export plan. One ready plan from
 the preceding Worker remains available to its creator and was deliberately left
 untouched; its existence is unrelated to this presentation-only rollout.
 
-## Installation and acceptance
+## Owner acceptance
 
-Installed operating-system icons are cached at installation time. After this
-protected-staging rollout, test a fresh installation:
+The owner reviewed the protected-staging result and simple inverse, gold, green,
+and neutral color alternatives. The current dark-terracotta field with a cream
+note remained the clearest fit against the application's light surfaces and was
+accepted without further change. This visual-identity and compact-shell slice is
+closed.
+
+Installed operating-system icons are cached at installation time. When checking
+the identity on another device or after a future icon change:
 
 1. remove the existing Home Screen installation on the test device;
 2. open the protected app and complete Access sign-in;
@@ -60,6 +66,6 @@ protected-staging rollout, test a fresh installation:
 6. confirm the online header scrolls away while bottom navigation remains;
 7. take the device offline and confirm the compact offline header stays visible.
 
-The installation check uses the real protected application but does not require
-catalog mutation, an export plan, media access, production/DNS work, or a new
-archive.
+This installation check uses the real protected application but does not
+require catalog mutation, an export plan, media access, production/DNS work, or
+a new archive.

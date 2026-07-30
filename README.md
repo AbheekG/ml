@@ -107,8 +107,9 @@ workspace/production-readiness review, and separately authorized cutover work:
   ordinary/maskable PWA assets. The 56 px online header scrolls away to recover
   mobile space while fixed bottom navigation remains available; it stays sticky
   offline so the read-only state remains visible. Protected-staging assets and
-  install metadata are verified, with fresh iOS and Android installation
-  acceptance left to the owner because operating systems cache installed icons;
+  install metadata are verified. The owner reviewed protected staging, compared
+  restrained color alternatives, accepted the current dark-terracotta and
+  cream identity, and closed this visual-polish slice;
 - the completed protected-staging reconciliation implements metadata-free,
   source-versus-derivative Scan selection under versioned v2 derivative keys.
   The exact plan selected 9 direct sources and 490 required derivatives, with
