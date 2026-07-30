@@ -1123,6 +1123,31 @@ records and 2,115 payload items, proving the failed path is repaired. It was
 revoked without kit construction or media access, creator recovery returns no
 active plan, and aggregate catalog/foreign-key state is unchanged.
 
+### Verified-work cleanup and preview maintenance, 2026-07-30
+
+Worker `7878e8e9-1968-4a2d-9be4-a17fa4893ef7` serves exact source
+`f31d1070aab77e0e9baaab3410e2bf4cb17832f9` at 100%, with client/service-worker
+build `15ae03aa84c9`. This bounded follow-up makes the automatic resumable work
+folder temporary after a successful fully verified build, preserves it after
+failure/interruption, and prints privacy-safe resumption/manual-cleanup
+guidance. Custom `--work` cleanup remains limited to builder-owned
+`objects/` and `checkpoint.json`.
+
+The HTML preview now separates active Songs from Trash. A Song with no exported
+lyric, Scan, or Recording files remains in authoritative metadata and is shown
+without a link to an omitted empty directory. No schema, catalog record, media
+object, or ZIP directory-entry rule changed.
+
+Protected-staging postflight confirmed the exact source binding, the unchanged
+Access, D1, private R2, Images, audio-secret, cron, and handler boundaries, the
+expected unauthenticated Access 302, no pending migration, and the exact remote
+client/service-worker artifacts. Aggregate D1 counts remain 644 Songs / 641
+active, 335 lyric rows, 590 Scans / 588 active, 835 Recordings / 833 active,
+1,624 media rows, and zero foreign-key errors. R2 remains 2,123 objects /
+8.08 GB. The rollout created no export plan and read no export payload; zero
+plans are active. Existing derived detail remains attached only to revoked
+plans for bounded scheduled cleanup.
+
 Before protected-staging deployment:
 
 - all Vitest files pass;
