@@ -16,6 +16,39 @@ type RecordingCredit = {
   fullName: string;
   role: string;
 };
+type AliasRow = SongChild & { alias: string };
+type LanguageRow = SongChild & { id: string; displayName: string };
+type TagRow = LanguageRow;
+type SongCreditRow = SongChild & { personId: string; fullName: string; role: string };
+type LyricRow = SongChild & {
+  id: string;
+  content: string;
+  origin: "user" | "legacy_import";
+  revision: number;
+};
+type ScanRow = SongChild & {
+  id: string;
+  mediaId: string;
+  notebookId: string | null;
+  notebookName: string | null;
+  pageLabel: string | null;
+  revision: number;
+  rotationQuarterTurns: 0 | 1 | 2 | 3;
+  hasReadabilityRepresentation: number;
+  filename: string;
+};
+type RecordingRow = SongChild & {
+  id: string;
+  originalMediaId: string;
+  playbackMediaId: string | null;
+  playbackByteSize: number;
+  description: string;
+  recordedOn: string | null;
+  revision: number;
+  processingState: "processing" | "ready" | "failed";
+  filename: string;
+  hasPlaybackMedia: number;
+};
 
 function groupBy<T, K>(rows: T[], key: (row: T) => K): Map<K, T[]> {
   const groups = new Map<K, T[]>();
@@ -34,7 +67,7 @@ function withoutSongId<T extends SongChild>(row: T): Omit<T, "songId"> {
 }
 
 export async function loadOfflineLibrary(database: D1Database) {
-  const [songs, aliases, languages, tags, credits, lyricTexts, scans, recordings, recordingCredits] = await Promise.all([
+  const results = await database.batch([
     database.prepare(`
       SELECT
         id,
@@ -48,24 +81,24 @@ export async function loadOfflineLibrary(database: D1Database) {
       FROM songs
       WHERE trashed_at IS NULL
       ORDER BY title_latin COLLATE NOCASE, id
-    `).all<SongRow>(),
+    `),
     database.prepare(`
       SELECT song_id AS songId, alias
       FROM song_aliases
       ORDER BY song_id, sort_order, alias
-    `).all<SongChild & { alias: string }>(),
+    `),
     database.prepare(`
       SELECT song_languages.song_id AS songId, languages.id, languages.display_name AS displayName
       FROM song_languages
       JOIN languages ON languages.id = song_languages.language_id
       ORDER BY song_languages.song_id, song_languages.sort_order, languages.display_name
-    `).all<SongChild & { id: string; displayName: string }>(),
+    `),
     database.prepare(`
       SELECT song_tags.song_id AS songId, tags.id, tags.display_name AS displayName
       FROM song_tags
       JOIN tags ON tags.id = song_tags.tag_id
       ORDER BY song_tags.song_id, song_tags.sort_order, tags.display_name
-    `).all<SongChild & { id: string; displayName: string }>(),
+    `),
     database.prepare(`
       SELECT
         song_credits.song_id AS songId,
@@ -75,7 +108,7 @@ export async function loadOfflineLibrary(database: D1Database) {
       FROM song_credits
       JOIN people ON people.id = song_credits.person_id
       ORDER BY song_credits.song_id, song_credits.sort_order, people.full_name
-    `).all<SongChild & { personId: string; fullName: string; role: string }>(),
+    `),
     database.prepare(`
       SELECT
         lyric_texts.song_id AS songId,
@@ -86,12 +119,7 @@ export async function loadOfflineLibrary(database: D1Database) {
       FROM lyric_texts
       WHERE lyric_texts.trashed_at IS NULL
       ORDER BY lyric_texts.song_id, lyric_texts.sort_order, lyric_texts.id
-    `).all<SongChild & {
-      id: string;
-      content: string;
-      origin: "user" | "legacy_import";
-      revision: number;
-    }>(),
+    `),
     database.prepare(`
       SELECT
         scans.song_id AS songId,
@@ -124,17 +152,7 @@ export async function loadOfflineLibrary(database: D1Database) {
         scans.page_label COLLATE NOCASE,
         scans.created_at,
         scans.id
-    `).all<SongChild & {
-      id: string;
-      mediaId: string;
-      notebookId: string | null;
-      notebookName: string | null;
-      pageLabel: string | null;
-      revision: number;
-      rotationQuarterTurns: 0 | 1 | 2 | 3;
-      hasReadabilityRepresentation: number;
-      filename: string;
-    }>(),
+    `),
     database.prepare(`
       SELECT
         recordings.song_id AS songId,
@@ -157,18 +175,7 @@ export async function loadOfflineLibrary(database: D1Database) {
         ON playback_media.id = recordings.playback_media_id
       WHERE recordings.trashed_at IS NULL
       ORDER BY recordings.song_id, recordings.recorded_on, recordings.id
-    `).all<SongChild & {
-      id: string;
-      originalMediaId: string;
-      playbackMediaId: string | null;
-      playbackByteSize: number;
-      description: string;
-      recordedOn: string | null;
-      revision: number;
-      processingState: "processing" | "ready" | "failed";
-      filename: string;
-      hasPlaybackMedia: number;
-    }>(),
+    `),
     database.prepare(`
       SELECT
         recording_credits.recording_id AS recordingId,
@@ -180,8 +187,19 @@ export async function loadOfflineLibrary(database: D1Database) {
       JOIN people ON people.id = recording_credits.person_id
       WHERE recordings.trashed_at IS NULL
       ORDER BY recording_credits.recording_id, recording_credits.sort_order, people.full_name
-    `).all<RecordingCredit>(),
+    `),
   ]);
+  const [songs, aliases, languages, tags, credits, lyricTexts, scans, recordings, recordingCredits] = results as [
+    D1Result<SongRow>,
+    D1Result<AliasRow>,
+    D1Result<LanguageRow>,
+    D1Result<TagRow>,
+    D1Result<SongCreditRow>,
+    D1Result<LyricRow>,
+    D1Result<ScanRow>,
+    D1Result<RecordingRow>,
+    D1Result<RecordingCredit>,
+  ];
 
   const aliasesBySong = groupBy(aliases.results, (row) => row.songId);
   const languagesBySong = groupBy(languages.results, (row) => row.songId);

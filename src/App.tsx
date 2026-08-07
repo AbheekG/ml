@@ -22,6 +22,7 @@ import { pauseOtherAudioPlayers } from "./audio-playback";
 import { copyTextBlock, shareTextBlock, supportsSystemTextShare } from "./text-sharing";
 import {
   ApiError,
+  bindPrivateCacheNamespace,
   clearPrivateLocalData,
   createLookup,
   createLyric,
@@ -117,6 +118,7 @@ import {
   privateDataBoundaryPresentation,
   reconcilePrivateDataSession,
 } from "./private-data";
+import { queryOfflineShellReady } from "./offline-shell";
 
 function useOnlineStatus(): boolean {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -135,8 +137,35 @@ function useSessionRevalidationSignal(): number {
   return signal;
 }
 
+function useOfflineShellReady(): boolean {
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return undefined;
+    let cancelled = false;
+    let generation = 0;
+    const refresh = () => {
+      const currentGeneration = ++generation;
+      void queryOfflineShellReady(navigator.serviceWorker).then((nextReady) => {
+        if (!cancelled && currentGeneration === generation) setReady(nextReady);
+      });
+    };
+    refresh();
+    navigator.serviceWorker.addEventListener("controllerchange", refresh);
+    window.addEventListener("online", refresh);
+    return () => {
+      cancelled = true;
+      navigator.serviceWorker.removeEventListener("controllerchange", refresh);
+      window.removeEventListener("online", refresh);
+    };
+  }, []);
+
+  return ready;
+}
+
 function SongsPage({
   isOnline,
+  offlineShellReady,
   hasAuthenticatedSession,
   canEdit,
   refreshSignal,
@@ -146,6 +175,7 @@ function SongsPage({
   scrollPosition,
 }: {
   isOnline: boolean;
+  offlineShellReady: boolean;
   hasAuthenticatedSession: boolean;
   canEdit: boolean | null;
   refreshSignal: number;
@@ -156,6 +186,7 @@ function SongsPage({
 }) {
   const [songs, setSongs] = useState<CatalogSong[]>([]);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
+  const [syncPending, setSyncPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshAttempt, setRefreshAttempt] = useState(0);
@@ -171,6 +202,7 @@ function SongsPage({
         if (cancelled) return;
         setSongs(cached.songs);
         setSyncedAt(cached.syncedAt);
+        setSyncPending(cached.syncPending);
         setError(null);
       } catch (loadError) {
         if (!cancelled) {
@@ -185,9 +217,11 @@ function SongsPage({
           if (cancelled) return;
           setSongs(fresh.songs);
           setSyncedAt(fresh.syncedAt);
+          setSyncPending(false);
           setError(null);
         } catch (loadError) {
           if (!cancelled) {
+            setSyncPending(true);
             setError(loadError instanceof Error ? loadError.message : "Catalog could not be loaded");
             if (sessionFailureInvalidatesIdentity(loadError)) {
               onAuthenticationRequired(loadError);
@@ -254,7 +288,16 @@ function SongsPage({
           )}
         </div>
       )}
-      {syncedAt && <p className="sync-note">Available offline · updated {new Date(syncedAt).toLocaleString()}</p>}
+      {syncedAt && (
+        <p className="sync-note">
+          {syncPending
+            ? "Offline copy needs sync"
+            : offlineShellReady
+              ? "Available offline"
+              : "Catalog saved locally · offline app setup incomplete"}
+          {` · updated ${new Date(syncedAt).toLocaleString()}`}
+        </p>
+      )}
 
       {isLoading && songs.length === 0 ? (
         <section className="empty-state"><p>Loading the local catalog…</p></section>
@@ -2552,6 +2595,7 @@ function ManageLookupsPage({ isOnline, canEdit }: { isOnline: boolean; canEdit: 
 
 export function App() {
   const isOnline = useOnlineStatus();
+  const offlineShellReady = useOfflineShellReady();
   const sessionRevalidationSignal = useSessionRevalidationSignal();
   const logoutReturnChecked = useRef(false);
   if (!logoutReturnChecked.current) {
@@ -2684,6 +2728,7 @@ export function App() {
         const user = await loadSession();
         if (cancelled || generation !== sessionGeneration.current) return;
         await reconcilePrivateDataSession(user.cacheNamespace, clearPrivateLocalData);
+        await bindPrivateCacheNamespace(user.cacheNamespace);
         if (cancelled || generation !== sessionGeneration.current) return;
         setSession(user);
         setSessionResolved(true);
@@ -2763,6 +2808,7 @@ export function App() {
         <Route path="/songs" element={(
           <SongsPage
             isOnline={isOnline}
+            offlineShellReady={offlineShellReady}
             hasAuthenticatedSession={session !== null}
             canEdit={canEdit}
             refreshSignal={sessionRevalidationSignal}

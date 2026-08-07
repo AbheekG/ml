@@ -67,6 +67,25 @@ export function isAccessLogoutPending(storage: StorageLike = localStorage): bool
   return storage.getItem(PENDING_ACCESS_LOGOUT_KEY) !== null;
 }
 
+export function privateCacheNamespaceMatches(
+  localNamespace: string | null,
+  durableNamespace: string | null | undefined,
+): boolean {
+  return localNamespace !== null && durableNamespace === localNamespace;
+}
+
+export function privateCacheRowsRequireReset(options: {
+  hasCachedRows: boolean;
+  hasMetadata: boolean;
+  durableNamespace: string | null | undefined;
+  sessionNamespace: string;
+}): boolean {
+  if (!options.hasCachedRows) return false;
+  if (!options.hasMetadata) return true;
+  return options.durableNamespace !== undefined
+    && options.durableNamespace !== options.sessionNamespace;
+}
+
 export function assertPrivateDataWritable(storage: StorageLike = localStorage): void {
   if (isPrivateDataBlocked(storage)) throw new PrivateDataBlockedError();
 }

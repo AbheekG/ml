@@ -1,64 +1,67 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { loadOfflineLibrary } from "./offline-library";
 
 describe("loadOfflineLibrary", () => {
   it("assembles normalized rows into complete offline song records", async () => {
+    const rowsForQuery = async (query: string) => {
+      if (query.includes("FROM songs")) return { results: [{
+        id: "song-1",
+        titleLatin: "A song",
+        titleNative: null,
+        status: null,
+        notes: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      }] };
+      if (query.includes("FROM song_languages")) return { results: [{
+        songId: "song-1", id: "bn", displayName: "Bengali",
+      }] };
+      if (query.includes("FROM lyric_texts")) return { results: [{
+        songId: "song-1",
+        id: "lyrics-1",
+        content: "Lyrics",
+        origin: "user",
+        revision: 2,
+      }] };
+      if (query.includes("FROM scans")) return { results: [{
+        songId: "song-1",
+        id: "scan-1",
+        mediaId: "scan-media-1",
+        notebookId: "notebook-1",
+        notebookName: "Blue notebook",
+        pageLabel: "Page 12",
+        revision: 3,
+        rotationQuarterTurns: 2,
+        hasReadabilityRepresentation: 1,
+        filename: "page.jpg",
+      }] };
+      if (query.includes("FROM recordings\n")) return { results: [{
+        songId: "song-1",
+        id: "recording-1",
+        originalMediaId: "media-1",
+        playbackMediaId: null,
+        playbackByteSize: 1234,
+        description: "First take",
+        recordedOn: null,
+        revision: 4,
+        processingState: "ready",
+        filename: "recording.mp3",
+        hasPlaybackMedia: 0,
+      }] };
+      if (query.includes("FROM recording_credits")) return { results: [{
+        recordingId: "recording-1",
+        personId: "person-1",
+        fullName: "A person",
+        role: "vocals",
+      }] };
+      return { results: [] };
+    };
+    const batch = vi.fn(async (statements: Array<{ query: string }>) => (
+      Promise.all(statements.map((statement) => rowsForQuery(statement.query)))
+    ));
     const database = {
-      prepare: (query: string) => ({
-        all: async () => {
-          if (query.includes("FROM songs")) return { results: [{
-            id: "song-1",
-            titleLatin: "A song",
-            titleNative: null,
-            status: null,
-            notes: null,
-            createdAt: "2026-01-01T00:00:00.000Z",
-            updatedAt: "2026-01-02T00:00:00.000Z",
-          }] };
-          if (query.includes("FROM song_languages")) return { results: [{
-            songId: "song-1", id: "bn", displayName: "Bengali",
-          }] };
-          if (query.includes("FROM lyric_texts")) return { results: [{
-            songId: "song-1",
-            id: "lyrics-1",
-            content: "Lyrics",
-            origin: "user",
-            revision: 2,
-          }] };
-          if (query.includes("FROM scans")) return { results: [{
-            songId: "song-1",
-            id: "scan-1",
-            mediaId: "scan-media-1",
-            notebookId: "notebook-1",
-            notebookName: "Blue notebook",
-            pageLabel: "Page 12",
-            revision: 3,
-            rotationQuarterTurns: 2,
-            hasReadabilityRepresentation: 1,
-            filename: "page.jpg",
-          }] };
-          if (query.includes("FROM recordings\n")) return { results: [{
-            songId: "song-1",
-            id: "recording-1",
-            originalMediaId: "media-1",
-            playbackMediaId: null,
-            playbackByteSize: 1234,
-            description: "First take",
-            recordedOn: null,
-            revision: 4,
-            processingState: "ready",
-            filename: "recording.mp3",
-            hasPlaybackMedia: 0,
-          }] };
-          if (query.includes("FROM recording_credits")) return { results: [{
-            recordingId: "recording-1",
-            personId: "person-1",
-            fullName: "A person",
-            role: "vocals",
-          }] };
-          return { results: [] };
-        },
-      }),
+      prepare: (query: string) => ({ query }),
+      batch,
     } as unknown as D1Database;
 
     const songs = await loadOfflineLibrary(database);
@@ -83,5 +86,7 @@ describe("loadOfflineLibrary", () => {
         credits: [expect.objectContaining({ fullName: "A person" })],
       })],
     })]);
+    expect(batch).toHaveBeenCalledOnce();
+    expect(batch.mock.calls[0]?.[0]).toHaveLength(9);
   });
 });

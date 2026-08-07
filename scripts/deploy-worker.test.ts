@@ -65,6 +65,7 @@ describe("reviewed Worker deployment", () => {
       scripts?: Record<string, string>;
     };
     expect(packageJson.scripts?.deploy).toBe("tsx scripts/deploy-worker.ts");
+    expect(packageJson.scripts?.verify).toBe("npm test && npm run build");
   });
 
   it("injects the exact full HEAD automatically while preserving remote vars", async () => {
@@ -105,7 +106,7 @@ describe("reviewed Worker deployment", () => {
       .toBe(false);
   });
 
-  it("refuses a dirty source tree before building", async () => {
+  it("refuses a dirty source tree before verification", async () => {
     const projectRoot = resolve("/private/tmp/music-library-deployment-test");
     const fake = scriptedRunner(projectRoot, [
       result(`${projectRoot}\n`),
@@ -116,13 +117,13 @@ describe("reviewed Worker deployment", () => {
     await expect(deployReviewedWorker(projectRoot, fake.runner))
       .rejects.toEqual(new DeploymentError("deployment_requires_clean_worktree"));
     expect(fake.invocations.some(({ executable, args }) => (
-      executable === "npm" && args.join(" ") === "run build"
+      executable === "npm" && args.join(" ") === "run verify"
     ))).toBe(false);
     expect(fake.invocations.some(({ executable }) => basename(executable) === "wrangler"))
       .toBe(false);
   });
 
-  it("refuses to deploy when the source changes during the build", async () => {
+  it("refuses to deploy when the source changes during verification", async () => {
     const projectRoot = resolve("/private/tmp/music-library-deployment-test");
     const changedCommit = "abcdef1234567890abcdef1234567890abcdef12";
     const fake = scriptedRunner(projectRoot, [
@@ -135,22 +136,22 @@ describe("reviewed Worker deployment", () => {
     ]);
 
     await expect(deployReviewedWorker(projectRoot, fake.runner))
-      .rejects.toEqual(new DeploymentError("deployment_source_changed_during_build"));
+      .rejects.toEqual(new DeploymentError("deployment_source_changed_during_verification"));
     expect(fake.invocations.some(({ executable }) => basename(executable) === "wrangler"))
       .toBe(false);
   });
 
-  it("stops before Wrangler when the required build fails", async () => {
+  it("stops before Wrangler when required verification fails", async () => {
     const projectRoot = resolve("/private/tmp/music-library-deployment-test");
     const fake = scriptedRunner(projectRoot, [
       result(`${projectRoot}\n`),
       result(`${SOURCE_COMMIT}\n`),
       result(""),
-      result("", 1, "synthetic build failure"),
+      result("", 1, "synthetic verification failure"),
     ]);
 
     await expect(deployReviewedWorker(projectRoot, fake.runner))
-      .rejects.toEqual(new DeploymentError("deployment_build_failed"));
+      .rejects.toEqual(new DeploymentError("deployment_verification_failed"));
     expect(fake.invocations.some(({ executable }) => basename(executable) === "wrangler"))
       .toBe(false);
   });

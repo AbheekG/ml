@@ -1799,6 +1799,7 @@ describe("Worker API", () => {
         objectKey: "recordings/example.mp3",
         filename: "take'\ud800.mp3",
         mimeType: "audio/mpeg",
+        byteSize: 5,
       }) }) }),
     } as unknown as D1Database;
     const media = {
@@ -1807,7 +1808,10 @@ describe("Worker API", () => {
         size: 5,
         range: undefined,
         httpEtag: '"etag"',
-        writeHttpMetadata: () => undefined,
+        writeHttpMetadata: (headers: Headers) => {
+          headers.set("Cache-Control", "public, max-age=31536000");
+          headers.set("Content-Type", "text/plain");
+        },
       }),
     } as unknown as R2Bucket;
 
@@ -1984,6 +1988,7 @@ describe("Worker API", () => {
           objectKey: "recordings/example.mp3",
           filename: "example.mp3",
           mimeType: "audio/mpeg",
+          byteSize: 5000,
         }) }) };
       },
     } as unknown as D1Database;
@@ -2010,6 +2015,67 @@ describe("Worker API", () => {
     expect(mediaQuery.match(/JOIN songs ON songs\.id = (?:scans|recordings)\.song_id/gu))
       .toHaveLength(2);
     expect(mediaQuery.match(/songs\.trashed_at IS NULL/gu)).toHaveLength(2);
+  });
+
+  it("rejects an invalid media range before reading private storage", async () => {
+    const database = {
+      prepare: () => ({ bind: () => ({ first: async () => ({
+        id: "media-1",
+        objectKey: "recordings/example.mp3",
+        filename: "example.mp3",
+        mimeType: "audio/mpeg",
+        byteSize: 5000,
+      }) }) }),
+    } as unknown as D1Database;
+    let storageRead = false;
+    const media = {
+      get: async () => {
+        storageRead = true;
+        return null;
+      },
+    } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/media/media-1",
+      { headers: { Range: "bytes=5000-5001" } },
+      { ...localBindings(database), MEDIA: media },
+    );
+
+    expect(response.status).toBe(416);
+    expect(response.headers.get("content-range")).toBe("bytes */5000");
+    expect(response.headers.get("accept-ranges")).toBe("bytes");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(storageRead).toBe(false);
+  });
+
+  it("rejects a range response that does not match the private object contract", async () => {
+    const database = {
+      prepare: () => ({ bind: () => ({ first: async () => ({
+        id: "media-1",
+        objectKey: "recordings/example.mp3",
+        filename: "example.mp3",
+        mimeType: "audio/mpeg",
+        byteSize: 5000,
+      }) }) }),
+    } as unknown as D1Database;
+    const media = {
+      get: async () => ({
+        body: new Uint8Array(1000),
+        size: 5000,
+        range: { offset: 0, length: 1000 },
+        httpEtag: '"etag"',
+        writeHttpMetadata: () => undefined,
+      }),
+    } as unknown as R2Bucket;
+
+    const response = await app.request(
+      "http://local.test/api/media/media-1",
+      { headers: { Range: "bytes=0-1023" } },
+      { ...localBindings(database), MEDIA: media },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "media_file_invalid" });
   });
 
   it("rejects API requests that bypass Access without a signed assertion", async () => {

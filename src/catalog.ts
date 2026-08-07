@@ -5,9 +5,14 @@ import {
   type CatalogSearchFields,
 } from "./catalog-search";
 import {
+  PRIVATE_CACHE_NAMESPACE_KEY,
+  PrivateDataBlockedError,
   assertPrivateDataWritable,
   isPrivateDataBlocked,
+  privateCacheNamespaceMatches,
+  privateCacheRowsRequireReset,
 } from "./private-data";
+import { withCatalogCacheLock } from "./catalog-cache-lock";
 
 export type CatalogSong = {
   id: string;
@@ -84,7 +89,9 @@ export type SongDetail = {
 
 type CatalogMetadata = {
   key: "catalog";
-  syncedAt: string;
+  syncedAt: string | null;
+  syncPending?: boolean;
+  cacheNamespace?: string | null;
 };
 
 const database = new Dexie("music-library") as Dexie & {
@@ -104,21 +111,124 @@ database.version(2).stores({
   metadata: "key",
 });
 
+function localPrivateCacheNamespace(): string | null {
+  try {
+    return localStorage.getItem(PRIVATE_CACHE_NAMESPACE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function privateCacheMetadataReadable(metadata: CatalogMetadata | null | undefined): boolean {
+  return !isPrivateDataBlocked()
+    && privateCacheNamespaceMatches(localPrivateCacheNamespace(), metadata?.cacheNamespace);
+}
+
+async function metadataForPrivateRead(): Promise<CatalogMetadata | null> {
+  if (isPrivateDataBlocked()) return null;
+  const localNamespace = localPrivateCacheNamespace();
+  if (localNamespace === null) return null;
+  let metadata = await database.metadata.get("catalog");
+
+  // Existing version-2 caches predate the durable namespace field. Bind that
+  // one legacy record to its still-present local namespace on first read so an
+  // already-installed app does not lose offline access merely by upgrading.
+  if (metadata && metadata.cacheNamespace === undefined) {
+    try {
+      await database.transaction("rw", database.metadata, async () => {
+        assertPrivateDataWritable();
+        const current = await database.metadata.get("catalog");
+        if (!current || current.cacheNamespace !== undefined) return;
+        await database.metadata.put({ ...current, cacheNamespace: localNamespace });
+        assertPrivateDataWritable();
+      });
+      metadata = await database.metadata.get("catalog");
+    } catch {
+      return null;
+    }
+  }
+
+  return privateCacheMetadataReadable(metadata)
+    ? metadata ?? null
+    : null;
+}
+
+function assertPrivateCacheMetadataWritable(metadata: CatalogMetadata | undefined): string {
+  assertPrivateDataWritable();
+  const localNamespace = localPrivateCacheNamespace();
+  if (!privateCacheNamespaceMatches(localNamespace, metadata?.cacheNamespace)) {
+    throw new PrivateDataBlockedError();
+  }
+  return localNamespace!;
+}
+
+function privateCacheNamespaceForOperation(): string {
+  assertPrivateDataWritable();
+  const cacheNamespace = localPrivateCacheNamespace();
+  if (cacheNamespace === null) throw new PrivateDataBlockedError();
+  return cacheNamespace;
+}
+
+export async function bindPrivateCacheNamespace(cacheNamespace: string): Promise<void> {
+  await withCatalogCacheLock(() => database.transaction(
+    "rw",
+    database.songs,
+    database.songDetails,
+    database.metadata,
+    async () => {
+      assertPrivateDataWritable();
+      if (localPrivateCacheNamespace() !== cacheNamespace) throw new PrivateDataBlockedError();
+      const current = await database.metadata.get("catalog");
+      const [songCount, songDetailCount] = await Promise.all([
+        database.songs.count(),
+        database.songDetails.count(),
+      ]);
+      const resetRequired = privateCacheRowsRequireReset({
+        hasCachedRows: songCount > 0 || songDetailCount > 0,
+        hasMetadata: current !== undefined,
+        durableNamespace: current?.cacheNamespace,
+        sessionNamespace: cacheNamespace,
+      });
+      if (resetRequired) {
+        await Promise.all([
+          database.songs.clear(),
+          database.songDetails.clear(),
+          database.metadata.clear(),
+        ]);
+      }
+      await database.metadata.put({
+        key: "catalog",
+        syncedAt: resetRequired ? null : current?.syncedAt ?? null,
+        syncPending: resetRequired ? false : current?.syncPending ?? false,
+        cacheNamespace,
+      });
+      assertPrivateDataWritable();
+      if (localPrivateCacheNamespace() !== cacheNamespace) throw new PrivateDataBlockedError();
+    },
+  ));
+}
+
 export async function readCachedCatalog(): Promise<{
   songs: CatalogSong[];
   syncedAt: string | null;
+  syncPending: boolean;
 }> {
-  if (isPrivateDataBlocked()) return { songs: [], syncedAt: null };
-  const [songs, metadata] = await Promise.all([
-    database.songs.orderBy("titleLatin").toArray(),
-    database.metadata.get("catalog"),
-  ]);
-  if (isPrivateDataBlocked()) return { songs: [], syncedAt: null };
+  if (isPrivateDataBlocked()) return { songs: [], syncedAt: null, syncPending: false };
+  const metadata = await metadataForPrivateRead();
+  if (!metadata) return { songs: [], syncedAt: null, syncPending: false };
+  const songs = await database.songs.orderBy("titleLatin").toArray();
+  if (!privateCacheMetadataReadable(metadata)) {
+    return { songs: [], syncedAt: null, syncPending: false };
+  }
 
   if (songs.every(hasExpandedCatalogFields)) {
-    return isPrivateDataBlocked()
-      ? { songs: [], syncedAt: null }
-      : { songs: songs.map(normalizeStoredCatalogSong), syncedAt: metadata?.syncedAt ?? null };
+    return !privateCacheMetadataReadable(metadata)
+      ? { songs: [], syncedAt: null, syncPending: false }
+      : {
+          songs: songs.map(normalizeStoredCatalogSong),
+          syncedAt: metadata?.syncedAt ?? null,
+          syncPending: metadata?.syncPending ?? false,
+        };
   }
 
   const songDetails = await database.songDetails.toArray();
@@ -127,16 +237,19 @@ export async function readCachedCatalog(): Promise<{
     const detail = detailsById.get(song.id);
     return detail ? createCatalogSongIndex(detail) : normalizeStoredCatalogSong(song);
   });
-  if (!isPrivateDataBlocked()) {
-    await database.transaction("rw", database.songs, async () => {
-      assertPrivateDataWritable();
+  if (privateCacheMetadataReadable(metadata)) {
+    await database.transaction("rw", database.songs, database.metadata, async () => {
+      const current = await database.metadata.get("catalog");
+      const cacheNamespace = assertPrivateCacheMetadataWritable(current);
+      if (cacheNamespace !== metadata.cacheNamespace) throw new PrivateDataBlockedError();
       await database.songs.bulkPut(expandedSongs);
       assertPrivateDataWritable();
     }).catch(() => undefined);
   }
-  return isPrivateDataBlocked() ? { songs: [], syncedAt: null } : {
+  return !privateCacheMetadataReadable(metadata) ? { songs: [], syncedAt: null, syncPending: false } : {
     songs: expandedSongs,
     syncedAt: metadata?.syncedAt ?? null,
+    syncPending: metadata?.syncPending ?? false,
   };
 }
 
@@ -180,50 +293,86 @@ function normalizeStoredCatalogSong(song: CatalogSong): CatalogSong {
   };
 }
 
+async function markOfflineLibrarySyncPending(expectedNamespace: string): Promise<void> {
+  if (isPrivateDataBlocked()) return;
+  await database.transaction("rw", database.metadata, async () => {
+    const current = await database.metadata.get("catalog");
+    const cacheNamespace = assertPrivateCacheMetadataWritable(current);
+    if (cacheNamespace !== expectedNamespace) throw new PrivateDataBlockedError();
+    await database.metadata.put({
+      key: "catalog",
+      syncedAt: current?.syncedAt ?? null,
+      syncPending: true,
+      cacheNamespace,
+    });
+    assertPrivateDataWritable();
+  });
+}
+
 export async function refreshOfflineLibrary(): Promise<{
   songs: CatalogSong[];
   syncedAt: string;
 }> {
-  const payload = await apiJson<{ songs: SongDetail[] }>("/api/offline-library");
-  const songs = payload.songs.map(createCatalogSongIndex);
-  const syncedAt = new Date().toISOString();
-  await database.transaction("rw", database.songs, database.songDetails, database.metadata, async () => {
-    assertPrivateDataWritable();
-    await Promise.all([database.songs.clear(), database.songDetails.clear()]);
-    await Promise.all([
-      database.songs.bulkPut(songs),
-      database.songDetails.bulkPut(payload.songs),
-      database.metadata.put({ key: "catalog", syncedAt }),
-    ]);
-    assertPrivateDataWritable();
+  return withCatalogCacheLock(async () => {
+    const expectedNamespace = privateCacheNamespaceForOperation();
+    try {
+      const payload = await apiJson<{ songs: SongDetail[] }>("/api/offline-library");
+      const songs = payload.songs.map(createCatalogSongIndex);
+      const syncedAt = new Date().toISOString();
+      await database.transaction("rw", database.songs, database.songDetails, database.metadata, async () => {
+        const current = await database.metadata.get("catalog");
+        const cacheNamespace = assertPrivateCacheMetadataWritable(current);
+        if (cacheNamespace !== expectedNamespace) throw new PrivateDataBlockedError();
+        await Promise.all([database.songs.clear(), database.songDetails.clear()]);
+        await Promise.all([
+          database.songs.bulkPut(songs),
+          database.songDetails.bulkPut(payload.songs),
+          database.metadata.put({ key: "catalog", syncedAt, syncPending: false, cacheNamespace }),
+        ]);
+        assertPrivateDataWritable();
+      });
+      assertPrivateDataWritable();
+      return { songs, syncedAt };
+    } catch (error) {
+      await markOfflineLibrarySyncPending(expectedNamespace).catch(() => undefined);
+      throw error;
+    }
   });
-  assertPrivateDataWritable();
-  return { songs, syncedAt };
 }
 
 export async function readCachedSong(songId: string): Promise<SongDetail | undefined> {
   if (isPrivateDataBlocked()) return undefined;
+  const metadata = await metadataForPrivateRead();
+  if (!metadata) return undefined;
   const song = await database.songDetails.get(songId);
-  return isPrivateDataBlocked() ? undefined : song;
+  return isPrivateDataBlocked()
+      || !privateCacheNamespaceMatches(localPrivateCacheNamespace(), metadata.cacheNamespace)
+    ? undefined
+    : song;
 }
 
 export async function refreshSong(songId: string): Promise<SongDetail> {
-  const response = await fetch(`/api/songs/${encodeURIComponent(songId)}`, {
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) throw new Error(`Song request failed (${response.status})`);
+  return withCatalogCacheLock(async () => {
+    const expectedNamespace = privateCacheNamespaceForOperation();
+    const response = await fetch(`/api/songs/${encodeURIComponent(songId)}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error(`Song request failed (${response.status})`);
 
-  const payload = await response.json() as { song: SongDetail };
-  await database.transaction("rw", database.songs, database.songDetails, async () => {
+    const payload = await response.json() as { song: SongDetail };
+    await database.transaction("rw", database.songs, database.songDetails, database.metadata, async () => {
+      const metadata = await database.metadata.get("catalog");
+      const cacheNamespace = assertPrivateCacheMetadataWritable(metadata);
+      if (cacheNamespace !== expectedNamespace) throw new PrivateDataBlockedError();
+      await Promise.all([
+        database.songs.put(createCatalogSongIndex(payload.song)),
+        database.songDetails.put(payload.song),
+      ]);
+      assertPrivateDataWritable();
+    });
     assertPrivateDataWritable();
-    await Promise.all([
-      database.songs.put(createCatalogSongIndex(payload.song)),
-      database.songDetails.put(payload.song),
-    ]);
-    assertPrivateDataWritable();
+    return payload.song;
   });
-  assertPrivateDataWritable();
-  return payload.song;
 }
 
 export type AppSession = {

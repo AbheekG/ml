@@ -12,6 +12,7 @@
     "build:service-worker": "tsx scripts/build-service-worker.ts",
     "preview": "npm run build && vite preview",
     "deploy": "tsx scripts/deploy-worker.ts",
+    "verify": "npm test && npm run build",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "vitest run",
     "test:archive": "python3 -m unittest discover -s tools/tests -v",
@@ -37,15 +38,15 @@
   },
   "dependencies": {
     "dexie": "4.4.4",
-    "hono": "4.12.29",
+    "hono": "4.13.1",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "react-router-dom": "7.18.1",
+    "react-router-dom": "7.18.2",
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.44.0",
-    "@cloudflare/workers-types": "5.20260712.1",
+    "@cloudflare/vite-plugin": "1.51.1",
+    "@cloudflare/workers-types": "5.20260801.1",
     "@testing-library/dom": "10.4.1",
     "@testing-library/react": "16.3.2",
     "@testing-library/user-event": "14.6.1",
@@ -60,6 +61,6 @@
     "typescript": "7.0.2",
     "vite": "8.1.4",
     "vitest": "4.1.10",
-    "wrangler": "4.110.0"
+    "wrangler": "4.120.0"
   }
 }

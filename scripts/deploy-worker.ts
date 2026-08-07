@@ -137,15 +137,17 @@ export async function deployReviewedWorker(
   }
 
   const sourceCommit = await sourceSnapshot(runner, projectRoot);
-  const build = await runner("npm", ["run", "build"], {
+  const verification = await runner("npm", ["run", "verify"], {
     cwd: projectRoot,
     inheritOutput: true,
   });
-  if (build.exitCode !== 0) throw new DeploymentError("deployment_build_failed");
+  if (verification.exitCode !== 0) {
+    throw new DeploymentError("deployment_verification_failed");
+  }
 
-  const postBuildCommit = await sourceSnapshot(runner, projectRoot);
-  if (postBuildCommit !== sourceCommit) {
-    throw new DeploymentError("deployment_source_changed_during_build");
+  const postVerificationCommit = await sourceSnapshot(runner, projectRoot);
+  if (postVerificationCommit !== sourceCommit) {
+    throw new DeploymentError("deployment_source_changed_during_verification");
   }
 
   const args = reviewedDeploymentArguments(sourceCommit);

@@ -1,5 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, loadSession, refreshOfflineLibrary } from "./catalog";
+import { PRIVATE_CACHE_NAMESPACE_KEY } from "./private-data";
+
+beforeEach(() => {
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => key === PRIVATE_CACHE_NAMESPACE_KEY
+      ? "opaque-cache-namespace"
+      : null,
+  });
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();

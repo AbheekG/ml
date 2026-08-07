@@ -219,6 +219,7 @@ type MediaRow = {
   objectKey: string;
   filename: string;
   mimeType: string | null;
+  byteSize: number;
 };
 
 type LyricStateRow = {
@@ -6590,7 +6591,8 @@ app.get("/api/media/:mediaId", async (context) => {
       media_objects.id,
       media_objects.object_key AS objectKey,
       media_objects.original_filename AS filename,
-      media_objects.mime_type AS mimeType
+      media_objects.mime_type AS mimeType,
+      media_objects.byte_size AS byteSize
     FROM media_objects
     WHERE media_objects.id = ?
       AND media_objects.state = 'active'
@@ -6623,40 +6625,66 @@ app.get("/api/media/:mediaId", async (context) => {
     return context.json({ error: "media_not_found" }, 404);
   }
 
+  if (!Number.isSafeInteger(media.byteSize) || media.byteSize < 1) {
+    return context.json({ error: "media_file_invalid" }, 409);
+  }
+
+  const headers = new Headers({
+    "Accept-Ranges": "bytes",
+    "Cache-Control": "private, no-store",
+    "Content-Type": media.mimeType ?? "application/octet-stream",
+    "Content-Disposition": `inline; filename*=UTF-8''${encodeRfc5987Filename(media.filename)}`,
+  });
   const rangeHeader = context.req.header("Range");
+  const requestedRange = rangeHeader
+    ? parseByteRange(rangeHeader, media.byteSize)
+    : undefined;
+  if (rangeHeader && !requestedRange) {
+    headers.set("Content-Range", `bytes */${media.byteSize}`);
+    return new Response(null, { status: 416, headers });
+  }
+
   const object = await context.env.MEDIA.get(
     media.objectKey,
-    rangeHeader ? { range: context.req.raw.headers } : undefined,
+    requestedRange ? { range: requestedRange } : undefined,
   );
   if (!object) {
     return context.json({ error: "media_file_unavailable" }, 404);
   }
+  const returnedRange = object.range;
+  const returnedRangeMatches = !requestedRange || (
+    returnedRange !== undefined
+    && "offset" in returnedRange
+    && "length" in returnedRange
+    && returnedRange.offset === requestedRange.offset
+    && returnedRange.length === requestedRange.length
+  );
+  if (
+    object.size !== media.byteSize
+    || !returnedRangeMatches
+  ) {
+    return context.json({ error: "media_file_invalid" }, 409);
+  }
 
-  const headers = new Headers();
   object.writeHttpMetadata(headers);
+  headers.set("Accept-Ranges", "bytes");
+  headers.set("Cache-Control", "private, no-store");
   headers.set("Content-Type", media.mimeType ?? "application/octet-stream");
   headers.set(
     "Content-Disposition",
     `inline; filename*=UTF-8''${encodeRfc5987Filename(media.filename)}`,
   );
-  headers.set("Accept-Ranges", "bytes");
-  headers.set("Cache-Control", "private, no-store");
   headers.set("ETag", object.httpEtag);
 
-  if (rangeHeader) {
-    const range = parseByteRange(rangeHeader, object.size);
-    if (!range) {
-      headers.set("Content-Range", `bytes */${object.size}`);
-      return new Response(null, { status: 416, headers });
-    }
-    const { offset, length } = range;
+  if (requestedRange) {
+    const { offset, length } = requestedRange;
     const end = offset + length - 1;
-    headers.set("Content-Range", `bytes ${offset}-${end}/${object.size}`);
+    headers.set("Content-Range", `bytes ${offset}-${end}/${media.byteSize}`);
     headers.set("Content-Length", String(length));
     return new Response(object.body, { status: 206, headers });
   }
 
-  headers.set("Content-Length", String(object.size));
+  headers.set("Content-Length", String(media.byteSize));
   return new Response(object.body, { headers });
 });
 

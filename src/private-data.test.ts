@@ -14,6 +14,8 @@ import {
   isPrivateDataClearedMessage,
   logoutAndClearPrivateData,
   markAccessLogoutNavigation,
+  privateCacheNamespaceMatches,
+  privateCacheRowsRequireReset,
   privateDataBoundaryPresentation,
   reconcilePrivateDataSession,
   requestPrivateBrowserCacheClear,
@@ -32,6 +34,41 @@ function memoryStorage(initial: Record<string, string> = {}): Storage {
 }
 
 describe("private local data lifecycle", () => {
+  it("requires matching local and durable cache identities before offline reads", () => {
+    expect(privateCacheNamespaceMatches("user-a", "user-a")).toBe(true);
+    expect(privateCacheNamespaceMatches(null, "user-a")).toBe(false);
+    expect(privateCacheNamespaceMatches("user-a", null)).toBe(false);
+    expect(privateCacheNamespaceMatches("user-a", undefined)).toBe(false);
+    expect(privateCacheNamespaceMatches("user-a", "user-b")).toBe(false);
+  });
+
+  it("resets ownerless or mismatched rows but preserves a genuine legacy cache", () => {
+    expect(privateCacheRowsRequireReset({
+      hasCachedRows: true,
+      hasMetadata: false,
+      durableNamespace: undefined,
+      sessionNamespace: "user-a",
+    })).toBe(true);
+    expect(privateCacheRowsRequireReset({
+      hasCachedRows: true,
+      hasMetadata: true,
+      durableNamespace: "user-b",
+      sessionNamespace: "user-a",
+    })).toBe(true);
+    expect(privateCacheRowsRequireReset({
+      hasCachedRows: true,
+      hasMetadata: true,
+      durableNamespace: undefined,
+      sessionNamespace: "user-a",
+    })).toBe(false);
+    expect(privateCacheRowsRequireReset({
+      hasCachedRows: false,
+      hasMetadata: false,
+      durableNamespace: undefined,
+      sessionNamespace: "user-a",
+    })).toBe(false);
+  });
+
   it("places a persistent barrier before removing the previous cache namespace", () => {
     const storage = memoryStorage({ [PRIVATE_CACHE_NAMESPACE_KEY]: "user-a" });
     expect(beginPrivateDataClearing(storage, "logout-1")).toBe("logout-1");
